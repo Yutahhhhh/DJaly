@@ -4,10 +4,6 @@ on:
     tags:
       - 'v*'
 
-env:
-  # Prevent Tauri from running the sidecar during build validation
-  TAURI_SKIP_SIDECAR_VALIDATION: true
-
 jobs:
   release:
     permissions:
@@ -130,31 +126,51 @@ jobs:
           chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION 2>/dev/null || true
           ls -la ../src-tauri/bin/
 
-      - name: build and release (ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI: true
-          DISPLAY: ':99'
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Djaly ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+      - name: build frontend
+        run: pnpm build
 
-      - name: build and release (non-ubuntu)
+      - name: build tauri app (ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" pnpm tauri build ${{ matrix.args }}
+        env:
+          CI: true
+
+      - name: build tauri app (non-ubuntu)
         if: matrix.platform != 'ubuntu-22.04'
-        uses: tauri-apps/tauri-action@v0
+        run: pnpm tauri build ${{ matrix.args }}
+        env:
+          CI: true
+
+      - name: upload artifacts (macos)
+        if: matrix.platform == 'macos-latest'
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          files: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI: true
+
+      - name: upload artifacts (ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: softprops/action-gh-release@v1
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Djaly ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          draft: true
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: upload artifacts (windows)
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
