@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlmodel
+duckdb
+duckdb-engine
+essentia-tensorflow
+tinytag
+pydantic
+python-multipart
+websockets
+requests
+ollama
+mutagen
+platformdirs
+pyinstaller

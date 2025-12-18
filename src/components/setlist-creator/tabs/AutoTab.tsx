@@ -1,0 +1,426 @@
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Loader2,
+  Sparkles,
+  Footprints,
+  ArrowRight,
+  Check,
+} from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { Track } from "@/types";
+import { setlistsService } from "@/services/setlists";
+import { presetsService, Preset } from "@/services/presets";
+import { TrackRow } from "../TrackRow";
+import { Badge } from "@/components/ui/badge";
+
+interface AutoTabProps {
+  currentSetlistTracks: Track[];
+  availableGenres: string[];
+  onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
+  onPlay: (track: Track) => void;
+  currentTrackId?: number | null;
+}
+
+export function AutoTab({
+  currentSetlistTracks,
+  availableGenres,
+  onInjectTracks,
+  onPlay,
+  currentTrackId,
+}: AutoTabProps) {
+  const [mode, setMode] = useState<"infinite" | "bridge">("infinite");
+
+  // Results
+  const [autoTracks, setAutoTracks] = useState<Track[]>([]);
+  const [isAutoLoading, setIsAutoLoading] = useState(false);
+
+  // Common Filters
+  const [autoGenres, setAutoGenres] = useState<string[]>([]);
+  const [length, setLength] = useState(5);
+
+  // Infinite Mode State
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+
+  // Bridge Mode State
+  const [startTrack, setStartTrack] = useState<Track | null>(null);
+  const [endTrack, setEndTrack] = useState<Track | null>(null);
+
+  // Drag State
+  const [isDraggingOver, setIsDraggingOver] = useState<"start" | "end" | null>(
+    null
+  );
+
+  useEffect(() => {
+    presetsService.getAll("generation", true).then((data) => {
+      setPresets(data);
+    });
+  }, []);
+
+  // Bridge Mode: Default Start is last track if not set (optional convenience)
+  useEffect(() => {
+    if (mode === "bridge" && !startTrack && currentSetlistTracks.length > 0) {
+      // Automatically suggest last track as start, but allow overwrite
+      setStartTrack(currentSetlistTracks[currentSetlistTracks.length - 1]);
+    }
+  }, [mode, currentSetlistTracks]);
+
+  const generateInfinite = async () => {
+    if (!selectedPreset) return;
+    setIsAutoLoading(true);
+    try {
+      const seedIds = currentSetlistTracks.slice(-3).map((t) => t.id);
+      const data = await setlistsService.generateAuto(
+        selectedPreset,
+        length,
+        seedIds.length > 0 ? seedIds : undefined,
+        autoGenres.length > 0 ? autoGenres : undefined
+      );
+      setAutoTracks(data);
+    } catch (e) {
+      console.error(e);
+      alert("Generation failed.");
+    } finally {
+      setIsAutoLoading(false);
+    }
+  };
+
+  const generateBridge = async () => {
+    if (!startTrack || !endTrack) return;
+    setIsAutoLoading(true);
+    try {
+      const data = await setlistsService.generatePath(
+        startTrack.id,
+        endTrack.id,
+        length,
+        autoGenres.length > 0 ? autoGenres : undefined
+      );
+      // Remove the start track from result if it's already in setlist
+      // Pathfinding usually returns [Start, ...Intermediates, End]
+      // We want to display the intermediates + end (or just intermediates if user keeps end separate)
+      // Usually "Bridge" means filling the gap. Let's filter out the start ID.
+      const resultToShow = data.filter((t) => t.id !== startTrack.id);
+      setAutoTracks(resultToShow);
+    } catch (e) {
+      console.error(e);
+      alert(
+        "Pathfinding failed. Try increasing the length or changing genres."
+      );
+    } finally {
+      setIsAutoLoading(false);
+    }
+  };
+
+  const handleApply = () => {
+    if (mode === "bridge" && startTrack) {
+      // Bridgeモードの場合、StartとEndの間を埋めるのが目的なので、
+      // 生成されたリストからEndトラックも除外して挿入する。
+      // (Startトラックは generateBridge 時点で既に除外されている前提)
+      const tracksToInject = autoTracks.filter(
+        (t) => t.id !== startTrack.id && (endTrack ? t.id !== endTrack.id : true)
+      );
+
+      onInjectTracks(tracksToInject, startTrack.id, endTrack?.id);
+    } else {
+      // Infinite or others: Just add to end
+      onInjectTracks(autoTracks);
+    }
+    setAutoTracks([]);
+    // Reset logic if needed
+    if (mode === "bridge") {
+      setStartTrack(null);
+      setEndTrack(null);
+    }
+  };
+
+  // --- Drag & Drop Handlers for Bridge ---
+  const handleDragOver = (e: React.DragEvent, zone: "start" | "end") => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy"; // Indicate we are copying the reference
+    setIsDraggingOver(zone);
+  };
+
+  const handleDragLeave = () => {
+    setIsDraggingOver(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, zone: "start" | "end") => {
+    e.preventDefault();
+    setIsDraggingOver(null);
+    try {
+      const trackData = e.dataTransfer.getData("track");
+      if (trackData) {
+        const track = JSON.parse(trackData) as Track;
+        if (zone === "start") setStartTrack(track);
+        if (zone === "end") setEndTrack(track);
+      }
+    } catch (err) {
+      console.error("Drop failed", err);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col p-0 m-0 min-h-0 bg-background">
+      <Tabs
+        value={mode}
+        onValueChange={(v) => setMode(v as any)}
+        className="flex-1 flex flex-col min-h-0"
+      >
+        {/* Tab Header */}
+        <div className="p-2 border-b bg-muted/20 shrink-0">
+          <TabsList className="w-full grid grid-cols-2">
+            <TabsTrigger value="infinite" className="text-xs gap-2">
+              <Sparkles className="h-3 w-3" /> Infinite Flow
+            </TabsTrigger>
+            <TabsTrigger value="bridge" className="text-xs gap-2">
+              <Footprints className="h-3 w-3" /> Bridge Mode
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* Controls Area */}
+        <div className="p-4 border-b space-y-4 bg-muted/5 shrink-0">
+          {/* Mode Specific Controls */}
+          {mode === "infinite" ? (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground mb-2 block">
+                Target Vibe (Pattern)
+              </Label>
+              <Select
+                value={selectedPreset ? selectedPreset.toString() : ""}
+                onValueChange={(val) => setSelectedPreset(Number(val))}
+                disabled={presets.length === 0}
+              >
+                <SelectTrigger className="h-9 text-xs bg-background">
+                  <SelectValue placeholder="Select a vibe..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Label className="text-xs font-semibold text-muted-foreground block text-center">
+                Drag & Drop from Setlist (Left)
+              </Label>
+              {/* Bridge Visualizer / Drop Zones */}
+              <div className="flex items-center justify-between gap-2">
+                {/* Start Drop Zone */}
+                <div
+                  className={`flex-1 flex flex-col items-center justify-center p-2 rounded-md border-2 border-dashed transition-colors h-24 cursor-default ${
+                    isDraggingOver === "start"
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-muted/20"
+                  }`}
+                  onDragOver={(e) => handleDragOver(e, "start")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, "start")}
+                >
+                  <span className="text-[10px] text-muted-foreground font-bold mb-1">
+                    START
+                  </span>
+                  {startTrack ? (
+                    <div className="text-xs font-medium text-center w-full px-1 overflow-hidden">
+                      <div className="truncate">{startTrack.title}</div>
+                      <div className="truncate text-[10px] text-muted-foreground">
+                        {startTrack.artist}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground/50 text-center">
+                      Drop Track
+                      <br />
+                      Here
+                    </div>
+                  )}
+                </div>
+
+                <ArrowRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+
+                {/* End Drop Zone */}
+                <div
+                  className={`flex-1 flex flex-col items-center justify-center p-2 rounded-md border-2 border-dashed transition-colors h-24 cursor-default ${
+                    isDraggingOver === "end"
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-muted/20"
+                  }`}
+                  onDragOver={(e) => handleDragOver(e, "end")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, "end")}
+                >
+                  <span className="text-[10px] text-muted-foreground font-bold mb-1">
+                    END
+                  </span>
+                  {endTrack ? (
+                    <div className="text-xs font-medium text-center w-full px-1 overflow-hidden">
+                      <div className="truncate text-primary">
+                        {endTrack.title}
+                      </div>
+                      <div className="truncate text-[10px] text-muted-foreground">
+                        {endTrack.artist}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground/50 text-center">
+                      Drop Track
+                      <br />
+                      Here
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Common Filters */}
+          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/50">
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold text-muted-foreground">
+                Filter Genres
+              </Label>
+              <MultiSelect
+                options={availableGenres.map((g) => ({ label: g, value: g }))}
+                selected={autoGenres}
+                onChange={setAutoGenres}
+                placeholder="All Genres"
+                className="bg-background h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center">
+                <Label className="text-[10px] font-semibold text-muted-foreground">
+                  Count
+                </Label>
+                <span className="text-[10px] font-mono bg-muted px-1.5 rounded">
+                  {length} tracks
+                </span>
+              </div>
+              <Slider
+                value={[length]}
+                min={3}
+                max={20}
+                step={1}
+                onValueChange={([v]) => setLength(v)}
+                className="py-1"
+              />
+            </div>
+          </div>
+
+          {/* Generate Action */}
+          <Button
+            className="w-full gap-2 mt-2"
+            disabled={
+              isAutoLoading ||
+              (mode === "infinite" && !selectedPreset) ||
+              (mode === "bridge" && (!startTrack || !endTrack))
+            }
+            onClick={mode === "infinite" ? generateInfinite : generateBridge}
+          >
+            {isAutoLoading ? (
+              <Loader2 className="animate-spin h-4 w-4" />
+            ) : mode === "infinite" ? (
+              <Sparkles className="h-4 w-4" />
+            ) : (
+              <Footprints className="h-4 w-4" />
+            )}
+            {mode === "infinite" ? "Generate Flow" : "Build Bridge"}
+          </Button>
+        </div>
+
+        {/* Results Area */}
+        <div className="flex-1 overflow-hidden flex flex-col bg-background">
+          {autoTracks.length > 0 && (
+            <div className="p-2 border-b bg-accent/20 flex justify-between items-center shrink-0 animate-in fade-in slide-in-from-top-1">
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] px-1.5 h-5 font-normal"
+                >
+                  {autoTracks.length} Recommended
+                </Badge>
+              </div>
+              <Button
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={handleApply}
+              >
+                <Check className="h-3 w-3" /> Apply to Setlist
+              </Button>
+            </div>
+          )}
+
+          <ScrollArea className="flex-1">
+            <div className="pb-10">
+              {autoTracks.map((t, idx) => (
+                <div
+                  key={`${t.id}-${idx}`}
+                  className="relative group animate-in fade-in slide-in-from-bottom-2"
+                  style={{ animationDelay: `${idx * 50}ms` }}
+                >
+                  <TrackRow
+                    track={t}
+                    currentTrackId={currentTrackId}
+                    onPlay={onPlay}
+                    onAddTrack={(track) =>
+                      onInjectTracks([track], startTrack?.id)
+                    } // Allow single add too
+                  />
+                </div>
+              ))}
+
+              {autoTracks.length === 0 && !isAutoLoading && (
+                <div className="h-full flex flex-col items-center justify-center p-8 text-muted-foreground gap-3 opacity-50 min-h-[200px]">
+                  {mode === "infinite" ? (
+                    <>
+                      <Sparkles className="h-8 w-8" />
+                      <div className="text-center text-xs">
+                        Select a Vibe Preset to
+                        <br />
+                        generate an infinite mix.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Footprints className="h-8 w-8" />
+                      <div className="text-center text-xs">
+                        Drag & Drop Start/End tracks
+                        <br />
+                        to find the perfect bridge.
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {isAutoLoading && autoTracks.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center p-8 min-h-[200px]">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    AI is thinking...
+                  </p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </Tabs>
+    </div>
+  );
+}
