@@ -46,7 +46,7 @@ export function PromptManager() {
       name: "New Preset",
       description: "",
       preset_type: "all",
-      content: {},
+      filters: {},
     });
     setSelectedPreset(null);
     setIsEditingPreset(true);

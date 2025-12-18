@@ -7,6 +7,7 @@ export interface Preset {
   preset_type: "search" | "generation" | "all";
   prompt_id?: number;
   prompt_content?: string; // APIから返される
+  filters?: Record<string, any>; // フィルタ設定を追加
 }
 
 export const presetsService = {

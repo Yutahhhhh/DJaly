@@ -12,4 +12,5 @@ export interface Preset {
   preset_type: "search" | "generation" | "all";
   prompt_id?: number;
   prompt_content?: string;
+  filters?: Record<string, any>;
 }
