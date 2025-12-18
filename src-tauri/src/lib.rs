@@ -1,5 +1,6 @@
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
+use std::env;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -9,6 +10,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            // CI環境やビルド時はサイドカーを起動しない
+            if env::var("CI").is_ok() || env::var("TAURI_SKIP_SIDECAR").is_ok() {
+                println!("Skipping sidecar startup (CI/build environment)");
+                return Ok(());
+            }
+
             // サイドカーの起動
             let sidecar_command = app.shell().sidecar("djaly-server").unwrap();
             

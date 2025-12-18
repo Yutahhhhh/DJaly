@@ -4,6 +4,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  # Prevent Tauri from running the sidecar during build validation
+  TAURI_SKIP_SIDECAR_VALIDATION: true
+
 jobs:
   release:
     permissions:
@@ -57,7 +61,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev xvfb
 
       - name: install frontend dependencies
         run: pnpm install
@@ -75,10 +79,14 @@ jobs:
               --collect-all uvicorn \
               --collect-all starlette \
               --collect-all fastapi \
+              --collect-all h11 \
               --hidden-import="uvicorn" \
+              --hidden-import="uvicorn.main" \
+              --hidden-import="uvicorn.config" \
               --hidden-import="uvicorn.logging" \
               --hidden-import="uvicorn.loops" \
               --hidden-import="uvicorn.loops.auto" \
+              --hidden-import="uvicorn.loops.asyncio" \
               --hidden-import="uvicorn.protocols" \
               --hidden-import="uvicorn.protocols.http" \
               --hidden-import="uvicorn.protocols.http.auto" \
@@ -86,18 +94,29 @@ jobs:
               --hidden-import="uvicorn.protocols.http.httptools_impl" \
               --hidden-import="uvicorn.protocols.websockets" \
               --hidden-import="uvicorn.protocols.websockets.auto" \
+              --hidden-import="uvicorn.protocols.websockets.wsproto_impl" \
+              --hidden-import="uvicorn.protocols.websockets.websockets_impl" \
               --hidden-import="uvicorn.lifespan" \
               --hidden-import="uvicorn.lifespan.on" \
               --hidden-import="uvicorn.lifespan.off" \
+              --hidden-import="uvicorn.server" \
               --hidden-import="starlette" \
               --hidden-import="starlette.routing" \
               --hidden-import="starlette.middleware" \
+              --hidden-import="starlette.applications" \
+              --hidden-import="fastapi" \
+              --hidden-import="fastapi.applications" \
               --hidden-import="sqlmodel" \
               --hidden-import="platformdirs" \
               --hidden-import="sklearn.utils._typedefs" \
               --hidden-import="sklearn.neighbors._partition_nodes" \
               --hidden-import="scipy.special.cython_special" \
               --hidden-import="h11" \
+              --hidden-import="h11._connection" \
+              --hidden-import="h11._state" \
+              --hidden-import="anyio" \
+              --hidden-import="anyio._backends" \
+              --hidden-import="anyio._backends._asyncio" \
               server.py
           
           mkdir -p ../src-tauri/bin
@@ -108,10 +127,26 @@ jobs:
           fi
           
           mv dist/djaly-server$EXTENSION ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
-          chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION || true
+          chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION 2>/dev/null || true
           ls -la ../src-tauri/bin/
 
-      - name: build and release
+      - name: build and release (ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI: true
+          DISPLAY: ':99'
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Djaly ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: build and release (non-ubuntu)
+        if: matrix.platform != 'ubuntu-22.04'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
