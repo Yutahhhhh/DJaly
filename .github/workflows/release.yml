@@ -12,24 +12,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest' # ARM64 (M1/M2/M3)
+          - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             sidecar_target: 'aarch64-apple-darwin'
-            python_arch: 'arm64'
-          - platform: 'macos-latest' # Intel Mac build on ARM runner
-            args: '--target x86_64-apple-darwin'
-            sidecar_target: 'x86_64-apple-darwin'
-            python_arch: 'x64'
           - platform: 'ubuntu-22.04'
             args: ''
             sidecar_target: 'x86_64-unknown-linux-gnu'
-            python_arch: 'x64'
           - platform: 'windows-latest'
             args: ''
             sidecar_target: 'x86_64-pc-windows-msvc'
-            python_arch: 'x64'
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -48,24 +42,22 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          architecture: ${{ matrix.python_arch }}
 
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.sidecar_target == 'aarch64-apple-darwin' && 'aarch64-apple-darwin' || matrix.sidecar_target == 'x86_64-apple-darwin' && 'x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.sidecar_target == 'aarch64-apple-darwin' && 'aarch64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev xvfb
-
-      - name: setup xvfb (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
 
       - name: install frontend dependencies
         run: pnpm install
@@ -79,24 +71,35 @@ jobs:
         shell: bash
         run: |
           cd backend
-          # Build with PyInstaller
           pyinstaller --clean --noconfirm --onefile --name djaly-server \
+              --collect-all uvicorn \
+              --collect-all starlette \
+              --collect-all fastapi \
+              --hidden-import="uvicorn" \
               --hidden-import="uvicorn.logging" \
               --hidden-import="uvicorn.loops" \
               --hidden-import="uvicorn.loops.auto" \
               --hidden-import="uvicorn.protocols" \
               --hidden-import="uvicorn.protocols.http" \
               --hidden-import="uvicorn.protocols.http.auto" \
+              --hidden-import="uvicorn.protocols.http.h11_impl" \
+              --hidden-import="uvicorn.protocols.http.httptools_impl" \
+              --hidden-import="uvicorn.protocols.websockets" \
+              --hidden-import="uvicorn.protocols.websockets.auto" \
               --hidden-import="uvicorn.lifespan" \
               --hidden-import="uvicorn.lifespan.on" \
+              --hidden-import="uvicorn.lifespan.off" \
+              --hidden-import="starlette" \
+              --hidden-import="starlette.routing" \
+              --hidden-import="starlette.middleware" \
               --hidden-import="sqlmodel" \
               --hidden-import="platformdirs" \
               --hidden-import="sklearn.utils._typedefs" \
               --hidden-import="sklearn.neighbors._partition_nodes" \
               --hidden-import="scipy.special.cython_special" \
+              --hidden-import="h11" \
               server.py
           
-          # Move and rename
           mkdir -p ../src-tauri/bin
           
           EXTENSION=""
@@ -105,19 +108,14 @@ jobs:
           fi
           
           mv dist/djaly-server$EXTENSION ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
-          ls -l ../src-tauri/bin/
-
-      - name: debug check files
-        run: |
-          echo "Checking src-tauri/bin content:"
-          ls -R src-tauri/bin
-          echo "Current directory:"
-          pwd
+          chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION || true
+          ls -la ../src-tauri/bin/
 
       - name: build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI: true
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Djaly ${{ github.ref_name }}'
