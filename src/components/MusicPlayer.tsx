@@ -13,13 +13,11 @@ import {
   FileText,
   Image as ImageIcon,
   Loader2,
-  Search,
   Music,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
-import { Badge } from "@/components/ui/badge";
 import { API_BASE_URL } from "@/services/api-client";
 import { metadataService, FileMetadata } from "@/services/metadata";
 import { formatTime } from "@/lib/utils";

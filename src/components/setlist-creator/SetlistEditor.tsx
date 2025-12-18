@@ -47,7 +47,7 @@ export function SetlistEditor({
     e.dataTransfer.setData("track", JSON.stringify(tracks[index]));
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
+  const handleDragOver = (e: React.DragEvent, _index: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };

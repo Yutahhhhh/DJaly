@@ -108,7 +108,7 @@ export function GenreBarChart({ data }: GenreBarChartProps) {
               radius={[0, 4, 4, 0]}
               barSize={30}
             >
-              {paginatedData.map((entry, index) => (
+              {paginatedData.map((_entry, index) => (
                 <Cell
                   key={`cell-${index}`}
                   fill="hsl(var(--primary))"

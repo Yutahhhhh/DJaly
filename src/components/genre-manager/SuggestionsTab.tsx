@@ -13,7 +13,6 @@ import {
   Play,
   Wand2,
   StopCircle,
-  Download
 } from "lucide-react";
 import {
   Dialog,

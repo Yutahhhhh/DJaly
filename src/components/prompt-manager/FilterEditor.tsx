@@ -24,8 +24,9 @@ export function FilterEditor({ filters, onChange, mode }: FilterEditorProps) {
 
   const getVal = (key: string, def: any) => filters[key] ?? def;
 
-  // generationモードの場合はフィルタ設定をシンプルにする、などの制御も可能だが
-  // 今回は共通のUIで編集可能にする。
+  // mode is currently unused but kept for future extensibility
+  // e.g. simplifying filters for generation mode
+  console.debug("FilterEditor mode:", mode);
 
   return (
     <div className="space-y-6 border p-4 rounded-md bg-card">

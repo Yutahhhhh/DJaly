@@ -107,7 +107,7 @@ export function SetlistCreator({
   const handleInjectTracks = (
     newTracks: Track[],
     startTrackId?: number,
-    endTrackId?: number
+    _endTrackId?: number
   ) => {
     if (!activeSetlist) return;
 

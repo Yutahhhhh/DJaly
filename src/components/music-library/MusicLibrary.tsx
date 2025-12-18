@@ -216,7 +216,7 @@ export function MusicLibrary({
     filters.key,
     filters.artist,
     filters.album,
-    filters.genre,
+    filters.genres,
     isFeatureActive(filters.minEnergy, filters.maxEnergy),
     isFeatureActive(filters.minDanceability, filters.maxDanceability),
     isFeatureActive(filters.minBrightness, filters.maxBrightness),
