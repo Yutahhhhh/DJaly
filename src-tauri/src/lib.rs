@@ -1,6 +1,8 @@
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use std::env;
+use tauri::Manager;
+use tauri::menu::{Menu, Submenu, MenuItem, PredefinedMenuItem};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +13,47 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_http::init())
+        .menu(|handle| {
+            let menu = Menu::new(handle)?;
+            
+            #[cfg(target_os = "macos")]
+            {
+                let app_menu = Submenu::new(handle, "Djaly", true)?;
+                app_menu.append(&PredefinedMenuItem::hide(handle, None)?)?;
+                app_menu.append(&PredefinedMenuItem::hide_others(handle, None)?)?;
+                app_menu.append(&PredefinedMenuItem::quit(handle, None)?)?;
+                menu.append(&app_menu)?;
+            }
+            
+            let edit_menu = Submenu::new(handle, "Edit", true)?;
+            edit_menu.append(&PredefinedMenuItem::undo(handle, None)?)?;
+            edit_menu.append(&PredefinedMenuItem::redo(handle, None)?)?;
+            edit_menu.append(&PredefinedMenuItem::separator(handle)?)?;
+            edit_menu.append(&PredefinedMenuItem::cut(handle, None)?)?;
+            edit_menu.append(&PredefinedMenuItem::copy(handle, None)?)?;
+            edit_menu.append(&PredefinedMenuItem::paste(handle, None)?)?;
+            edit_menu.append(&PredefinedMenuItem::select_all(handle, None)?)?;
+            menu.append(&edit_menu)?;
+
+            let view_menu = Submenu::new(handle, "View", true)?;
+            view_menu.append(&PredefinedMenuItem::fullscreen(handle, None)?)?;
+            view_menu.append(&MenuItem::with_id(handle, "toggle_devtools", "Toggle Developer Tools", true, None::<&str>)?)?;
+            menu.append(&view_menu)?;
+            
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == "toggle_devtools" {
+                if let Some(window) = app.get_webview_window("main") {
+                     if window.is_devtools_open() {
+                         window.close_devtools();
+                     } else {
+                         window.open_devtools();
+                     }
+                }
+            }
+        })
         .setup(|app| {
             // CI環境やビルド時はサイドカーを起動しない
             if env::var("CI").is_ok() || env::var("TAURI_SKIP_SIDECAR").is_ok() {

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, text
+from sqlalchemy import func
 import duckdb
 from typing import Dict, Any, List
 from pydantic import BaseModel
@@ -79,8 +80,8 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
     
     # 1. Basic Counts
     # 解析済み = bpm > 0
-    total_tracks = session.exec(select(text("COUNT(*)")).select_from(Track)).one()
-    analyzed_tracks = session.exec(select(text("COUNT(*)")).select_from(Track).where(Track.bpm > 0)).one()
+    total_tracks = session.exec(select(func.count()).select_from(Track)).one()
+    analyzed_tracks = session.exec(select(func.count()).select_from(Track).where(Track.bpm > 0)).one()
     unanalyzed_tracks = total_tracks - analyzed_tracks
     
     # 2. Genre Distribution (All)
@@ -102,7 +103,7 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
 
     # 3. Unverified Genres Count
     unverified_count = session.exec(
-        select(text("COUNT(*)")).select_from(Track).where(Track.is_genre_verified == False)
+        select(func.count()).select_from(Track).where(Track.is_genre_verified == False)
     ).one()
 
     # 4. Recent Setlists

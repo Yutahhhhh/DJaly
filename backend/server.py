@@ -8,19 +8,13 @@ import platformdirs
 multiprocessing.freeze_support()
 
 if __name__ == "__main__":
-    # アプリケーションデータディレクトリの確保
-    APP_NAME = "Djaly"
-    APP_AUTHOR = "DjalyDev"
-    user_data = platformdirs.user_data_dir(APP_NAME, APP_AUTHOR)
-    os.makedirs(user_data, exist_ok=True)
+    # 設定の読み込みと環境変数のセットアップ
+    # これを最初に行うことで、後続のインポート(librosa等)が正しいパスを使用できる
+    from config import settings
+    settings.setup_environment()
 
-    # Librosaなどのキャッシュディレクトリをユーザーデータ配下に強制設定
-    # (書き込み権限のない場所へのアクセスを防ぐため)
-    os.environ["NUMBA_CACHE_DIR"] = os.path.join(user_data, ".numba_cache")
-    os.environ["MPLCONFIGDIR"] = os.path.join(user_data, ".matplotlib")
-    
-    # ログディレクトリの設定 (backend/utils/logger.py で使用)
-    os.environ["DJALY_LOG_DIR"] = os.path.join(user_data, "logs")
+    # アプリケーションデータディレクトリの確保
+    os.makedirs(settings.USER_DATA_DIR, exist_ok=True)
 
     # PyInstallerでバンドルされた場合のパス解決（必要に応じて）
     if getattr(sys, 'frozen', False):
@@ -32,18 +26,13 @@ if __name__ == "__main__":
     # これによりPyInstaller環境下でも正しくアプリが見つかる
     from main import app
 
-    print(f"Starting Djaly Backend Server on port 8001...")
-    print(f"User Data Directory: {user_data}")
-
-    # サーバー起動
-    # reload=False は必須 (フリーズされたアプリではリロード不可)
-    # workers=1 (DuckDBの並行性のためシングルワーカー推奨)
-    # 文字列 "main:app" ではなく、appオブジェクトを直接渡す
-    
     # ポート番号を環境変数から取得（デフォルトは開発用の8001）
     # 本番環境ではTauri側からランダムな空きポートなどが渡されることを想定、
     # または競合しにくい固定ポート（例: 48123）を使用する
-    port = int(os.environ.get("DJALY_PORT", 8001))
+    port = settings.DJALY_PORT
+
+    print(f"Starting Djaly Backend Server on port {port}...")
+    print(f"User Data Directory: {settings.USER_DATA_DIR}")
     
     # 既存のプロセスをチェックして終了させる (macOS/Linux)
     # Windowsでは lsof がないためスキップ (必要なら psutil を使う)

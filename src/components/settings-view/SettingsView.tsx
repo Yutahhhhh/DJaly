@@ -427,7 +427,7 @@ export function SettingsView() {
                     <div>
                       Please install Ollama and run it in the background
                     </div>
-                    <code>※ http://localhost:11434</code>
+                    <code>Default: http://localhost:11434</code>
                   </p>
                 </div>
               ) : (

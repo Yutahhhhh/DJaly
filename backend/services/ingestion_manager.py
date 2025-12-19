@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import List, Dict, Any, Optional
 from fastapi import WebSocket
 from sqlmodel import Session, select
+from config import settings
 from models import Track, TrackEmbedding
 from db import engine
 from services.ingestion import process_track_ingestion
@@ -62,12 +63,12 @@ class IngestionManager:
 
         # 並列化設定
         default_workers = max(2, cpu_cores - 1)
-        if os.getenv("ENV") == "dev":
+        if settings.ENV == "dev":
              default_workers = 2
 
-        if os.getenv("NUM_WORKERS"):
+        if settings.NUM_WORKERS:
             try:
-                self.max_workers = int(os.getenv("NUM_WORKERS"))
+                self.max_workers = int(settings.NUM_WORKERS)
             except ValueError:
                 self.max_workers = default_workers
         else:

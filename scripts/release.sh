@@ -68,6 +68,7 @@ pyinstaller --clean --noconfirm --onefile --name $BINARY_NAME \
     --hidden-import="fastapi.applications" \
     --hidden-import="sqlmodel" \
     --hidden-import="platformdirs" \
+    --hidden-import="pydantic_settings" \
     --hidden-import="sklearn.utils._typedefs" \
     --hidden-import="sklearn.neighbors._partition_nodes" \
     --hidden-import="scipy.special.cython_special" \

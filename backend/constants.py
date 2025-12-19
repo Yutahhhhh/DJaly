@@ -1,6 +1,7 @@
 import os
+from config import settings
 
-MUSIC_DIR = os.getenv("MUSIC_DIR", "/music_data")
+MUSIC_DIR = settings.MUSIC_DIR
 SUPPORTED_EXTENSIONS = ('.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac', '.aiff')
 
 # Genre Normalization Constants

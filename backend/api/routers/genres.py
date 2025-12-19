@@ -24,14 +24,14 @@ from services.genres import GenreService
 router = APIRouter()
 genre_service = GenreService()
 
-@router.get("/list", response_model=List[str])
+@router.get("/api/genres/list", response_model=List[str])
 def get_all_genres(session: Session = Depends(get_session)):
     """
     Get all unique genres existing in the database.
     """
     return genre_service.get_all_genres(session)
 
-@router.get("/unknown", response_model=List[TrackRead])
+@router.get("/api/genres/unknown", response_model=List[TrackRead])
 def get_unknown_tracks(
     offset: int = 0,
     limit: int = 50,
@@ -39,11 +39,11 @@ def get_unknown_tracks(
 ):
     return genre_service.get_unknown_tracks(session, offset, limit)
 
-@router.get("/unknown-ids", response_model=List[int])
+@router.get("/api/genres/unknown-ids", response_model=List[int])
 def get_unknown_track_ids(session: Session = Depends(get_session)):
     return genre_service.get_all_unknown_track_ids(session)
 
-@router.get("/grouped-suggestions", response_model=List[GroupedSuggestionSummary])
+@router.get("/api/genres/grouped-suggestions", response_model=List[GroupedSuggestionSummary])
 def get_grouped_suggestions(
     offset: int = 0,
     limit: int = 10,
@@ -54,7 +54,7 @@ def get_grouped_suggestions(
     results = service.get_grouped_suggestions(session, limit=limit, offset=offset, threshold=threshold, summary_only=True)
     return results
 
-@router.get("/grouped-suggestions/{track_id}", response_model=List[TrackSuggestion])
+@router.get("/api/genres/grouped-suggestions/{track_id}", response_model=List[TrackSuggestion])
 def get_suggestions_for_track(
     track_id: int,
     threshold: float = 0.85,
@@ -64,7 +64,7 @@ def get_suggestions_for_track(
     results = service.get_suggestions_for_track(session, track_id=track_id, threshold=threshold)
     return results
 
-@router.post("/llm-analyze", response_model=GenreAnalysisResponse)
+@router.post("/api/genres/llm-analyze", response_model=GenreAnalysisResponse)
 def analyze_track_with_llm(
     request: GenreLLMAnalyzeRequest,
     session: Session = Depends(get_session)
@@ -74,7 +74,7 @@ def analyze_track_with_llm(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-@router.post("/batch-llm-analyze", response_model=List[GenreUpdateResult])
+@router.post("/api/genres/batch-llm-analyze", response_model=List[GenreUpdateResult])
 def analyze_batch_tracks_with_llm(
     request: GenreBatchLLMAnalyzeRequest,
     session: Session = Depends(get_session)
@@ -88,7 +88,7 @@ def analyze_batch_tracks_with_llm(
         print(f"Batch Analysis Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/batch-update")
+@router.post("/api/genres/batch-update", response_model=GenreUpdateResult)
 def batch_update_genres(
     request: GenreBatchUpdateRequest,
     session: Session = Depends(get_session)
@@ -98,14 +98,14 @@ def batch_update_genres(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/cleanup-suggestions", response_model=List[GenreCleanupGroup])
+@router.get("/api/genres/cleanup-suggestions", response_model=List[GenreCleanupGroup])
 def get_cleanup_suggestions(session: Session = Depends(get_session)):
     """
     表記揺れのあるジャンルグループを取得する
     """
     return genre_service.get_cleanup_suggestions(session)
 
-@router.post("/cleanup-execute")
+@router.post("/api/genres/cleanup-execute")
 def execute_cleanup(
     request: GenreCleanupRequest,
     session: Session = Depends(get_session)
@@ -115,7 +115,7 @@ def execute_cleanup(
     """
     return genre_service.execute_cleanup(session, request.target_genre, request.track_ids)
 
-@router.post("/apply-to-files")
+@router.post("/api/genres/apply-to-files")
 def apply_genres_to_files(
     request: GenreApplyRequest,
     session: Session = Depends(get_session)

@@ -13,3 +13,4 @@ ollama
 mutagen
 platformdirs
 pyinstaller
+pydantic-settings

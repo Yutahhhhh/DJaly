@@ -4,6 +4,7 @@ import urllib.error
 import os
 from typing import Optional, Dict, Any, Tuple
 from sqlmodel import Session
+from config import settings
 from db import get_setting_value
 import ollama
 from utils.logger import get_logger
@@ -48,7 +49,8 @@ def get_llm_config(session: Session) -> Tuple[str, str, str, str]:
         if legacy_key:
             api_key = legacy_key
 
-    default_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    # 環境変数からデフォルト値を取得
+    default_host = settings.OLLAMA_HOST
     ollama_host = get_setting_value(session, "ollama_host", default_host)
 
     return provider, model_name, api_key, ollama_host

@@ -14,7 +14,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release": "./scripts/release.sh"
+    "release": "./scripts/release.sh",
+    "restore:db": "cp db_data/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
+    "log:watch": "tail -f \"$HOME/Library/Application Support/Djaly/logs/djaly.log\""
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",
@@ -32,6 +34,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2.4.2",
+    "@tauri-apps/plugin-http": "^2.5.4",
     "@tauri-apps/plugin-opener": "^2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

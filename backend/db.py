@@ -4,20 +4,13 @@ from sqlalchemy.pool import NullPool
 import os
 import sys
 import threading
-import platformdirs
+from config import settings
 
-# --- Path Logic Modification for Native App ---
-APP_NAME = "Djaly"
-APP_AUTHOR = "DjalyDev"
+# DBパスは設定から取得
+DB_PATH = settings.DB_PATH
+# ディレクトリが存在しない場合は作成 (DB_PATHの親ディレクトリ)
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-# macOS: ~/Library/Application Support/Djaly
-# Windows: C:\Users\<User>\AppData\Local\DjalyDev\Djaly
-# Linux: ~/.local/share/Djaly
-user_data_dir = platformdirs.user_data_dir(APP_NAME, APP_AUTHOR)
-os.makedirs(user_data_dir, exist_ok=True)
-
-# DBファイルをユーザーデータディレクトリに配置
-DB_PATH = os.path.join(user_data_dir, "djaly.duckdb")
 DATABASE_URL = f"duckdb:///{DB_PATH}"
 
 # poolclass=NullPool is crucial for DuckDB locking issues
