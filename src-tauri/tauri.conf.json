@@ -24,6 +24,16 @@
     "resources": []
   },
   "app": {
+    "windows": [
+      {
+        "title": "Djaly",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "devtools": true
+      }
+    ],
     "withGlobalTauri": true,
     "security": {
       "csp": null
@@ -37,7 +47,7 @@
       "endpoints": [
         "https://github.com/Yutahhhhh/DJaly/releases/latest/download/latest.json"
       ],
-      "pubkey": "YOUR_PUBLIC_KEY_HERE"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGQjU1RjVEQzA3M0NFNzgKUldSNHpuUEFYVisxSDFaV2YzNW1Ha1RQdnhhby9IRlR0MXdvbndSWElKa2RhaDhwdnBhU2NKdUcK"
     }
   }
 }

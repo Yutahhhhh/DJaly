@@ -50,33 +50,19 @@
 
 ## 3. リリースとデプロイ (Release & Deployment)
 
-GitHub Actionsを利用して、クロスプラットフォーム向けのビルドとリリースを自動化しています。
+ローカル環境でスクリプトを実行してリリースを行います。
 
 ### リリースフロー
 1. `package.json` と `src-tauri/tauri.conf.json` のバージョン番号を更新します。
 2. 変更をコミットし、`main` ブランチにプッシュします。
-3. バージョンタグを作成してプッシュします。
+3. 以下のコマンドを実行してリリースビルドとアップロードを行います。
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   pnpm release v0.1.0
    ```
+   ※ `gh` コマンド (GitHub CLI) がインストールされ、ログイン済みである必要があります。
 
-### CI/CD パイプライン (`.github/workflows/release.yml`)
-タグのプッシュを検知すると、以下のジョブが実行されます。
-
-1. **環境セットアップ**: Node.js, Python, Rust環境を構築。
-2. **依存関係インストール**: フロントエンド・バックエンドのライブラリをインストール。
-3. **バックエンドビルド (Sidecar)**:
-   - `pyinstaller` を使用してPythonバックエンドを単一の実行ファイルにビルドします。
-   - プラットフォームごとのターゲット名（例: `djaly-server-aarch64-apple-darwin`）に変更し、`src-tauri/bin/` に配置します。
-4. **Tauriビルド**:
-   - フロントエンドをビルドし、RustでTauriアプリとしてパッケージングします。
-   - バックエンドの実行ファイル（Sidecar）がアプリに同梱されます。
-5. **GitHub Release作成**:
-   - ビルド成果物（インストーラー等）を含むドラフトリリースを自動作成します。
-
-### サポートプラットフォーム
-マトリックスビルドにより、以下の環境向けのバイナリが生成されます。
-- **macOS**: Apple Silicon (aarch64) / Intel (x86_64)
-- **Windows**: x86_64
-- **Linux**: Ubuntu (x86_64)
+### スクリプトの動作 (`scripts/release.sh`)
+1. **バックエンドビルド**: `pyinstaller` でPythonバックエンドをビルドします。
+2. **Sidecar配置**: ビルドしたバイナリを `src-tauri/bin/` に配置します。
+3. **Tauriビルド**: `tauri build` を実行してアプリケーションをパッケージングします。
+4. **GitHub Release**: 生成されたインストーラーをGitHub Releasesにアップロードします。

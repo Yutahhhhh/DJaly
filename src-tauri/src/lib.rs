@@ -6,6 +6,8 @@ use std::env;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
+        .plugin(tauri_plugin_devtools::init()) 
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -17,8 +19,20 @@ pub fn run() {
             }
 
             // サイドカーの起動
-            let sidecar_command = app.shell().sidecar("djaly-server").unwrap();
+            // 本番環境（リリースビルド）では競合しにくいポートを使用する
+            // 開発環境ではデフォルトの8001を使用
+            #[cfg(debug_assertions)]
+            let port = "8001";
+            #[cfg(not(debug_assertions))]
+            let port = "48123"; // 競合しにくいポート番号
+
+            let sidecar_command = app.shell().sidecar("djaly-server")
+                .unwrap()
+                .env("DJALY_PORT", port);
             
+            // コマンドの実行結果を詳細にログ出力
+            println!("Attempting to spawn sidecar with port: {}", port);
+
             let (mut _rx, _child) = sidecar_command
                 .spawn()
                 .expect("Failed to spawn sidecar");

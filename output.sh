@@ -3,6 +3,7 @@
   -not -path "*/node_modules/*" \
   -not -path "*/.wrangler/*" \
   -not -path "*/dist/*" \
+  -not -path "*/venv/*" \
   -not -path "*/.cache/*" \
   -not -path "*/.git/*" \
   -not -path "*/temp/*" \

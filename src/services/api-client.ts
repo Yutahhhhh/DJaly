@@ -1,8 +1,12 @@
 const envApiUrl = import.meta.env.VITE_API_BASE_URL;
 const envWsUrl = import.meta.env.VITE_WS_BASE_URL;
 
-export const API_BASE_URL = envApiUrl || "http://127.0.0.1:8001/api";
-export const WS_BASE_URL = envWsUrl || "ws://127.0.0.1:8001/ws";
+// 開発環境(dev)と本番環境(prod)でポートを切り替える
+// import.meta.env.PROD は vite build 時に true になる
+const DEFAULT_PORT = import.meta.env.PROD ? "48123" : "8001";
+
+export const API_BASE_URL = envApiUrl || `http://127.0.0.1:${DEFAULT_PORT}/api`;
+export const WS_BASE_URL = envWsUrl || `ws://127.0.0.1:${DEFAULT_PORT}/ws`;
 
 class ApiClient {
   private baseUrl: string;

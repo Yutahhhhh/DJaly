@@ -37,3 +37,4 @@ backend/models/*.pb
 
 # Tauri sidecar binaries
 src-tauri/bin/
+keys/

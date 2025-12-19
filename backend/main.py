@@ -48,3 +48,21 @@ app.include_router(prompts.router)
 app.include_router(presets.router)
 app.include_router(setlists.router)
 app.include_router(genres.router, prefix="/api/genres", tags=["genres"])
+
+@app.get("/")
+def root():
+    return {"message": "Djaly Backend API is running"}
+
+# Exception Handler for debugging
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_msg = "".join(traceback.format_exception(None, exc, exc.__traceback__))
+    print(f"Global Exception: {error_msg}") # 標準出力にも出す
+    return JSONResponse(
+        status_code=500,
+        content={"message": "Internal Server Error", "detail": str(exc), "traceback": error_msg},
+    )

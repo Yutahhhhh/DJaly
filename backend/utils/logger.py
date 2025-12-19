@@ -3,9 +3,15 @@ import os
 from logging.handlers import RotatingFileHandler
 import sys
 
-# ログディレクトリの作成 (backend/logs)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+# ログディレクトリの作成
+# 環境変数 DJALY_LOG_DIR が設定されていればそれを使用 (本番環境/server.py経由)
+# 設定されていなければ、このファイルからの相対パスを使用 (開発環境)
+if "DJALY_LOG_DIR" in os.environ:
+    LOG_DIR = os.environ["DJALY_LOG_DIR"]
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    LOG_DIR = os.path.join(BASE_DIR, "logs")
+
 os.makedirs(LOG_DIR, exist_ok=True)
 
 def get_logger(name: str):
