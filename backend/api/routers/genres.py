@@ -14,7 +14,8 @@ from schemas.genres import (
     GenreApplyRequest,
     GenreBatchLLMAnalyzeRequest,
     GenreBatchAnalysisResponse,
-    GenreUpdateResult
+    GenreUpdateResult,
+    GenreBatchUpdateResponse
 )
 from schemas.track import TrackRead
 from services.recommendation import RecommendationService
@@ -70,7 +71,7 @@ def analyze_track_with_llm(
     session: Session = Depends(get_session)
 ):
     try:
-        return genre_service.analyze_track_with_llm(session, request.track_id)
+        return genre_service.analyze_track_with_llm(session, request.track_id, request.overwrite)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -88,7 +89,7 @@ def analyze_batch_tracks_with_llm(
         print(f"Batch Analysis Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/api/genres/batch-update", response_model=GenreUpdateResult)
+@router.post("/api/genres/batch-update", response_model=GenreBatchUpdateResponse)
 def batch_update_genres(
     request: GenreBatchUpdateRequest,
     session: Session = Depends(get_session)

@@ -16,7 +16,8 @@
     "tauri": "tauri",
     "release": "./scripts/release.sh",
     "restore:db": "cp db_data/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
-    "log:watch": "tail -f \"$HOME/Library/Application Support/Djaly/logs/djaly.log\""
+    "log:watch": "tail -f \"$HOME/Library/Application Support/Djaly/logs/djaly.log\"",
+    "test:backend": "backend/.venv/bin/pytest"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

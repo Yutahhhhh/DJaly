@@ -390,7 +390,7 @@ def execute_import(session: Session, data: ImportExecuteRequest):
             import_count += 1
             
     session.commit()
-    return import_count
+    return import_count, update_count
 
 def export_presets_csv(session: Session) -> str:
     """プリセットをCSVとしてエクスポート"""

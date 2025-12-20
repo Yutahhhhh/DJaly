@@ -6,6 +6,10 @@ class GenreBatchUpdateRequest(BaseModel):
     parent_track_id: int
     target_track_ids: List[int]
 
+class GenreBatchUpdateResponse(BaseModel):
+    updated_count: int
+    genre: str
+
 class GenreCleanupRequest(BaseModel):
     target_genre: str
     track_ids: List[int]

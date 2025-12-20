@@ -31,7 +31,7 @@ class GenreService:
         statement = select(Track.id).where(Track.is_genre_verified == False)
         return session.exec(statement).all()
 
-    def analyze_track_with_llm(self, session: Session, track_id: int) -> GenreAnalysisResponse:
+    def analyze_track_with_llm(self, session: Session, track_id: int, overwrite: bool = False) -> GenreAnalysisResponse:
         # 単体解析は詳細な理由が欲しい場合もあるのでJSON形式を維持
         track = session.get(Track, track_id)
         if not track:
@@ -91,7 +91,18 @@ class GenreService:
         try:
             cleaned_response = self._clean_json_string(raw_response)
             data = json.loads(cleaned_response)
-            return GenreAnalysisResponse(**data)
+            response = GenreAnalysisResponse(**data)
+            
+            # Update track if overwrite is True or current genre is Unknown/None
+            current_genre = track.genre or "Unknown"
+            if overwrite or current_genre.lower() == "unknown":
+                track.genre = response.genre
+                track.is_genre_verified = True
+                session.add(track)
+                session.commit()
+                session.refresh(track)
+                
+            return response
         except Exception as e:
             logger.error(f"LLM JSON Parse Error: {e}, Raw: {raw_response}")
             raise RuntimeError(f"Failed to parse LLM response: {str(e)}")

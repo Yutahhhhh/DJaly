@@ -38,3 +38,9 @@ backend/models/*.pb
 # Tauri sidecar binaries
 src-tauri/bin/
 keys/
+
+# Coverage
+.coverage
+backend/.coverage
+htmlcov/
+coverage.xml

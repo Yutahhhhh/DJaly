@@ -1,7 +1,8 @@
 {
-  find . -type f \( -name "*.tsx" -o -name "*.ts" \) \
+  find . -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.py" \) \
   -not -path "*/node_modules/*" \
-  -not -path "*/backend/*" \
+  -not -path "*/src/*" \
+  -not -path "*/src-tauri/*" \
   -not -path "*/.wrangler/*" \
   -not -path "*/dist/*" \
   -not -path "*/venv/*" \
