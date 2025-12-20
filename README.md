@@ -13,7 +13,7 @@ Djalyは、ローカルファーストの音楽ライブラリ管理およびDJ�
 ## インストール方法
 
 ### 1. アプリのダウンロード
-[Releasesページ](https://github.com/horiyuuta/Djaly/releases) から、お使いのOSに合わせたインストーラーをダウンロードしてください。
+[Releasesページ](https://github.com/Yutahhhhh/Djaly/releases) から、お使いのOSに合わせたインストーラーをダウンロードしてください。
 
 - **macOS**: `.dmg` ファイル (Apple Silicon用: `aarch64`, Intel用: `x86_64`)
 - **Windows**: `.exe` または `.msi` ファイル

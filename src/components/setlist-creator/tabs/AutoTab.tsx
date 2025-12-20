@@ -24,6 +24,7 @@ import { setlistsService } from "@/services/setlists";
 import { presetsService, Preset } from "@/services/presets";
 import { TrackRow } from "../TrackRow";
 import { Badge } from "@/components/ui/badge";
+import { DropZone } from "./DropZone";
 
 interface AutoTabProps {
   currentSetlistTracks: Track[];
@@ -31,6 +32,12 @@ interface AutoTabProps {
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   onPlay: (track: Track) => void;
   currentTrackId?: number | null;
+  bridgeState?: {
+    start: Track | null;
+    end: Track | null;
+    setStart: (t: Track | null) => void;
+    setEnd: (t: Track | null) => void;
+  };
 }
 
 export function AutoTab({
@@ -39,6 +46,7 @@ export function AutoTab({
   onInjectTracks,
   onPlay,
   currentTrackId,
+  bridgeState,
 }: AutoTabProps) {
   const [mode, setMode] = useState<"infinite" | "bridge">("infinite");
 
@@ -54,14 +62,14 @@ export function AutoTab({
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
 
-  // Bridge Mode State
-  const [startTrack, setStartTrack] = useState<Track | null>(null);
-  const [endTrack, setEndTrack] = useState<Track | null>(null);
+  // Bridge Mode State (Fallback if bridgeState not provided)
+  const [localStart, setLocalStart] = useState<Track | null>(null);
+  const [localEnd, setLocalEnd] = useState<Track | null>(null);
 
-  // Drag State
-  const [isDraggingOver, setIsDraggingOver] = useState<"start" | "end" | null>(
-    null
-  );
+  const startTrack = bridgeState?.start ?? localStart;
+  const endTrack = bridgeState?.end ?? localEnd;
+  const setStartTrack = bridgeState?.setStart ?? setLocalStart;
+  const setEndTrack = bridgeState?.setEnd ?? setLocalEnd;
 
   useEffect(() => {
     presetsService.getAll("generation", true).then((data) => {
@@ -145,32 +153,6 @@ export function AutoTab({
     }
   };
 
-  // --- Drag & Drop Handlers for Bridge ---
-  const handleDragOver = (e: React.DragEvent, zone: "start" | "end") => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy"; // Indicate we are copying the reference
-    setIsDraggingOver(zone);
-  };
-
-  const handleDragLeave = () => {
-    setIsDraggingOver(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, zone: "start" | "end") => {
-    e.preventDefault();
-    setIsDraggingOver(null);
-    try {
-      const trackData = e.dataTransfer.getData("track");
-      if (trackData) {
-        const track = JSON.parse(trackData) as Track;
-        if (zone === "start") setStartTrack(track);
-        if (zone === "end") setEndTrack(track);
-      }
-    } catch (err) {
-      console.error("Drop failed", err);
-    }
-  };
-
   return (
     <div className="flex-1 flex flex-col p-0 m-0 min-h-0 bg-background">
       <Tabs
@@ -223,68 +205,20 @@ export function AutoTab({
               {/* Bridge Visualizer / Drop Zones */}
               <div className="flex items-center justify-between gap-2">
                 {/* Start Drop Zone */}
-                <div
-                  className={`flex-1 flex flex-col items-center justify-center p-2 rounded-md border-2 border-dashed transition-colors h-24 cursor-default ${
-                    isDraggingOver === "start"
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-muted/20"
-                  }`}
-                  onDragOver={(e) => handleDragOver(e, "start")}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, "start")}
-                >
-                  <span className="text-[10px] text-muted-foreground font-bold mb-1">
-                    START
-                  </span>
-                  {startTrack ? (
-                    <div className="text-xs font-medium text-center w-full px-1 overflow-hidden">
-                      <div className="truncate">{startTrack.title}</div>
-                      <div className="truncate text-[10px] text-muted-foreground">
-                        {startTrack.artist}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[10px] text-muted-foreground/50 text-center">
-                      Drop Track
-                      <br />
-                      Here
-                    </div>
-                  )}
-                </div>
+                <DropZone
+                  id="bridge-start"
+                  label="START"
+                  track={startTrack}
+                />
 
                 <ArrowRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
 
                 {/* End Drop Zone */}
-                <div
-                  className={`flex-1 flex flex-col items-center justify-center p-2 rounded-md border-2 border-dashed transition-colors h-24 cursor-default ${
-                    isDraggingOver === "end"
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-muted/20"
-                  }`}
-                  onDragOver={(e) => handleDragOver(e, "end")}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, "end")}
-                >
-                  <span className="text-[10px] text-muted-foreground font-bold mb-1">
-                    END
-                  </span>
-                  {endTrack ? (
-                    <div className="text-xs font-medium text-center w-full px-1 overflow-hidden">
-                      <div className="truncate text-primary">
-                        {endTrack.title}
-                      </div>
-                      <div className="truncate text-[10px] text-muted-foreground">
-                        {endTrack.artist}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[10px] text-muted-foreground/50 text-center">
-                      Drop Track
-                      <br />
-                      Here
-                    </div>
-                  )}
-                </div>
+                <DropZone
+                  id="bridge-end"
+                  label="END"
+                  track={endTrack}
+                />
               </div>
             </div>
           )}
@@ -370,17 +304,17 @@ export function AutoTab({
             <div className="pb-10">
               {autoTracks.map((t, idx) => (
                 <div
-                  key={`${t.id}-${idx}`}
+                  key={`auto-${t.id}-${idx}`}
                   className="relative group animate-in fade-in slide-in-from-bottom-2"
                   style={{ animationDelay: `${idx * 50}ms` }}
                 >
                   <TrackRow
+                    id={`auto-${t.id}-${idx}`}
                     track={t}
-                    currentTrackId={currentTrackId}
-                    onPlay={onPlay}
-                    onAddTrack={(track) =>
-                      onInjectTracks([track], startTrack?.id)
-                    } // Allow single add too
+                    type="LIBRARY_ITEM"
+                    isPlaying={currentTrackId === t.id}
+                    onPlay={() => onPlay(t)}
+                    onAdd={() => onInjectTracks([t], startTrack?.id)}
                   />
                 </div>
               ))}

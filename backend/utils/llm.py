@@ -4,7 +4,8 @@ import urllib.error
 import os
 from typing import Optional, Dict, Any, Tuple
 from sqlmodel import Session
-from db import get_setting_value
+from config import settings
+from infra.database.connection import get_setting_value
 import ollama
 from utils.logger import get_logger
 
@@ -48,7 +49,8 @@ def get_llm_config(session: Session) -> Tuple[str, str, str, str]:
         if legacy_key:
             api_key = legacy_key
 
-    default_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    # 環境変数からデフォルト値を取得
+    default_host = settings.OLLAMA_HOST
     ollama_host = get_setting_value(session, "ollama_host", default_host)
 
     return provider, model_name, api_key, ollama_host
@@ -240,6 +242,13 @@ def generate_vibe_parameters(prompt_text: str, model_name: Optional[str] = None,
     system_prompt = """
     You are a professional music curator. Analyze the given user prompt (mood/genre/scene) and estimate the ideal audio features for a track that fits this vibe.
     Return ONLY a JSON object with keys: bpm, energy, danceability, brightness, noisiness.
+    
+    Constraints:
+    - bpm: integer (e.g. 80, 120, 140)
+    - energy: float between 0.0 and 1.0
+    - danceability: float between 0.0 and 1.0
+    - brightness: float between 0.0 and 1.0
+    - noisiness: float between 0.0 and 1.0
     """
     full_prompt = f"{system_prompt}\n\nUser Prompt: {prompt_text}\n\nJSON:"
     
@@ -251,7 +260,24 @@ def generate_vibe_parameters(prompt_text: str, model_name: Optional[str] = None,
         end = response_text.rfind("}") + 1
         if start != -1 and end != -1:
             json_str = response_text[start:end]
-            return json.loads(json_str)
+            params = json.loads(json_str)
+            
+            # Normalize if needed (Handle cases where LLM returns 1-10 or 0-100 scale)
+            for key in ["energy", "danceability", "brightness", "noisiness"]:
+                if key in params:
+                    try:
+                        val = float(params[key])
+                        if val > 1.0:
+                            if val <= 10.0:
+                                params[key] = val / 10.0
+                            elif val <= 100.0:
+                                params[key] = val / 100.0
+                            else:
+                                params[key] = 1.0
+                    except ValueError:
+                        pass
+            
+            return params
         return {}
     except Exception as e:
         logger.error(f"Error generating vibe parameters: {e}")

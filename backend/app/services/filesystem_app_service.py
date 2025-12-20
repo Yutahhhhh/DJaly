@@ -1,0 +1,196 @@
+import os
+import re
+import requests
+import urllib.parse
+import base64
+from typing import List, Set, Dict, Any, Optional
+from sqlmodel import Session, select
+from domain.constants import SUPPORTED_EXTENSIONS
+from utils.filesystem import resolve_path
+from utils.metadata import extract_full_metadata, update_file_metadata
+from domain.models.track import Track, TrackAnalysis
+
+def _is_supported_file(filename: str) -> bool:
+    return filename.lower().endswith(SUPPORTED_EXTENSIONS)
+
+class FilesystemAppService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_track_metadata(self, track_id: int) -> Dict[str, Any]:
+        track = self.session.get(Track, track_id)
+        if not track:
+            return None
+
+        resolved_path = resolve_path(track.filepath)
+        if not resolved_path:
+            return None
+        
+        analysis = self.session.get(TrackAnalysis, track_id)
+        if analysis:
+            db_metadata = {
+                "bpm": track.bpm,
+                "key": track.key,
+                "beat_positions": analysis.beat_positions,
+                "waveform_peaks": analysis.waveform_peaks,
+                "analyzed": True
+            }
+        else:
+            db_metadata = {
+                "bpm": track.bpm,
+                "key": track.key,
+                "beat_positions": [],
+                "waveform_peaks": [],
+                "analyzed": False
+            }
+
+        tag_metadata = extract_full_metadata(resolved_path)
+
+        return {
+            **tag_metadata,
+            **db_metadata
+        }
+
+    def list_directory(self, path: str) -> List[Dict[str, Any]]:
+        search_path = resolve_path(path)
+        if not search_path:
+            return None
+        
+        try:
+            items = []
+
+            with os.scandir(search_path) as it:
+                for entry in it:
+                    if entry.name.startswith('.'):
+                        continue
+                    
+                    if entry.is_dir():
+                        pass
+                    
+                    else:
+                        if not _is_supported_file(entry.name):
+                            continue
+
+                    item = {
+                        "name": entry.name,
+                        "path": entry.path,
+                        "is_dir": entry.is_dir(),
+                        "is_analyzed": False
+                    }
+                    items.append(item)
+
+            items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+            
+            file_paths = [item['path'] for item in items if not item['is_dir']]
+            
+            analyzed_files = set()
+            if file_paths:
+                statement = select(Track.filepath).where(Track.filepath.in_(file_paths))
+                analyzed_files = set(self.session.exec(statement).all())
+
+            final_result = []
+            for item in items:
+                if not item['is_dir']:
+                    item['is_analyzed'] = item['path'] in analyzed_files
+                final_result.append(item)
+                
+            return final_result
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise e
+
+    def update_metadata_content(self, track_id: int, lyrics: Optional[str] = None, artwork_data: Optional[str] = None) -> bool:
+        track = self.session.get(Track, track_id)
+        if not track or not track.filepath:
+            raise ValueError("Track not found")
+        
+        if lyrics is not None or artwork_data is not None:
+            success = update_file_metadata(track.filepath, lyrics=lyrics, artwork_b64=artwork_data)
+            if not success:
+                raise RuntimeError("Failed to write metadata to file")
+        
+        return True
+
+    def _clean_title_for_search(self, title: str) -> str:
+        return re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+
+    def fetch_lyrics(self, track_id: int) -> str:
+        track = self.session.get(Track, track_id)
+        if not track:
+            raise ValueError("Track not found")
+        
+        return self._fetch_lyrics_from_api(track.artist, track.title) or ""
+
+    def _fetch_lyrics_from_api(self, artist: str, title: str) -> str | None:
+        try:
+            params = {"artist_name": artist, "track_name": title}
+            resp = requests.get("https://lrclib.net/api/get", params=params, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("plainLyrics"):
+                    return data.get("plainLyrics")
+            
+            cleaned_title = self._clean_title_for_search(title)
+            if cleaned_title != title:
+                params["track_name"] = cleaned_title
+                resp = requests.get("https://lrclib.net/api/get", params=params, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("plainLyrics"):
+                        return data.get("plainLyrics")
+        except Exception as e:
+            print(f"Lrclib API Error: {e}")
+
+        try:
+            url = f"https://api.lyrics.ovh/v1/{artist}/{title}"
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("lyrics"):
+                    return data.get("lyrics")
+            
+            cleaned_title = self._clean_title_for_search(title)
+            if cleaned_title != title:
+                url = f"https://api.lyrics.ovh/v1/{artist}/{cleaned_title}"
+                resp = requests.get(url, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("lyrics"):
+                        return data.get("lyrics")
+        except Exception as e:
+            print(f"Lyrics.ovh API Error: {e}")
+        
+        return None
+
+    def fetch_artwork_info(self, track_id: int) -> str:
+        track = self.session.get(Track, track_id)
+        if not track:
+            raise ValueError("Track not found")
+        
+        query = f"{track.artist} {track.album}" if track.album else f"{track.artist} {track.title}"
+        
+        try:
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://itunes.apple.com/search?term={encoded_query}&media=music&entity=album&limit=1"
+            
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            if data["resultCount"] > 0:
+                result = data["results"][0]
+                artwork_url = result.get("artworkUrl100")
+                if artwork_url:
+                    high_res_url = artwork_url.replace("100x100bb", "1000x1000bb")
+                    
+                    img_res = requests.get(high_res_url, timeout=10)
+                    if img_res.status_code == 200:
+                        b64_data = base64.b64encode(img_res.content).decode('utf-8')
+                        return f"data:image/jpeg;base64,{b64_data}"
+            
+            return ""
+            
+        except Exception as e:
+            print(f"Artwork fetch failed: {e}")
+            return ""

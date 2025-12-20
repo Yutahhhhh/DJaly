@@ -19,6 +19,7 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
     --hidden-import="uvicorn.lifespan.on" \
     --hidden-import="sqlmodel" \
     --hidden-import="platformdirs" \
+    --hidden-import="pydantic_settings" \
     --hidden-import="sklearn.utils._typedefs" \
     --hidden-import="sklearn.neighbors._partition_nodes" \
     --hidden-import="scipy.special.cython_special" \

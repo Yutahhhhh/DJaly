@@ -1,68 +1,59 @@
-import os
-import sys
-
-# 環境変数が既に設定されている場合は上書きしない (server.pyの設定を優先)
-if "OMP_NUM_THREADS" not in os.environ:
-    os.environ["OMP_NUM_THREADS"] = "1"
-if "MKL_NUM_THREADS" not in os.environ:
-    os.environ["MKL_NUM_THREADS"] = "1"
-if "OPENBLAS_NUM_THREADS" not in os.environ:
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-if "VECLIB_MAXIMUM_THREADS" not in os.environ:
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-if "NUMEXPR_NUM_THREADS" not in os.environ:
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from infra.database.connection import init_db
+from api.routers import (
+    filesystem,
+    genres,
+    ingest,
+    presets,
+    prompts,
+    setlists,
+    settings as settings_router,
+    system,
+    tracks
+)
 
-from db import init_db
-from api.routers import system, filesystem, ingest, settings, tracks, prompts, presets, setlists, genres
-from services.ingestion_manager import ingestion_manager
+from config import settings
 
-app = FastAPI()
+# Lifespan event to handle startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()  # DuckDBの初期化 (Raw SQLによるSequence/Table作成)
+    yield
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
+app = FastAPI(title="Djaly Backend API", lifespan=lifespan)
 
-@app.on_event("shutdown")
-def on_shutdown():
-    print("Application shutting down...")
-    ingestion_manager.shutdown()
+# CORS Configuration
+origins = [
+    f"http://localhost:{settings.FRONTEND_PORT}", # Tauri Dev Server
+    f"http://127.0.0.1:{settings.FRONTEND_PORT}", # Tauri Dev Server (IP)
+    f"http://localhost:{settings.DJALY_PORT}",    # Dynamic Port
+    f"http://127.0.0.1:{settings.DJALY_PORT}",    # Dynamic Port
+    "tauri://localhost",                          # Tauri Production (macOS)
+    "https://tauri.localhost",                    # Tauri Production (Windows/Linux)
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(system.router)
-app.include_router(filesystem.router)
-app.include_router(ingest.router)
-app.include_router(settings.router)
-app.include_router(tracks.router)
-app.include_router(prompts.router)
-app.include_router(presets.router)
-app.include_router(setlists.router)
-app.include_router(genres.router, prefix="/api/genres", tags=["genres"])
-
+# Root endpoint for health check
 @app.get("/")
-def root():
+async def root():
     return {"message": "Djaly Backend API is running"}
 
-# Exception Handler for debugging
-from fastapi import Request
-from fastapi.responses import JSONResponse
-import traceback
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    error_msg = "".join(traceback.format_exception(None, exc, exc.__traceback__))
-    print(f"Global Exception: {error_msg}") # 標準出力にも出す
-    return JSONResponse(
-        status_code=500,
-        content={"message": "Internal Server Error", "detail": str(exc), "traceback": error_msg},
-    )
+# Include Routers
+app.include_router(filesystem.router)
+app.include_router(genres.router)
+app.include_router(ingest.router)
+app.include_router(presets.router)
+app.include_router(prompts.router)
+app.include_router(setlists.router)
+app.include_router(settings_router.router)
+app.include_router(system.router)
+app.include_router(tracks.router)
