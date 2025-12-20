@@ -9,19 +9,26 @@ import { AutoTab } from "./tabs/AutoTab";
 interface TrackSelectorProps {
   referenceTrack: Track | null;
   onAddTrack: (track: Track) => void;
-  onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void; // ★ 追加
+  onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   currentSetlistTracks: Track[];
   onPlay: (track: Track) => void;
   currentTrackId?: number | null;
+  bridgeState?: {
+    start: Track | null;
+    end: Track | null;
+    setStart: (t: Track | null) => void;
+    setEnd: (t: Track | null) => void;
+  };
 }
 
 export function TrackSelector({
   referenceTrack,
   onAddTrack,
-  onInjectTracks, // ★
+  onInjectTracks,
   currentSetlistTracks,
   onPlay,
   currentTrackId,
+  bridgeState,
 }: TrackSelectorProps) {
   const [activeTab, setActiveTab] = useState("library");
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
@@ -92,9 +99,10 @@ export function TrackSelector({
           <AutoTab
             currentSetlistTracks={currentSetlistTracks}
             availableGenres={availableGenres}
-            onInjectTracks={onInjectTracks} // ★
+            onInjectTracks={onInjectTracks}
             onPlay={onPlay}
             currentTrackId={currentTrackId}
+            bridgeState={bridgeState}
           />
         </TabsContent>
       </Tabs>

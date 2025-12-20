@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from schemas.common import IngestRequest
-from services.ingestion_manager import ingestion_manager
+from api.schemas.common import IngestRequest
+from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
 
 router = APIRouter()
 

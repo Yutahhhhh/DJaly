@@ -55,7 +55,7 @@ def test_vibe_search_integration(client, session: Session, mocker):
     session.commit()
 
     # 2. LLMのレスポンスをモック (エナジーが高い値を返すように)
-    mock_params = mocker.patch("services.tracks.generate_vibe_parameters")
+    mock_params = mocker.patch("app.services.track_app_service.generate_vibe_parameters")
     mock_params.return_value = {"bpm": 140, "energy": 0.9, "danceability": 0.8, "brightness": 0.8, "noisiness": 0.1}
 
     # 3. リクエスト実行
@@ -70,9 +70,9 @@ def test_suggest_genre(client, session: Session, mocker):
     session.add(t1)
     session.commit()
     
-    # RecommendationService.suggest_genre をモック
+    # RecommendationAppService.suggest_genre をモック
     # 実際にはLLMやルールベースで提案するが、ここではモック
-    mock_suggest = mocker.patch("services.recommendation.RecommendationService.suggest_genre")
+    mock_suggest = mocker.patch("app.services.recommendation_app_service.RecommendationAppService.suggest_genre")
     mock_suggest.return_value = {"suggested_genre": "Techno", "reason": "BPM"}
     
     response = client.get(f"/api/tracks/{t1.id}/suggest-genre")

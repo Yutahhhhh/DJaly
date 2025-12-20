@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 from typing import Optional, List
-from db import get_session
+from infra.database.connection import get_session
 from models import Track
-from schemas.track import TrackRead
-from services.recommendation import RecommendationService
-from services.tracks import TrackService
+from api.schemas.track import TrackRead
+from app.services.track_app_service import TrackAppService
+from app.services.recommendation_app_service import RecommendationAppService
 from pydantic import BaseModel
 
 router = APIRouter()
-track_service = TrackService()
 
 class GenreUpdate(BaseModel):
     genre: str
@@ -20,7 +19,8 @@ def update_track_genre(
     update: GenreUpdate,
     session: Session = Depends(get_session)
 ):
-    track = track_service.update_genre(session, track_id, update.genre)
+    app_service = TrackAppService(session)
+    track = app_service.update_genre(track_id, update.genre)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     return track
@@ -30,8 +30,8 @@ def suggest_track_genre(
     track_id: int,
     session: Session = Depends(get_session)
 ):
-    service = RecommendationService()
-    result = service.suggest_genre(session, track_id)
+    service = RecommendationAppService(session)
+    result = service.suggest_genre(track_id)
     return result
 
 @router.get("/api/tracks/{track_id}/similar", response_model=List[TrackRead])
@@ -44,7 +44,8 @@ def get_similar_tracks(
     Vector Search: Find tracks similar to the given track_id using embeddings.
     """
     try:
-        return track_service.get_similar_tracks(session, track_id, limit)
+        app_service = TrackAppService(session)
+        return app_service.get_similar_tracks(track_id, limit)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -75,8 +76,8 @@ def get_tracks(
     offset: int = 0, 
     session: Session = Depends(get_session)
 ):
-    return track_service.get_tracks(
-        session=session,
+    app_service = TrackAppService(session)
+    return app_service.get_tracks(
         status=status,
         title=title,
         artist=artist,

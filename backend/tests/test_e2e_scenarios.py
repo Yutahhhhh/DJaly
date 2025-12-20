@@ -4,7 +4,7 @@ import asyncio
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 from models import Track, Setlist, SetlistTrack
-from services.ingestion_manager import ingestion_manager
+from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -23,11 +23,12 @@ async def test_e2e_ingestion_flow(client: TestClient, session: Session, tmp_path
     
     # 2. Mocking heavy dependencies
     # Use ThreadPoolExecutor instead of ProcessPoolExecutor to ensure mocks and DB patches work
-    ingestion_manager.executor.shutdown(wait=False)
-    ingestion_manager.executor = ThreadPoolExecutor(max_workers=1)
-
-    # Mock AudioAnalyzer to return dummy features without processing audio
-    def mock_analyze(filepath, **kwargs):
+    # ingestion_app_service uses executor only inside the context manager, skip executor modification
+    from concurrent.futures import ThreadPoolExecutor
+    
+    # Mock analyze_track_file directly (ProcessPoolExecutor runs in separate process, so we need to mock at ingest level)
+    # Also patch ProcessPoolExecutor to use ThreadPoolExecutor so mocks work
+    def mock_analyze(filepath, high_precision=True, skip_basic=False, skip_waveform=False):
         return {
             "filepath": filepath,
             "title": "Test Title",
@@ -47,10 +48,14 @@ async def test_e2e_ingestion_flow(client: TestClient, session: Session, tmp_path
             "loudness_range": 2.0,
             "spectral_flux": 1.0,
             "spectral_rolloff": 1000.0,
-            "features_extra": {}
+            "features_extra": {},
+            "embedding": [0.1] * 50,
+            "embedding_model": "test"
         }
     
-    mock_analyzer = mocker.patch("services.analysis.analyzer.AudioAnalyzer.analyze", side_effect=mock_analyze)
+    mocker.patch("domain.services.ingestion_domain_service.analyze_track_file", side_effect=mock_analyze)
+    # Use ThreadPoolExecutor instead of ProcessPoolExecutor for tests (mocks work in threads)
+    mocker.patch("app.services.ingestion_app_service.ProcessPoolExecutor", ThreadPoolExecutor)
     
     # Mock TinyTag to return metadata for dummy files
     mock_tag = mocker.Mock()

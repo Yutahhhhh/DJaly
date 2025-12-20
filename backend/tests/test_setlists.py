@@ -131,9 +131,9 @@ def test_generate_auto_setlist(client: TestClient, session: Session, mocker):
     # モックの戻り値を調整する必要があるかもしれない
     # SetlistServiceの実装詳細が不明だが、とりあえず実行
     
-    # エラーになる可能性が高いので、SetlistService.generate_auto_setlist自体をモックする
-    mock_gen = mocker.patch("services.setlists.SetlistService.generate_auto_setlist")
-    mock_gen.return_value = {"name": "Auto Setlist", "tracks": []}
+    # エラーになる可能性が高いので、SetlistAppService.generate_auto_setlist自体をモックする
+    mock_gen = mocker.patch("app.services.setlist_app_service.SetlistAppService.generate_auto_setlist")
+    mock_gen.return_value = []
     
     response = client.post("/api/recommendations/auto", json={"preset_id": preset.id})
     assert response.status_code == 200

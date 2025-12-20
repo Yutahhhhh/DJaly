@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from db import init_db
+from infra.database.connection import init_db
 from api.routers import (
     filesystem,
     genres,

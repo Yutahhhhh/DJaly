@@ -4,7 +4,7 @@ from sqlalchemy import func
 import duckdb
 from typing import Dict, Any, List
 from pydantic import BaseModel
-from db import get_session, get_setting_value
+from infra.database.connection import get_session, get_setting_value
 from utils.llm import check_llm_status
 from models import Track, Setlist
 

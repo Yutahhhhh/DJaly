@@ -2,7 +2,7 @@ import os
 import logging
 import threading
 from typing import Optional
-from services.analysis.analyzer import AudioAnalyzer
+from domain.services.analysis.analyzer import AudioAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

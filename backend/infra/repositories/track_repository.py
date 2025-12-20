@@ -1,32 +1,35 @@
 from typing import List, Optional, Dict, Any
 from sqlmodel import Session, select, or_, and_, col, text
-from sqlalchemy.orm import defer
 import json
-import time
 
-from models import Track, TrackEmbedding
-from utils.llm import generate_vibe_parameters
-from db import get_setting_value
+from domain.models.track import Track, TrackEmbedding
 
-class TrackService:
-    def update_genre(self, session: Session, track_id: int, genre: str) -> Optional[Track]:
-        track = session.get(Track, track_id)
-        if not track:
-            return None
-        
-        track.genre = genre
-        track.is_genre_verified = True
-        session.add(track)
-        session.commit()
-        session.refresh(track)
+class TrackRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_by_id(self, track_id: int) -> Optional[Track]:
+        return self.session.get(Track, track_id)
+
+    def find_all(self, offset: int = 0, limit: int = 100) -> List[Track]:
+        return self.session.exec(select(Track).offset(offset).limit(limit)).all()
+
+    def update_genre(self, track_id: int, genre: str, verified: bool = True) -> Optional[Track]:
+        track = self.get_by_id(track_id)
+        if track:
+            track.genre = genre
+            track.is_genre_verified = verified
+            self.session.add(track)
+            self.session.commit()
+            self.session.refresh(track)
         return track
 
-    def get_similar_tracks(self, session: Session, track_id: int, limit: int = 20) -> List[Track]:
+    def get_similar_tracks(self, track_id: int, limit: int = 20) -> List[Track]:
         """
         Vector Search: Find tracks similar to the given track_id using embeddings.
         """
         # 1. Get target embedding
-        target_embedding = session.exec(
+        target_embedding = self.session.exec(
             select(TrackEmbedding).where(TrackEmbedding.track_id == track_id)
         ).first()
         
@@ -50,16 +53,15 @@ class TrackService:
             query = query.order_by(text(f"array_cosine_similarity(CAST(track_embeddings.embedding_json AS FLOAT[200]), CAST('{vec_str}' AS FLOAT[200])) DESC"))
             query = query.limit(limit)
             
-            results = session.exec(query).all()
+            results = self.session.exec(query).all()
             return results
 
         except Exception as e:
             print(f"Vector search error: {e}")
             raise e
 
-    def get_tracks(
+    def search_tracks(
         self,
-        session: Session,
         status: str = "all",
         title: Optional[str] = None,
         artist: Optional[str] = None,
@@ -76,47 +78,34 @@ class TrackService:
         max_danceability: Optional[float] = None,
         min_brightness: Optional[float] = None,
         max_brightness: Optional[float] = None,
-        vibe_prompt: Optional[str] = None,
+        target_params: Optional[Dict[str, float]] = None,
         limit: int = 100, 
         offset: int = 0
     ) -> List[Track]:
-        start_time = time.time()
-        print(f"DEBUG: Start get_tracks")
-
         query = select(Track)
         
         # Vibe Search Logic (Sort by similarity to inferred features)
-        if vibe_prompt:
-            # LLM Model setting
-            model_name = get_setting_value(session, "llm_model") or "llama3.2"
-            target_params = generate_vibe_parameters(vibe_prompt, model_name=model_name, session=session)
+        if target_params:
+            # Calculate Euclidean Distance Squared
+            dist_expr = 0
             
-            print(f"DEBUG: Target Params: {target_params}") # Debug log
-
-            if target_params:
-                # Calculate Euclidean Distance Squared
-                dist_expr = 0
+            if "bpm" in target_params and target_params["bpm"] > 0:
+                dist_expr += (Track.bpm - target_params["bpm"]) * (Track.bpm - target_params["bpm"]) * 0.0001
+            
+            if "energy" in target_params:
+                dist_expr += (Track.energy - target_params["energy"]) * (Track.energy - target_params["energy"])
                 
-                if "bpm" in target_params and target_params["bpm"] > 0:
-                    dist_expr += (Track.bpm - target_params["bpm"]) * (Track.bpm - target_params["bpm"]) * 0.0001
+            if "danceability" in target_params:
+                dist_expr += (Track.danceability - target_params["danceability"]) * (Track.danceability - target_params["danceability"])
                 
-                if "energy" in target_params:
-                    dist_expr += (Track.energy - target_params["energy"]) * (Track.energy - target_params["energy"])
-                    
-                if "danceability" in target_params:
-                    dist_expr += (Track.danceability - target_params["danceability"]) * (Track.danceability - target_params["danceability"])
-                    
-                if "brightness" in target_params:
-                    dist_expr += (Track.brightness - target_params["brightness"]) * (Track.brightness - target_params["brightness"])
-                    
-                if "noisiness" in target_params:
-                    dist_expr += (Track.noisiness - target_params["noisiness"]) * (Track.noisiness - target_params["noisiness"])
+            if "brightness" in target_params:
+                dist_expr += (Track.brightness - target_params["brightness"]) * (Track.brightness - target_params["brightness"])
+                
+            if "noisiness" in target_params:
+                dist_expr += (Track.noisiness - target_params["noisiness"]) * (Track.noisiness - target_params["noisiness"])
 
-                # Sort by distance (ASC)
-                query = query.order_by(dist_expr)
-            else:
-                # Fallback if LLM fails
-                query = query.order_by(Track.created_at.desc())
+            # Sort by distance (ASC)
+            query = query.order_by(dist_expr)
         else:
             # Default Sort
             query = query.order_by(Track.created_at.desc())
@@ -180,12 +169,4 @@ class TrackService:
         
         query = query.offset(offset).limit(limit)
         
-        query_build_time = time.time()
-        print(f"DEBUG: Query built in {query_build_time - start_time:.4f}s")
-        
-        tracks = session.exec(query).all()
-        
-        query_exec_time = time.time()
-        print(f"DEBUG: Query executed in {query_exec_time - query_build_time:.4f}s. Fetched {len(tracks)} tracks.")
-        
-        return tracks
+        return self.session.exec(query).all()

@@ -31,7 +31,7 @@ def test_genres_batch_llm_analyze(client: TestClient, session: Session, mocker):
     session.commit()
 
     # ID|Genre 形式のレスポンスをシミュレート
-    mock_gen = mocker.patch("services.genres.generate_text", return_value=f"{t1.id}|Deep House")
+    mock_gen = mocker.patch("app.services.genre_app_service.generate_text", return_value=f"{t1.id}|Deep House")
     
     response = client.post("/api/genres/batch-llm-analyze", json={"track_ids": [t1.id]})
     assert response.status_code == 200
@@ -62,4 +62,4 @@ def test_settings_import_presets(client: TestClient, session: Session):
     exec_req = {"new_presets": data["new_presets"], "updates": []}
     res = client.post("/api/settings/presets/import/execute", json=exec_req)
     assert res.status_code == 200
-    assert res.json()["updated"] == 1
+    assert res.json()["imported"] == 1

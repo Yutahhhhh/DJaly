@@ -5,38 +5,42 @@ from typing import List, Optional, Dict, Any
 import re
 import urllib.parse
 
-from db import get_session
-from models import Setlist
-from services.setlists import SetlistService
+from infra.database.connection import get_session
+from domain.models.setlist import Setlist
+from app.services.setlist_app_service import SetlistAppService
 
 router = APIRouter()
-setlist_service = SetlistService()
 
 @router.get("/api/setlists")
 def get_setlists(session: Session = Depends(get_session)):
-    return setlist_service.get_setlists(session)
+    service = SetlistAppService(session)
+    return service.get_setlists()
 
 @router.post("/api/setlists")
 def create_setlist(name: str = Body(embed=True), session: Session = Depends(get_session)):
-    return setlist_service.create_setlist(session, name)
+    service = SetlistAppService(session)
+    return service.create_setlist(name)
 
 @router.put("/api/setlists/{setlist_id}")
 def update_setlist(setlist_id: int, setlist_data: Dict[str, Any], session: Session = Depends(get_session)):
-    setlist = setlist_service.update_setlist(session, setlist_id, setlist_data)
+    service = SetlistAppService(session)
+    setlist = service.update_setlist(setlist_id, setlist_data)
     if not setlist:
         raise HTTPException(status_code=404, detail="Setlist not found")
     return setlist
 
 @router.delete("/api/setlists/{setlist_id}")
 def delete_setlist(setlist_id: int, session: Session = Depends(get_session)):
-    success = setlist_service.delete_setlist(session, setlist_id)
+    service = SetlistAppService(session)
+    success = service.delete_setlist(setlist_id)
     if not success:
         raise HTTPException(status_code=404, detail="Setlist not found")
     return {"ok": True}
 
 @router.get("/api/setlists/{setlist_id}/tracks")
 def get_setlist_tracks(setlist_id: int, session: Session = Depends(get_session)):
-    return setlist_service.get_setlist_tracks(session, setlist_id)
+    service = SetlistAppService(session)
+    return service.get_setlist_tracks(setlist_id)
 
 @router.post("/api/setlists/{setlist_id}/tracks")
 def update_setlist_tracks(
@@ -44,7 +48,8 @@ def update_setlist_tracks(
     track_ids: List[int] = Body(...), 
     session: Session = Depends(get_session)
 ):
-    success = setlist_service.update_setlist_tracks(session, setlist_id, track_ids)
+    service = SetlistAppService(session)
+    success = service.update_setlist_tracks(setlist_id, track_ids)
     if not success:
         raise HTTPException(status_code=404, detail="Setlist not found")
     return {"status": "success"}
@@ -54,11 +59,12 @@ def export_setlist_m3u8(setlist_id: int, session: Session = Depends(get_session)
     """
     Rekordbox等のためのM3U8プレイリストをダウンロードする
     """
+    service = SetlistAppService(session)
     try:
-        content = setlist_service.export_as_m3u8(session, setlist_id)
+        content = service.export_as_m3u8(setlist_id)
         
         # セットリスト名を取得してファイル名にする
-        setlist = session.get(Setlist, setlist_id)
+        setlist = service.repository.get_by_id(setlist_id)
         filename = f"{setlist.name}.m3u8" if setlist else "playlist.m3u8"
         # ファイル名に使えない文字を置換
         filename = re.sub(r'[\\/*?:"<>|]', "", filename)
@@ -83,8 +89,9 @@ def recommend_next_track(
     指定された曲に続く、相性の良い曲を提案する。
     Hybrid Scoring (Vector + BPM + Key) を使用。
     """
+    service = SetlistAppService(session)
     try:
-        return setlist_service.recommend_next_track(session, track_id, limit, preset_id, genres)
+        return service.recommend_next_track(track_id, limit, preset_id, genres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -99,8 +106,9 @@ def generate_auto_setlist(
     """
     プリセット(LLM解析)とChain Builderアルゴリズムに基づいてセットリストを自動生成する。
     """
+    service = SetlistAppService(session)
     try:
-        return setlist_service.generate_auto_setlist(session, preset_id, limit, seed_track_ids, genres)
+        return service.generate_auto_setlist(preset_id, limit, seed_track_ids, genres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -115,7 +123,8 @@ def generate_path_setlist(
     """
     2曲間を繋ぐセットリストを生成する (Pathfinding)
     """
+    service = SetlistAppService(session)
     try:
-        return setlist_service.generate_path_setlist(session, start_track_id, end_track_id, length, genres)
+        return service.generate_path_setlist(start_track_id, end_track_id, length, genres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

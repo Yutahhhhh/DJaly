@@ -25,7 +25,6 @@ import { presetsService, Preset } from "@/services/presets";
 import { TrackRow } from "../TrackRow";
 import { Badge } from "@/components/ui/badge";
 import { DropZone } from "./DropZone";
-import { useDragDrop, parseTrackData } from "@/hooks/useDragDrop";
 
 interface AutoTabProps {
   currentSetlistTracks: Track[];
@@ -33,6 +32,12 @@ interface AutoTabProps {
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   onPlay: (track: Track) => void;
   currentTrackId?: number | null;
+  bridgeState?: {
+    start: Track | null;
+    end: Track | null;
+    setStart: (t: Track | null) => void;
+    setEnd: (t: Track | null) => void;
+  };
 }
 
 export function AutoTab({
@@ -41,6 +46,7 @@ export function AutoTab({
   onInjectTracks,
   onPlay,
   currentTrackId,
+  bridgeState,
 }: AutoTabProps) {
   const [mode, setMode] = useState<"infinite" | "bridge">("infinite");
 
@@ -56,22 +62,14 @@ export function AutoTab({
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
 
-  // Bridge Mode State
-  const [startTrack, setStartTrack] = useState<Track | null>(null);
-  const [endTrack, setEndTrack] = useState<Track | null>(null);
+  // Bridge Mode State (Fallback if bridgeState not provided)
+  const [localStart, setLocalStart] = useState<Track | null>(null);
+  const [localEnd, setLocalEnd] = useState<Track | null>(null);
 
-  // Drag State
-  const { isDraggingOver: isStartDragging, dragHandlers: startDragHandlers } =
-    useDragDrop<Track>({
-      onDrop: (track) => setStartTrack(track),
-      parseData: parseTrackData,
-    });
-
-  const { isDraggingOver: isEndDragging, dragHandlers: endDragHandlers } =
-    useDragDrop<Track>({
-      onDrop: (track) => setEndTrack(track),
-      parseData: parseTrackData,
-    });
+  const startTrack = bridgeState?.start ?? localStart;
+  const endTrack = bridgeState?.end ?? localEnd;
+  const setStartTrack = bridgeState?.setStart ?? setLocalStart;
+  const setEndTrack = bridgeState?.setEnd ?? setLocalEnd;
 
   useEffect(() => {
     presetsService.getAll("generation", true).then((data) => {
@@ -156,13 +154,7 @@ export function AutoTab({
   };
 
   return (
-    <div
-      className="flex-1 flex flex-col p-0 m-0 min-h-0 bg-background"
-      onDragOver={(e) => {
-        e.preventDefault();
-        console.log("AutoTab: Global DragOver");
-      }}
-    >
+    <div className="flex-1 flex flex-col p-0 m-0 min-h-0 bg-background">
       <Tabs
         value={mode}
         onValueChange={(v) => setMode(v as any)}
@@ -214,20 +206,18 @@ export function AutoTab({
               <div className="flex items-center justify-between gap-2">
                 {/* Start Drop Zone */}
                 <DropZone
+                  id="bridge-start"
                   label="START"
                   track={startTrack}
-                  isDraggingOver={isStartDragging}
-                  {...startDragHandlers}
                 />
 
                 <ArrowRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
 
                 {/* End Drop Zone */}
                 <DropZone
+                  id="bridge-end"
                   label="END"
                   track={endTrack}
-                  isDraggingOver={isEndDragging}
-                  {...endDragHandlers}
                 />
               </div>
             </div>

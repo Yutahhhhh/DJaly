@@ -21,9 +21,9 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from main import app
-from db import get_session, engine as prod_engine
-import db
-import migrations
+from infra.database.connection import get_session, engine as prod_engine
+import infra.database.connection as db
+import infra.database.migrations as migrations
 from models import Track, TrackAnalysis, Setlist, SetlistTrack, Preset, Prompt, Setting
 
 # テスト用のエンジン（StaticPoolを使用して、単一の接続を全テストで共有）

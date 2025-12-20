@@ -1,8 +1,8 @@
 import pytest
 import numpy as np
 import json
-from services.analysis.analyzer import AudioAnalyzer
-from services.ingestion_manager import IngestionManager
+from domain.services.analysis.analyzer import AudioAnalyzer
+from app.services.ingestion_app_service import IngestionAppService as IngestionManager
 from sqlmodel import Session
 from models import Track
 

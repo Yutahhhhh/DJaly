@@ -48,7 +48,7 @@ def test_llm_analyze(client: TestClient, session: Session, mocker):
     # generate_textの結果をパースしてジャンルを抽出しているはず。
     # ここでは特定のレスポンスを返すようにモックを上書きする。
     
-    mock_gen = mocker.patch("services.genres.generate_text")
+    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
     mock_gen.return_value = '{"genre": "Minimal Techno", "reason": "It sounds minimal.", "confidence": "High"}'
     
     t1 = Track(filepath="/l1.mp3", title="L1", artist="A", album="B", genre="Unknown", bpm=120, duration=100)

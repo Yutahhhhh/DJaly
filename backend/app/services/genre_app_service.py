@@ -1,39 +1,43 @@
 from typing import List, Optional, Dict, Any
-from sqlmodel import Session, select
+from sqlmodel import Session
 import json
 import re
-from collections import defaultdict, Counter
+from collections import defaultdict
 
-from constants import GENRE_ABBREVIATIONS, GENRE_SEPARATORS_REGEX
-from models import Track
-from schemas.genres import (
+from domain.models.track import Track
+from infra.repositories.genre_repository import GenreRepository
+from infra.repositories.track_repository import TrackRepository
+from api.schemas.genres import (
     GenreAnalysisResponse, 
     GenreBatchUpdateRequest, 
     GenreCleanupGroup, 
     TrackSuggestion,
-    GenreBatchAnalysisResponse,
-    GenreBatchAnalysisItem,
     GenreUpdateResult
 )
 from utils.llm import generate_text
 from utils.metadata import update_file_genre
 from utils.logger import get_logger
+from domain.constants import GENRE_ABBREVIATIONS, GENRE_SEPARATORS_REGEX
 
 logger = get_logger(__name__)
 
-class GenreService:
-    def get_unknown_tracks(self, session: Session, offset: int = 0, limit: int = 50) -> List[Track]:
-        statement = select(Track).where(Track.is_genre_verified == False).offset(offset).limit(limit)
-        tracks = session.exec(statement).all()
-        return tracks
+class GenreAppService:
+    def __init__(self, session: Session):
+        self.session = session
+        self.repository = GenreRepository(session)
+        self.track_repository = TrackRepository(session)
 
-    def get_all_unknown_track_ids(self, session: Session) -> List[int]:
-        statement = select(Track.id).where(Track.is_genre_verified == False)
-        return session.exec(statement).all()
+    def get_unknown_tracks(self, offset: int = 0, limit: int = 50) -> List[Track]:
+        return self.repository.get_unknown_tracks(offset, limit)
 
-    def analyze_track_with_llm(self, session: Session, track_id: int, overwrite: bool = False) -> GenreAnalysisResponse:
-        # 単体解析は詳細な理由が欲しい場合もあるのでJSON形式を維持
-        track = session.get(Track, track_id)
+    def get_all_unknown_track_ids(self) -> List[int]:
+        return self.repository.get_all_unknown_track_ids()
+
+    def get_all_genres(self) -> List[str]:
+        return self.repository.get_all_unique_genres()
+
+    def analyze_track_with_llm(self, track_id: int, overwrite: bool = False) -> GenreAnalysisResponse:
+        track = self.track_repository.get_by_id(track_id)
         if not track:
             raise ValueError("Track not found")
         
@@ -77,9 +81,8 @@ class GenreService:
         Output ONLY the JSON string.
         """
         
-        raw_response = generate_text(session, prompt)
+        raw_response = generate_text(self.session, prompt)
         
-        # エラーハンドリング
         if raw_response.startswith("API_ERROR:") or raw_response.startswith("CONNECTION_ERROR:") or raw_response.startswith("BLOCKED:"):
             logger.error(f"Single Analysis Failed: {raw_response}")
             raise RuntimeError(raw_response)
@@ -93,49 +96,35 @@ class GenreService:
             data = json.loads(cleaned_response)
             response = GenreAnalysisResponse(**data)
             
-            # Update track if overwrite is True or current genre is Unknown/None
             current_genre = track.genre or "Unknown"
             if overwrite or current_genre.lower() == "unknown":
                 track.genre = response.genre
                 track.is_genre_verified = True
-                session.add(track)
-                session.commit()
-                session.refresh(track)
+                self.session.add(track)
+                self.session.commit()
+                self.session.refresh(track)
                 
             return response
         except Exception as e:
             logger.error(f"LLM JSON Parse Error: {e}, Raw: {raw_response}")
             raise RuntimeError(f"Failed to parse LLM response: {str(e)}")
 
-    def analyze_tracks_batch_with_llm(self, session: Session, track_ids: List[int]) -> List[GenreUpdateResult]:
-        """
-        [High Efficiency Mode]
-        トークン効率を最大化するため、JSONではなく `ID|Genre` 形式のテキストでやり取りする。
-        LLMから解析結果が得られたら、即座にDBの Track テーブルを更新する。
-        実際にジャンルが変更されたトラックの情報をリストとして返す。
-        """
+    def analyze_tracks_batch_with_llm(self, track_ids: List[int]) -> List[GenreUpdateResult]:
         if not track_ids:
             return []
 
-        statement = select(Track).where(Track.id.in_(track_ids))
-        tracks = session.exec(statement).all()
-        
+        tracks = self.repository.get_tracks_by_ids(track_ids)
         if not tracks:
             return []
 
-        # 入力データをコンパクトなリストにする
         track_lines = []
         for t in tracks:
-            # パイプ記号が含まれているとフォーマットが崩れるので置換
             safe_title = (t.title or "").replace("|", " ")
             safe_artist = (t.artist or "").replace("|", " ")
-            
             bpm_str = f"{int(t.bpm)}" if t.bpm and t.bpm > 0 else ""
-            
             def safe_float(val):
                 return f"{val:.2f}" if val is not None else "0.00"
 
-            # ID|Title|Artist|BPM|Key|Scale|Energy|Dance|Loud|Bright|Noise|Contrast
             features = [
                 str(t.id), safe_title, safe_artist, bpm_str, 
                 t.key or "", t.scale or "",
@@ -168,37 +157,27 @@ class GenreService:
         - No markdown, no header, no extra text.
         """
 
-        raw_response = generate_text(session, prompt)
+        raw_response = generate_text(self.session, prompt)
         
-        # エラーチェック
         if raw_response.startswith("API_ERROR:") or raw_response.startswith("CONNECTION_ERROR:") or raw_response.startswith("BLOCKED:"):
             logger.error(f"Batch Analysis Failed: {raw_response}")
             raise RuntimeError(raw_response)
 
-        # パース結果を一時保存
         new_genres_map = {}
-        
-        # 行ごとの解析（非常に堅牢かつ高速）
         lines = raw_response.strip().split('\n')
         
         for line in lines:
             line = line.strip()
             if not line: continue
-            
-            # "123|GenreName" の形式を探す
             parts = line.split('|')
             if len(parts) >= 2:
                 try:
-                    # ID部分は数値であることを確認
                     t_id_str = parts[0].strip()
-                    # まれに "1. 123" のような形式で来る場合があるので数字だけ抽出
                     t_id_match = re.search(r'\d+', t_id_str)
                     if not t_id_match: continue
                     
                     track_id = int(t_id_match.group(0))
                     genre = parts[1].strip()
-                    
-                    # ジャンル名のクリーニング（余計な記号削除）
                     genre = re.sub(r'^[\"\']|[\"\']$', '', genre)
                     
                     if genre and genre.lower() != "unknown":
@@ -210,7 +189,6 @@ class GenreService:
         if not new_genres_map and raw_response:
             logger.error(f"No valid lines parsed from response. Raw: {raw_response}")
             
-        # DB更新と結果リスト作成
         updated_results = []
         
         for track in tracks:
@@ -220,10 +198,8 @@ class GenreService:
                 
             old_genre = track.genre or "Unknown"
             
-            # 変更がある場合のみ更新・記録
             if old_genre != new_genre:
                 track.genre = new_genre
-                
                 updated_results.append(GenreUpdateResult(
                     track_id=track.id,
                     title=track.title,
@@ -232,11 +208,10 @@ class GenreService:
                     new_genre=new_genre
                 ))
             
-            # ジャンルが変更されなくても、LLMによる分析が完了したのでVerifiedにする
             track.is_genre_verified = True
-            session.add(track)
+            self.session.add(track)
         
-        session.commit()
+        self.session.commit()
         logger.info(f"Batch analyzed {len(tracks)} tracks. Updated {len(updated_results)} tracks.")
         
         return updated_results
@@ -258,66 +233,53 @@ class GenreService:
             
         return text.strip()
 
-    def batch_update_genres(self, session: Session, request: GenreBatchUpdateRequest) -> Dict[str, Any]:
-        parent_track = session.get(Track, request.parent_track_id)
+    def batch_update_genres(self, request: GenreBatchUpdateRequest) -> Dict[str, Any]:
+        parent_track = self.track_repository.get_by_id(request.parent_track_id)
         if not parent_track:
             raise ValueError("Parent track not found")
             
         if not parent_track.genre:
             raise ValueError("Parent track has no genre")
             
-        statement = select(Track).where(Track.id.in_(request.target_track_ids))
-        targets = session.exec(statement).all()
+        targets = self.repository.get_tracks_by_ids(request.target_track_ids)
         
         updated_count = 0
         for track in targets:
             track.genre = parent_track.genre
             track.is_genre_verified = True
-            session.add(track)
+            self.session.add(track)
             updated_count += 1
             
-        session.commit()
+        self.session.commit()
         
         return {"updated_count": updated_count, "genre": parent_track.genre}
 
-    def execute_cleanup(self, session: Session, target_genre: str, track_ids: List[int]) -> Dict[str, Any]:
-        statement = select(Track).where(Track.id.in_(track_ids))
-        targets = session.exec(statement).all()
+    def execute_cleanup(self, target_genre: str, track_ids: List[int]) -> Dict[str, Any]:
+        targets = self.repository.get_tracks_by_ids(track_ids)
         
         updated_count = 0
         for track in targets:
             track.genre = target_genre
             track.is_genre_verified = True 
-            session.add(track)
+            self.session.add(track)
             updated_count += 1
             
-        session.commit()
+        self.session.commit()
         return {"updated_count": updated_count, "genre": target_genre}
 
-    def get_cleanup_suggestions(self, session: Session) -> List[GenreCleanupGroup]:
-        tracks = session.exec(select(Track).where(Track.genre != None).where(Track.genre != "Unknown")).all()
+    def get_cleanup_suggestions(self) -> List[GenreCleanupGroup]:
+        tracks = self.repository.get_all_tracks_with_genre()
         
         groups = defaultdict(lambda: defaultdict(list))
         
         def normalize_genre(g: str) -> str:
-            # 1. Lowercase
             s = g.lower()
-            
-            # 2. Expand common abbreviations
             for pattern, replacement in GENRE_ABBREVIATIONS:
                 s = re.sub(pattern, replacement, s)
-
-            # 3. Replace & with and for consistent tokenization
-            # Add spaces to ensure "R&B" becomes "R and B" not "RandB"
             s = s.replace('&', ' and ')
-            
-            # 4. Split by separators
             tokens = re.split(GENRE_SEPARATORS_REGEX, s)
-            # 5. Remove empty tokens
             tokens = [t for t in tokens if t]
-            # 6. Sort tokens to ignore word order
             tokens.sort()
-            # 7. Join
             return "".join(tokens)
 
         for t in tracks:
@@ -334,11 +296,11 @@ class GenreService:
             sorted_variants = sorted(
                 variants.keys(), 
                 key=lambda k: (
-                    0 if '&' in k else 1,                       # 1. Prefer '&' (High Priority)
-                    1 if re.search(r'\band\b', k.lower()) else 0, # 2. Avoid word 'and'
-                    -len(variants[k]),                          # 3. Track count (desc)
-                    len(k),                                     # 4. Length (asc)
-                    k                                           # 5. Alphabetical
+                    0 if '&' in k else 1,
+                    1 if re.search(r'\band\b', k.lower()) else 0,
+                    -len(variants[k]),
+                    len(k),
+                    k
                 )
             )
             primary_genre = sorted_variants[0]
@@ -371,17 +333,16 @@ class GenreService:
         
         return cleanup_candidates
 
-    def apply_genres_to_files(self, session: Session, track_ids: List[int]) -> Dict[str, int]:
+    def apply_genres_to_files(self, track_ids: List[int]) -> Dict[str, int]:
         success_count = 0
         fail_count = 0
         
         if not track_ids:
-            statement = select(Track).where(Track.genre != None)
-            tracks = session.exec(statement).all()
+            tracks = self.repository.get_all_tracks_with_genre_any()
         else:
             tracks = []
             for tid in track_ids:
-                t = session.get(Track, tid)
+                t = self.track_repository.get_by_id(tid)
                 if t:
                     tracks.append(t)
         
@@ -396,8 +357,3 @@ class GenreService:
                 fail_count += 1
                 
         return {"success": success_count, "failed": fail_count}
-
-    def get_all_genres(self, session: Session) -> List[str]:
-        statement = select(Track.genre).where(Track.genre != None).distinct()
-        genres = session.exec(statement).all()
-        return sorted([g for g in genres if g])

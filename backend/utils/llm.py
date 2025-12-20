@@ -5,7 +5,7 @@ import os
 from typing import Optional, Dict, Any, Tuple
 from sqlmodel import Session
 from config import settings
-from db import get_setting_value
+from infra.database.connection import get_setting_value
 import ollama
 from utils.logger import get_logger
 

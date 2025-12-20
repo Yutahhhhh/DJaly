@@ -231,14 +231,12 @@ export function SetlistCreator({
               currentSetlistTracks={tracks}
               onPlay={onPlay}
               currentTrackId={currentTrackId}
-              {...({
-                bridgeState: {
-                  start: bridgeStart,
-                  end: bridgeEnd,
-                  setStart: setBridgeStart,
-                  setEnd: setBridgeEnd,
-                },
-              } as any)}
+              bridgeState={{
+                start: bridgeStart,
+                end: bridgeEnd,
+                setStart: setBridgeStart,
+                setEnd: setBridgeEnd,
+              }}
             />
           </>
         ) : (

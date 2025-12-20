@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from services.ingestion_manager import ingestion_manager
+from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
 
 @pytest.mark.asyncio
 async def test_ingest_start(client: TestClient, mocker):

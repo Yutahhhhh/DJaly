@@ -62,17 +62,17 @@ def test_get_track_metadata(client: TestClient, session: Session, tmp_path):
     #    pass
 
     # 今回は fs_service.get_track_metadata をモックする
-    from services.filesystem import FilesystemService
+    from app.services.filesystem_app_service import FilesystemAppService
     
     # MonkeyPatch
-    original_method = FilesystemService.get_track_metadata
+    original_method = FilesystemAppService.get_track_metadata
     
-    def mock_get_metadata(self, session, track_id):
+    def mock_get_metadata(self, track_id):
         if track_id == track.id:
             return {"title": "Mock Title", "artist": "Mock Artist"}
         return None
         
-    FilesystemService.get_track_metadata = mock_get_metadata
+    FilesystemAppService.get_track_metadata = mock_get_metadata
     
     try:
         response = client.get("/api/metadata", params={"track_id": track.id})
@@ -82,7 +82,7 @@ def test_get_track_metadata(client: TestClient, session: Session, tmp_path):
         response = client.get("/api/metadata", params={"track_id": 9999})
         assert response.status_code == 404
     finally:
-        FilesystemService.get_track_metadata = original_method
+        FilesystemAppService.get_track_metadata = original_method
 
 def test_list_directory(client: TestClient, session: Session, tmp_path):
     # ディレクトリ構造作成

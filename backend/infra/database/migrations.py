@@ -2,7 +2,7 @@ import logging
 import json
 from sqlalchemy import text
 from sqlmodel import Session, select
-from db import engine
+from infra.database.connection import engine
 from models import Prompt, Preset
 
 logger = logging.getLogger(__name__)
