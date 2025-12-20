@@ -139,11 +139,13 @@ export function RecommendTab({
             <div className="pb-10">
               {recTracks.map((t) => (
                 <TrackRow
-                  key={t.id}
+                  key={`rec-${t.id}`}
+                  id={`rec-${t.id}`}
                   track={t}
-                  currentTrackId={currentTrackId}
-                  onPlay={onPlay}
-                  onAddTrack={onAddTrack}
+                  type="LIBRARY_ITEM"
+                  isPlaying={currentTrackId === t.id}
+                  onPlay={() => onPlay(t)}
+                  onAdd={() => onAddTrack(t)}
                 />
               ))}
             </div>

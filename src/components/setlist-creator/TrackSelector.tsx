@@ -31,7 +31,14 @@ export function TrackSelector({
   }, []);
 
   return (
-    <div className="w-[400px] border-l bg-background flex flex-col shadow-xl z-20 h-full">
+    <div
+      className="w-[400px] border-l bg-background flex flex-col shadow-xl z-50 h-full"
+      onDragOver={(e) => {
+        e.preventDefault();
+        console.log("TrackSelector: DragOver");
+      }}
+      onDragEnter={() => console.log("TrackSelector: DragEnter")}
+    >
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}

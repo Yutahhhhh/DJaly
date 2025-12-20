@@ -423,12 +423,12 @@ export function SettingsView() {
                     }
                     className="bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     <div>
                       Please install Ollama and run it in the background
                     </div>
                     <code>Default: http://localhost:11434</code>
-                  </p>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2 animate-in fade-in">

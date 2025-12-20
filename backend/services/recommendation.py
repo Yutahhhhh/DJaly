@@ -282,6 +282,12 @@ class RecommendationEngine:
         if "danceability" in vibe_params:
             order_clauses.append(f"ABS(t.danceability - {vibe_params['danceability']})")
 
+        if "brightness" in vibe_params:
+            order_clauses.append(f"ABS(t.brightness - {vibe_params['brightness']})")
+
+        if "noisiness" in vibe_params:
+            order_clauses.append(f"ABS(t.noisiness - {vibe_params['noisiness']})")
+
         if order_clauses:
             query_str += " ORDER BY (" + " + ".join(order_clauses) + ") ASC"
         else:

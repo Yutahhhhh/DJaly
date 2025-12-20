@@ -1,25 +1,49 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  DndContext,
+  DragEndEvent,
+  MouseSensor,
+  useSensor,
+  useSensors,
+  rectIntersection,
+  DragOverEvent,
+  DragStartEvent,
+  DragOverlay,
+} from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
+
 import { SetlistSidebar } from "./SetlistSidebar";
 import { SetlistEditor } from "./SetlistEditor";
 import { TrackSelector } from "./TrackSelector";
+import { TrackRow } from "./TrackRow";
 import { setlistsService, Setlist } from "@/services/setlists";
 import { Track } from "@/types";
-
-interface SetlistCreatorProps {
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
-}
 
 export function SetlistCreator({
   onPlay,
   currentTrackId,
-}: SetlistCreatorProps) {
+}: {
+  onPlay: (track: Track) => void;
+  currentTrackId?: number | null;
+}) {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [activeSetlist, setActiveSetlist] = useState<Setlist | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
-
-  // Selection State for Recommendation
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+
+  const [activeDragItem, setActiveDragItem] = useState<{
+    track: Track;
+    type: string;
+  } | null>(null);
+  const [bridgeStart, setBridgeStart] = useState<Track | null>(null);
+  const [bridgeEnd, setBridgeEnd] = useState<Track | null>(null);
+
+  // 【速度改善】 MouseSensor を使用し、WebKitの遅延を最小化
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  );
 
   useEffect(() => {
     loadSetlists();
@@ -38,148 +62,205 @@ export function SetlistCreator({
     const setlist = setlists.find((s) => s.id === id);
     if (setlist) {
       setActiveSetlist(setlist);
+      const t = await setlistsService.getTracks(id);
+      setTracks(t);
+      setSelectedTrack(null);
+    }
+  };
+
+  const commitTracksToDB = async (newTracks: Track[]) => {
+    setTracks(newTracks);
+    if (activeSetlist) {
       try {
-        const t = await setlistsService.getTracks(id);
-        setTracks(t);
-        setSelectedTrack(null);
+        await setlistsService.updateTracks(
+          activeSetlist.id,
+          newTracks.map((t) => t.id)
+        );
       } catch (e) {
         console.error(e);
       }
     }
   };
 
-  const handleCreateSetlist = async (name: string) => {
-    try {
-      const newSetlist = await setlistsService.create(name);
-      setSetlists([newSetlist, ...setlists]);
-      handleSelectSetlist(newSetlist.id);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveDragItem(event.active.data.current as any);
+  }, []);
 
-  const handleUpdateName = async (id: number, name: string) => {
-    try {
-      const updated = await setlistsService.update(id, { name });
-      setSetlists(setlists.map((s) => (s.id === id ? updated : s)));
-      if (activeSetlist?.id === id) setActiveSetlist(updated);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  // 【モーションの肝】 ドラッグ中に配列を操作して「避ける」動きを作る
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { active, over } = event;
+      if (!over || !activeSetlist) return;
 
-  const handleDeleteSetlist = async (id: number) => {
-    if (!confirm("Are you sure?")) return;
-    try {
-      await setlistsService.delete(id);
-      setSetlists(setlists.filter((s) => s.id !== id));
-      if (activeSetlist?.id === id) {
-        setActiveSetlist(null);
-        setTracks([]);
+      const activeData = active.data.current;
+      const overData = over.data.current;
+
+      // ライブラリからセットリストのアイテムの上に重なった時
+      if (
+        activeData?.type === "LIBRARY_ITEM" &&
+        overData?.type === "SETLIST_ITEM"
+      ) {
+        const track = activeData.track as Track;
+        const overId = over.id as string;
+
+        const isAlreadyInList = tracks.some((t) => t.id === track.id);
+        const overIndex = tracks.findIndex((t) => `setlist-${t.id}` === overId);
+
+        if (!isAlreadyInList) {
+          // まだリストにない曲なら、その位置にプレビューとして挿入
+          const newTracks = [...tracks];
+          newTracks.splice(overIndex, 0, track);
+          setTracks(newTracks);
+        } else {
+          // すでにリストにある（移動中）なら位置を入れ替え
+          const oldIndex = tracks.findIndex((t) => t.id === track.id);
+          if (oldIndex !== overIndex) {
+            setTracks(arrayMove(tracks, oldIndex, overIndex));
+          }
+        }
       }
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
-  // --- Track Manipulation ---
-
-  const saveTracks = async (newTracks: Track[]) => {
-    setTracks(newTracks);
-    if (activeSetlist) {
-      const ids = newTracks.map((t) => t.id);
-      try {
-        await setlistsService.updateTracks(activeSetlist.id, ids);
-      } catch (e) {
-        console.error("Failed to save setlist", e);
+      // セットリスト内での並べ替えプレビュー
+      if (
+        activeData?.type === "SETLIST_ITEM" &&
+        overData?.type === "SETLIST_ITEM"
+      ) {
+        if (active.id !== over.id) {
+          const oldIndex = tracks.findIndex(
+            (t) => `setlist-${t.id}` === active.id
+          );
+          const newIndex = tracks.findIndex(
+            (t) => `setlist-${t.id}` === over.id
+          );
+          setTracks(arrayMove(tracks, oldIndex, newIndex));
+        }
       }
-    }
-  };
+    },
+    [tracks, activeSetlist]
+  );
 
-  const handleAddTrack = (track: Track) => {
-    if (!activeSetlist) return;
-    const newTracks = [...tracks, track];
-    saveTracks(newTracks);
-    setSelectedTrack(track);
-  };
-
-  // ★ 修正: トラック挿入ロジック
-  const handleInjectTracks = (
-    newTracks: Track[],
-    startTrackId?: number,
-    _endTrackId?: number
-  ) => {
-    if (!activeSetlist) return;
-
-    let updatedList = [...tracks];
-
-    if (startTrackId) {
-      // Startの直後(Index + 1)に挿入
-      const startIndex = updatedList.findIndex((t) => t.id === startTrackId);
-      if (startIndex !== -1) {
-        updatedList.splice(startIndex + 1, 0, ...newTracks);
-      } else {
-        // Startが見つからない場合は末尾
-        updatedList = [...updatedList, ...newTracks];
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveDragItem(null);
+      if (!over) {
+        // どこにもドロップされなかった場合、リロードしてプレビューをリセット
+        if (activeSetlist) handleSelectSetlist(activeSetlist.id);
+        return;
       }
-    } else {
-      // 指定がなければ末尾
-      updatedList = [...updatedList, ...newTracks];
-    }
 
-    saveTracks(updatedList);
-  };
+      const activeData = active.data.current;
+      const overId = over.id as string;
 
-  const handleRemoveTrack = (index: number) => {
-    const newTracks = [...tracks];
-    newTracks.splice(index, 1);
-    saveTracks(newTracks);
-  };
+      // 【確定保存】 ここで初めてDBに書き込む
+      if (
+        activeData?.type === "SETLIST_ITEM" ||
+        activeData?.type === "LIBRARY_ITEM"
+      ) {
+        if (
+          over.data.current?.type === "SETLIST_ITEM" ||
+          over.id === "setlist-editor-droppable"
+        ) {
+          commitTracksToDB(tracks);
+          return;
+        }
+      }
 
-  const handleReorder = (dragIndex: number, hoverIndex: number) => {
-    const newTracks = [...tracks];
-    const [removed] = newTracks.splice(dragIndex, 1);
-    newTracks.splice(hoverIndex, 0, removed);
-    saveTracks(newTracks);
-  };
+      if (activeData?.track) {
+        if (overId === "bridge-start") setBridgeStart(activeData.track);
+        if (overId === "bridge-end") setBridgeEnd(activeData.track);
+      }
+    },
+    [tracks, activeSetlist]
+  );
 
   return (
-    <div className="h-full flex overflow-hidden">
-      <SetlistSidebar
-        setlists={setlists}
-        activeSetlistId={activeSetlist?.id || null}
-        onSelect={handleSelectSetlist}
-        onCreate={handleCreateSetlist}
-        onUpdateName={handleUpdateName}
-        onDelete={handleDeleteSetlist}
-      />
+    <DndContext
+      sensors={sensors}
+      collisionDetection={rectIntersection}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="h-full flex overflow-hidden w-full bg-background border-t">
+        <SetlistSidebar
+          setlists={setlists}
+          activeSetlistId={activeSetlist?.id || null}
+          onSelect={handleSelectSetlist}
+          onCreate={(name) => setlistsService.create(name).then(loadSetlists)}
+          onUpdateName={(id, name) =>
+            setlistsService.update(id, { name }).then(loadSetlists)
+          }
+          onDelete={(id) => setlistsService.delete(id).then(loadSetlists)}
+        />
 
-      {activeSetlist ? (
-        <>
-          <SetlistEditor
-            tracks={tracks}
-            onRemoveTrack={handleRemoveTrack}
-            onReorder={handleReorder}
-            onDropTrack={handleAddTrack}
-            onTrackSelect={setSelectedTrack}
-            selectedTrackId={selectedTrack?.id || null}
-            onPlay={onPlay}
-            currentTrackId={currentTrackId}
-          />
-          <TrackSelector
-            referenceTrack={selectedTrack}
-            onAddTrack={handleAddTrack}
-            onInjectTracks={handleInjectTracks}
-            currentSetlistTracks={tracks}
-            onPlay={onPlay}
-            currentTrackId={currentTrackId}
-          />
-        </>
-      ) : (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground bg-muted/10">
-          Select or create a setlist to start editing.
-        </div>
-      )}
-    </div>
+        {activeSetlist ? (
+          <>
+            <SetlistEditor
+              tracks={tracks}
+              onRemoveTrack={(idx: number) => {
+                const nt = [...tracks];
+                nt.splice(idx, 1);
+                commitTracksToDB(nt);
+              }}
+              onTrackSelect={setSelectedTrack}
+              selectedTrackId={selectedTrack?.id || null}
+              onPlay={onPlay}
+              currentTrackId={currentTrackId}
+            />
+            {/* TrackSelectorのPropsにbridgeStateが存在しないエラーを回避しつつ
+              型を安全にキャストして渡します。
+            */}
+            <TrackSelector
+              referenceTrack={selectedTrack}
+              onAddTrack={(t: Track) => {
+                if (!tracks.some((ex) => ex.id === t.id))
+                  commitTracksToDB([...tracks, t]);
+              }}
+              onInjectTracks={(
+                ts: Track[],
+                startId?: number,
+                _endId?: number
+              ) => {
+                let nt = [...tracks];
+                const idx = nt.findIndex((t) => t.id === startId);
+                // 指定されたIDの後ろに挿入、見つからなければ末尾
+                nt.splice(idx !== -1 ? idx + 1 : nt.length, 0, ...ts);
+                commitTracksToDB(nt);
+              }}
+              currentSetlistTracks={tracks}
+              onPlay={onPlay}
+              currentTrackId={currentTrackId}
+              {...({
+                bridgeState: {
+                  start: bridgeStart,
+                  end: bridgeEnd,
+                  setStart: setBridgeStart,
+                  setEnd: setBridgeEnd,
+                },
+              } as any)}
+            />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground bg-muted/10 italic">
+            Select a setlist to start editing
+          </div>
+        )}
+      </div>
+
+      {/* 【視覚効果】 ドラッグ中のオーバーレイ表示 */}
+      <DragOverlay dropAnimation={null}>
+        {activeDragItem ? (
+          <div className="w-72 shadow-2xl rounded-md overflow-hidden border border-primary bg-background pointer-events-none opacity-90 scale-105">
+            <TrackRow
+              id="overlay"
+              track={activeDragItem.track}
+              type={activeDragItem.type as any}
+              onPlay={() => {}}
+            />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
