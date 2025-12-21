@@ -95,6 +95,19 @@ export function SetlistCreator({
       const activeData = active.data.current;
       const overData = over.data.current;
 
+      // ライブラリからセットリストのコンテナ（空の場合や余白）に重なった時
+      if (
+        activeData?.type === "LIBRARY_ITEM" &&
+        over.id === "setlist-editor-droppable"
+      ) {
+        const track = activeData.track as Track;
+        const isAlreadyInList = tracks.some((t) => t.id === track.id);
+
+        if (!isAlreadyInList) {
+          setTracks([...tracks, track]);
+        }
+      }
+
       // ライブラリからセットリストのアイテムの上に重なった時
       if (
         activeData?.type === "LIBRARY_ITEM" &&

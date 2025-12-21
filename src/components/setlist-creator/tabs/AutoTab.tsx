@@ -132,18 +132,24 @@ export function AutoTab({
   };
 
   const handleApply = () => {
+    const filteredAutoTracks = autoTracks.filter(
+      (t) => !currentSetlistTracks.some((st) => st.id === t.id)
+    );
+
     if (mode === "bridge" && startTrack) {
       // Bridgeモードの場合、StartとEndの間を埋めるのが目的なので、
       // 生成されたリストからEndトラックも除外して挿入する。
       // (Startトラックは generateBridge 時点で既に除外されている前提)
-      const tracksToInject = autoTracks.filter(
-        (t) => t.id !== startTrack.id && (endTrack ? t.id !== endTrack.id : true)
+      // filteredAutoTracks で既にセットリスト内の曲は除外されているはずだが、念のため
+      const tracksToInject = filteredAutoTracks.filter(
+        (t) =>
+          t.id !== startTrack.id && (endTrack ? t.id !== endTrack.id : true)
       );
 
       onInjectTracks(tracksToInject, startTrack.id, endTrack?.id);
     } else {
       // Infinite or others: Just add to end
-      onInjectTracks(autoTracks);
+      onInjectTracks(filteredAutoTracks);
     }
     setAutoTracks([]);
     // Reset logic if needed
@@ -235,6 +241,9 @@ export function AutoTab({
                 onChange={setAutoGenres}
                 placeholder="All Genres"
                 className="bg-background h-8 text-xs"
+                creatable={true}
+                customPrefix="expand:"
+                createLabel="Expand Search"
               />
             </div>
             <div className="space-y-1">
@@ -302,22 +311,27 @@ export function AutoTab({
 
           <ScrollArea className="flex-1">
             <div className="pb-10">
-              {autoTracks.map((t, idx) => (
-                <div
-                  key={`auto-${t.id}-${idx}`}
-                  className="relative group animate-in fade-in slide-in-from-bottom-2"
-                  style={{ animationDelay: `${idx * 50}ms` }}
-                >
-                  <TrackRow
-                    id={`auto-${t.id}-${idx}`}
-                    track={t}
-                    type="LIBRARY_ITEM"
-                    isPlaying={currentTrackId === t.id}
-                    onPlay={() => onPlay(t)}
-                    onAdd={() => onInjectTracks([t], startTrack?.id)}
-                  />
-                </div>
-              ))}
+              {autoTracks
+                .filter(
+                  (t) => !currentSetlistTracks.some((st) => st.id === t.id)
+                )
+                .map((t, idx) => (
+                  <div
+                    key={`auto-${t.id}-${idx}`}
+                    className="relative group animate-in fade-in slide-in-from-bottom-2"
+                    style={{ animationDelay: `${idx * 50}ms` }}
+                  >
+                    <TrackRow
+                      id={`auto-${t.id}-${idx}`}
+                      track={t}
+                      type="LIBRARY_ITEM"
+                      isPlaying={currentTrackId === t.id}
+                      onPlay={() => onPlay(t)}
+                      onAdd={() => onInjectTracks([t], startTrack?.id)}
+                    />
+                  </div>
+                ))
+              }
 
               {autoTracks.length === 0 && !isAutoLoading && (
                 <div className="h-full flex flex-col items-center justify-center p-8 text-muted-foreground gap-3 opacity-50 min-h-[200px]">

@@ -24,6 +24,7 @@ interface RecommendTabProps {
   onAddTrack: (track: Track) => void;
   onPlay: (track: Track) => void;
   currentTrackId?: number | null;
+  currentSetlistTracks: Track[];
 }
 
 export function RecommendTab({
@@ -32,6 +33,7 @@ export function RecommendTab({
   onAddTrack,
   onPlay,
   currentTrackId,
+  currentSetlistTracks,
 }: RecommendTabProps) {
   const [recTracks, setRecTracks] = useState<Track[]>([]);
   const [isRecLoading, setIsRecLoading] = useState(false);
@@ -116,13 +118,16 @@ export function RecommendTab({
                 onChange={setRecGenres}
                 placeholder="All Genres"
                 className="bg-background"
+                creatable={true}
+                customPrefix="expand:"
+                createLabel="Expand Search"
               />
             </div>
           </>
         ) : (
           <div className="text-sm text-muted-foreground text-center py-8 flex flex-col items-center gap-3">
             <Music2 className="h-10 w-10 opacity-20 dark:opacity-40" />
-            <span className="max-w-[240px]">
+            <span className="max-w-60">
               Select a track in the setlist to see recommendations.
             </span>
           </div>
@@ -137,17 +142,21 @@ export function RecommendTab({
             </div>
           ) : recTracks.length > 0 ? (
             <div className="pb-10">
-              {recTracks.map((t) => (
-                <TrackRow
-                  key={`rec-${t.id}`}
-                  id={`rec-${t.id}`}
-                  track={t}
-                  type="LIBRARY_ITEM"
-                  isPlaying={currentTrackId === t.id}
-                  onPlay={() => onPlay(t)}
-                  onAdd={() => onAddTrack(t)}
-                />
-              ))}
+              {recTracks
+                .filter(
+                  (t) => !currentSetlistTracks.some((st) => st.id === t.id)
+                )
+                .map((t) => (
+                  <TrackRow
+                    key={`rec-${t.id}`}
+                    id={`rec-${t.id}`}
+                    track={t}
+                    type="LIBRARY_ITEM"
+                    isPlaying={currentTrackId === t.id}
+                    onPlay={() => onPlay(t)}
+                    onAdd={() => onAddTrack(t)}
+                  />
+                ))}
             </div>
           ) : (
             referenceTrack && (

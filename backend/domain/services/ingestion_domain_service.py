@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from tinytag import TinyTag
 from ingest import analyze_track_file
 from domain.constants import SUPPORTED_EXTENSIONS
-from utils.metadata import extract_metadata_smart, check_metadata_changed
+from utils.metadata import extract_metadata_smart, check_metadata_changed, update_file_metadata
 from utils.ingestion import has_valid_metadata
 import infra.database.connection as db_connection
 from domain.models.track import Track, TrackEmbedding
@@ -84,6 +84,19 @@ class IngestionDomainService:
     ) -> Optional[Dict[str, Any]]:
         
         filename = os.path.basename(filepath)
+
+        # Check for .lrc file and import lyrics if present
+        lrc_path = os.path.splitext(filepath)[0] + ".lrc"
+        if os.path.exists(lrc_path):
+            try:
+                with open(lrc_path, 'r', encoding='utf-8') as f:
+                    lyrics_content = f.read()
+                if lyrics_content:
+                    # Run in default executor (thread pool) to avoid blocking
+                    await loop.run_in_executor(None, update_file_metadata, filepath, lyrics_content)
+                    print(f"DEBUG: Imported lyrics from {os.path.basename(lrc_path)}")
+            except Exception as e:
+                print(f"WARNING: Failed to import .lrc file for {filename}: {e}")
         
         skip_basic = False
         skip_waveform = False

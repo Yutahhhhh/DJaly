@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronsUpDown, X } from "lucide-react"
+import { ChevronsUpDown, X, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +22,9 @@ interface MultiSelectProps {
   onChange: (selected: string[]) => void
   placeholder?: string
   className?: string
+  creatable?: boolean
+  customPrefix?: string
+  createLabel?: string
 }
 
 export function MultiSelect({
@@ -30,6 +33,9 @@ export function MultiSelect({
   onChange,
   placeholder = "Select items...",
   className,
+  creatable = false,
+  customPrefix = "",
+  createLabel = "Create",
 }: MultiSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [searchTerm, setSearchTerm] = React.useState("")
@@ -79,17 +85,24 @@ export function MultiSelect({
           <div className="flex gap-1 flex-wrap items-center text-left">
             {selected.length === 0 && <span className="text-muted-foreground">{placeholder}</span>}
             {selected.length > 0 && (
-              selected.map((val) => (
-                <Badge variant="secondary" key={val} className="mr-1 pr-1 flex items-center gap-1">
-                  {options.find((opt) => opt.value === val)?.label || val}
-                  <div
-                    className="hover:bg-secondary-foreground/20 rounded-full p-0.5 cursor-pointer"
-                    onClick={(e) => handleRemove(val, e)}
-                  >
-                    <X className="h-3 w-3" />
-                  </div>
-                </Badge>
-              ))
+              selected.map((val) => {
+                const isCustom = customPrefix && val.startsWith(customPrefix);
+                const displayVal = isCustom ? val.slice(customPrefix.length) : val;
+                const label = options.find((opt) => opt.value === val)?.label || displayVal;
+                
+                return (
+                  <Badge variant="secondary" key={val} className="mr-1 pr-1 flex items-center gap-1">
+                    {isCustom && <Sparkles className="h-3 w-3 opacity-70 mr-0.5" />}
+                    {label}
+                    <div
+                      className="hover:bg-secondary-foreground/20 rounded-full p-0.5 cursor-pointer"
+                      onClick={(e) => handleRemove(val, e)}
+                    >
+                      <X className="h-3 w-3" />
+                    </div>
+                  </Badge>
+                )
+              })
             )}
           </div>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -117,7 +130,22 @@ export function MultiSelect({
             className="max-h-[300px] overflow-y-auto p-1"
             onWheel={(e) => e.stopPropagation()}
         >
-            {filteredOptions.length === 0 && (
+            {creatable && searchTerm && (
+                <div
+                    className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm cursor-pointer border-b mb-1"
+                    onClick={() => {
+                        const newValue = customPrefix ? customPrefix + searchTerm : searchTerm;
+                        handleSelect(newValue);
+                        setSearchTerm("");
+                    }}
+                >
+                    <span className="text-sm font-medium text-primary">
+                        {createLabel} "{searchTerm}"
+                    </span>
+                </div>
+            )}
+
+            {filteredOptions.length === 0 && (!creatable || !searchTerm) && (
               <div className="p-2 text-sm text-muted-foreground text-center">
                 No results found.
               </div>

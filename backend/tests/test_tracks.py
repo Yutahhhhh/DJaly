@@ -101,3 +101,49 @@ def test_get_similar_tracks(client, session: Session):
     assert len(data) > 0
     assert data[0]["title"] == "Sim2"
 
+def test_genre_expansion_search(client, session: Session, mocker):
+    """ジャンル展開検索（親ジャンル検索）のテスト"""
+    # 1. データ準備
+    # Parent Genre Track
+    t1 = Track(filepath="/p.mp3", title="Parent Track", artist="A", album="B", genre="House", bpm=120, duration=100)
+    # Child Genre Track
+    t2 = Track(filepath="/c.mp3", title="Child Track", artist="A", album="B", genre="Deep House", bpm=120, duration=100)
+    # Unrelated Track
+    t3 = Track(filepath="/o.mp3", title="Other Track", artist="A", album="B", genre="Techno", bpm=120, duration=100)
+    
+    session.add(t1)
+    session.add(t2)
+    session.add(t3)
+    session.commit()
+
+    # 2. GenreExpanderのモック
+    # expand("House") -> ["House", "Deep House"] を返すように設定
+    mock_expand = mocker.patch("utils.genres.genre_expander.expand")
+    mock_expand.return_value = ["House", "Deep House"]
+
+    # 3. 親ジャンル検索 (expand:House)
+    # House(親)とDeep House(子)の両方がヒットするはず
+    response = client.get("/api/tracks", params={"genres": ["expand:House"]})
+    assert response.status_code == 200
+    data = response.json()
+    titles = [t["title"] for t in data]
+    assert "Parent Track" in titles
+    assert "Child Track" in titles
+    assert "Other Track" not in titles
+    
+    # モックが正しい引数で呼ばれたか確認
+    # 注意: 実装では "expand:" プレフィックスを除去して "House" を渡しているはず
+    mock_expand.assert_called_with(mocker.ANY, "House")
+
+    # 4. 通常検索 (House)
+    # House(親)のみヒットし、Deep House(子)はヒットしないはず
+    # ※ 実装上、通常検索では genre_expander.expand は呼ばれない、または呼ばれても展開ロジックを通らない
+    response_normal = client.get("/api/tracks", params={"genres": ["House"]})
+    assert response_normal.status_code == 200
+    data_normal = response_normal.json()
+    titles_normal = [t["title"] for t in data_normal]
+    
+    assert "Parent Track" in titles_normal
+    assert "Child Track" not in titles_normal
+
+

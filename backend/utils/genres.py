@@ -40,13 +40,17 @@ class GenreExpander:
                 logger.error(f"Failed to load genre cache: {e}")
                 self.cache = {}
         
-        # 2. 初期JSONの内容をマージ（キャッシュにないキーのみ追加）
+        # 2. 初期JSONの内容をマージ（キャッシュにある場合も統合）
         if os.path.exists(INITIAL_JSON_PATH):
             try:
                 with open(INITIAL_JSON_PATH, "r", encoding="utf-8") as f:
                     initial_data = json.load(f)
                     for k, v in initial_data.items():
-                        if k not in self.cache:
+                        if k in self.cache:
+                            # 既存キャッシュと初期データをマージして重複排除
+                            merged = list(set(self.cache[k] + v))
+                            self.cache[k] = merged
+                        else:
                             self.cache[k] = v
             except Exception as e:
                 logger.warning(f"Failed to load initial genres.json: {e}")
@@ -67,10 +71,18 @@ class GenreExpander:
         if not genre:
             return []
 
-        # キャッシュヒット
+        # キャッシュヒット (完全一致)
         if genre in self.cache:
-            # 親ジャンル自身も含めて返す
             return list(set([genre] + self.cache[genre]))
+
+        # キャッシュヒット (正規化マッチ: 大文字小文字・スペース無視)
+        # 例: "Hiphop" -> "Hip Hop"
+        normalized_input = genre.lower().replace(" ", "").replace("-", "")
+        for key in self.cache.keys():
+            normalized_key = key.lower().replace(" ", "").replace("-", "")
+            if normalized_input == normalized_key:
+                # マッチしたキーのリストを返す（入力されたgenre自体も追加）
+                return list(set([genre] + self.cache[key]))
         
         # キャッシュミス: LLMに問い合わせ
         logger.info(f"Expanding unknown genre with LLM: {genre}")

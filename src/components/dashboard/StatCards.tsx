@@ -32,7 +32,9 @@ export function StatCards({
   // 1. 設定が存在するか (Backend: stats.config.llm_configured)
   // 2. 実際に接続できているか (Backend: health.ollama_status)
   const isLlmConfigured = stats.config.llm_configured;
-  const isLlmConnected = health?.ollama_status?.includes("Connected");
+  const isLlmConnected =
+    health?.ollama_status?.includes("Connected") ||
+    health?.ollama_status?.includes("Configured");
 
   let llmStatusLabel = "Off";
   let llmStatusColorClass = "bg-gray-100 text-gray-700";

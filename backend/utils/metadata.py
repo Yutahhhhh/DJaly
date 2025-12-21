@@ -96,7 +96,7 @@ def update_file_metadata(filepath: str, lyrics: Optional[str] = None, artwork_b6
             audio = ID3(filepath)
             if lyrics is not None:
                 audio.delall("USLT")
-                audio.add(USLT(encoding=3, lang='eng', desc='desc', text=lyrics))
+                audio.add(USLT(encoding=3, lang='eng', desc='', text=lyrics))
             if artwork_b64:
                 img_data = base64.b64decode(artwork_b64)
                 audio.delall("APIC")

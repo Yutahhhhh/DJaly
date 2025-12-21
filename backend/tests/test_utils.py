@@ -65,3 +65,27 @@ def test_logger_setup():
     log = logger.get_logger("test_logger")
     assert log is not None
     log.info("Test Log")
+
+def test_update_file_metadata_mp3_lyrics(tmp_path, mocker):
+    # Mock mutagen to avoid needing real audio files
+    mock_id3 = mocker.Mock()
+    mock_uslt = mocker.Mock()
+    
+    # Mock ID3 constructor
+    mocker.patch("utils.metadata.ID3", return_value=mock_id3)
+    # Mock USLT constructor
+    mock_uslt_class = mocker.patch("utils.metadata.USLT", return_value=mock_uslt)
+    
+    path = str(tmp_path / "test.mp3")
+    # Create dummy file so os.path.exists/splitext works
+    with open(path, "w") as f:
+        f.write("dummy mp3 content")
+        
+    metadata.update_file_metadata(path, lyrics="Test Lyrics")
+    
+    # Verify USLT was initialized with empty desc
+    # This confirms the fix for "descSeptember" bug where desc was hardcoded
+    mock_uslt_class.assert_called_with(encoding=3, lang='eng', desc='', text="Test Lyrics")
+    
+    # Verify save was called
+    mock_id3.save.assert_called_once()

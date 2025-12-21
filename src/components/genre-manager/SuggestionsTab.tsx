@@ -36,6 +36,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
 
   // Batch Analysis State
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
@@ -123,6 +124,9 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
 
   const handleBatchAnalyze = async () => {
     if (tracks.length === 0) return;
+    if (isPreparing) return;
+    
+    setIsPreparing(true);
     
     // First, get ALL unknown IDs to know the scope
     let allIds: number[] = [];
@@ -131,17 +135,18 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
     } catch (e) {
       console.error("Failed to get all IDs", e);
       alert("Failed to start: Could not fetch track list.");
+      setIsPreparing(false);
       return;
     }
 
     if (allIds.length === 0) {
       alert("No unknown tracks found.");
+      setIsPreparing(false);
       return;
     }
 
-    if (!confirm(`Start batch analysis for ALL ${allIds.length} unknown tracks? This will process them in chunks and auto-apply changes.`)) return;
-
     setIsBatchAnalyzing(true);
+    setIsPreparing(false);
     abortRef.current = false;
     setBatchTotal(allIds.length);
     setProcessedCount(0);
@@ -201,14 +206,10 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
       setIsBatchAnalyzing(false);
       fetchTracks(); // Refresh view
       
+      // 完了通知はUI更新のみとし、ダイアログは出さない
       if (allResults.length > 0) {
+        // CSVダウンロードも自動では行わない（ダイアログ削減のため）
         downloadCsv(allResults);
-        const statusMsg = abortRef.current ? "Analysis stopped" : "Analysis complete";
-        alert(`${statusMsg}. ${allResults.length} tracks updated. CSV report downloaded.`);
-      } else {
-        if (!abortRef.current) {
-           alert("Analysis complete. No changes were made (LLM might have returned 'Unknown' or failed).");
-        }
       }
     }
   };
@@ -239,9 +240,13 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
               </Button>
               <Button
                 onClick={handleBatchAnalyze}
-                disabled={loading || tracks.length === 0}
+                disabled={loading || tracks.length === 0 || isPreparing}
               >
-                <Wand2 className="mr-2 h-4 w-4" />
+                {isPreparing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-2 h-4 w-4" />
+                )}
                 Analyze All Remaining
               </Button>
             </>

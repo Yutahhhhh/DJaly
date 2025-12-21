@@ -8,6 +8,7 @@ import { FilterDialog } from "./FilterDialog";
 import { TrackList } from "./TrackList";
 import { FilterState } from "./types";
 import { INITIAL_FILTERS, LIMIT } from "./constants";
+import { buildTrackSearchParams } from "./utils";
 import { tracksService } from "@/services/tracks";
 import { ingestService } from "@/services/ingest";
 
@@ -117,50 +118,12 @@ export function MusicLibrary({
     setIsLoading(true);
     try {
       const currentOffset = reset ? 0 : offset;
-      const params: Record<string, any> = {
-        status: "all",
-        limit: LIMIT.toString(),
-        offset: currentOffset.toString(),
-      };
-
-      if (currentTitle) params["title"] = currentTitle;
-
-      // Basic Filters
-      if (currentFilters.bpm && currentFilters.bpm > 0) {
-        params["bpm"] = currentFilters.bpm.toString();
-        params["bpm_range"] = currentFilters.bpmRange.toString();
-      }
-      if (currentFilters.key) params["key"] = currentFilters.key;
-      if (currentFilters.artist) params["artist"] = currentFilters.artist;
-      if (currentFilters.album) params["album"] = currentFilters.album;
-      if (currentFilters.genres && currentFilters.genres.length > 0) {
-        params["genres"] = currentFilters.genres;
-      }
-      if (currentFilters.minDuration)
-        params["min_duration"] = currentFilters.minDuration.toString();
-      if (currentFilters.maxDuration)
-        params["max_duration"] = currentFilters.maxDuration.toString();
-
-      // Advanced Feature Filters (Only send if range is narrowed)
-      if (currentFilters.minEnergy > 0)
-        params["min_energy"] = currentFilters.minEnergy.toString();
-      if (currentFilters.maxEnergy < 1)
-        params["max_energy"] = currentFilters.maxEnergy.toString();
-
-      if (currentFilters.minDanceability > 0)
-        params["min_danceability"] = currentFilters.minDanceability.toString();
-      if (currentFilters.maxDanceability < 1)
-        params["max_danceability"] = currentFilters.maxDanceability.toString();
-
-      if (currentFilters.minBrightness > 0)
-        params["min_brightness"] = currentFilters.minBrightness.toString();
-      if (currentFilters.maxBrightness < 1)
-        params["max_brightness"] = currentFilters.maxBrightness.toString();
-
-      // Vibe Search
-      if (currentFilters.vibePrompt) {
-        params["vibe_prompt"] = currentFilters.vibePrompt;
-      }
+      const params = buildTrackSearchParams(
+        currentTitle,
+        currentFilters,
+        LIMIT,
+        currentOffset
+      );
 
       const response = await tracksService.getTracks(params);
       setTracks((prev) => {

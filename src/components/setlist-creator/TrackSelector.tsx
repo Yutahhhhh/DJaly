@@ -74,6 +74,7 @@ export function TrackSelector({
             onAddTrack={onAddTrack}
             onPlay={onPlay}
             currentTrackId={currentTrackId}
+            currentSetlistTracks={currentSetlistTracks}
           />
         </TabsContent>
 
@@ -88,6 +89,7 @@ export function TrackSelector({
             onAddTrack={onAddTrack}
             onPlay={onPlay}
             currentTrackId={currentTrackId}
+            currentSetlistTracks={currentSetlistTracks}
           />
         </TabsContent>
 

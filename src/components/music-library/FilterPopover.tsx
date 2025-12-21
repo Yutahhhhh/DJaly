@@ -363,6 +363,9 @@ export function FilterPopover({
                     setLocalFilters({ ...localFilters, genres: selected })
                   }
                   placeholder="Select genres..."
+                  creatable={true}
+                  customPrefix="expand:"
+                  createLabel="Expand Search"
                 />
               </div>
             </div>

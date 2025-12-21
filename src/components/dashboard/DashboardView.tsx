@@ -85,7 +85,8 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
         </div>
         <div className="flex items-center gap-2">
           {health?.ollama_status &&
-            !health.ollama_status.includes("Connected") && (
+            !health.ollama_status.includes("Connected") &&
+            !health.ollama_status.includes("Configured") && (
               <span className="text-xs text-red-500 font-medium px-2 py-1 bg-red-50 rounded border border-red-100">
                 LLM Connection Error
               </span>
