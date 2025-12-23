@@ -11,6 +11,8 @@
     "shell:allow-execute",
     "fs:default",
     "dialog:default",
-    "http:default"
+    "http:default",
+    "updater:default",
+    "process:default"
   ]
 }

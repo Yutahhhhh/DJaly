@@ -67,6 +67,9 @@ pyinstaller --clean --noconfirm --onefile --name $BINARY_NAME \
     --hidden-import="fastapi" \
     --hidden-import="fastapi.applications" \
     --hidden-import="sqlmodel" \
+    --hidden-import="sqlalchemy.sql.default_comparator" \
+    --hidden-import="duckdb" \
+    --hidden-import="duckdb_engine" \
     --hidden-import="platformdirs" \
     --hidden-import="pydantic_settings" \
     --hidden-import="sklearn.utils._typedefs" \

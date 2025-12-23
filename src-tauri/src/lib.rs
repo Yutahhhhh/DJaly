@@ -11,6 +11,7 @@ pub fn run() {
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
         .plugin(tauri_plugin_devtools::init()) 
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())

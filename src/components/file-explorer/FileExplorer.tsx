@@ -10,7 +10,6 @@ import { FileList } from "./FileList";
 import { AnalysisModal } from "./AnalysisModal";
 import { settingsService } from "@/services/settings";
 import { filesystemService } from "@/services/filesystem";
-import { ingestService } from "@/services/ingest";
 import { useIngestion } from "@/contexts/IngestionContext";
 
 export function FileExplorer() {

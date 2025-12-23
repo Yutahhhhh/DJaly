@@ -13,6 +13,7 @@ import { Track } from "@/types";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 import { API_BASE_URL } from "@/services/api-client";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { Updater } from "@/components/Updater";
 
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
@@ -81,6 +82,7 @@ function App() {
 
   return (
     <IngestionProvider>
+      <Updater />
       <div className="h-screen w-full bg-background text-foreground flex overflow-hidden">
         <Sidebar
           activeView={activeView}
