@@ -26,6 +26,7 @@ interface IngestionContextType {
   cancelIngestion: () => Promise<void>;
   dismissComplete: () => void;
   waitForIngestionComplete: () => Promise<void>;
+  startIngestion: (targets: string[], forceUpdate: boolean) => Promise<void>;
 }
 
 const IngestionContext = createContext<IngestionContextType | undefined>(
@@ -34,6 +35,7 @@ const IngestionContext = createContext<IngestionContextType | undefined>(
 
 export function IngestionProvider({ children }: { children: ReactNode }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const isAnalyzingRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("");
   const [currentFile, setCurrentFile] = useState("");
@@ -46,10 +48,17 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completionResolvers = useRef<(() => void)[]>([]);
 
+  // Sync Ref with State
+  useEffect(() => {
+    isAnalyzingRef.current = isAnalyzing;
+  }, [isAnalyzing]);
+
   const handleSocketMessage = useCallback((data: IngestMessage) => {
     switch (data.type) {
       case "start":
         setIsAnalyzing(true);
+        // Ref will be updated by useEffect, but for safety in this callback if needed:
+        isAnalyzingRef.current = true;
         setShowComplete(false);
         setStats({
           current: 0,
@@ -150,8 +159,26 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
   };
 
+  const startIngestion = async (targets: string[], forceUpdate: boolean) => {
+    isAnalyzingRef.current = true;
+    setIsAnalyzing(true);
+    setStatusText("Initializing ingestion...");
+    try {
+      await ingestService.ingest(targets, forceUpdate);
+    } catch (e) {
+      isAnalyzingRef.current = false;
+      setIsAnalyzing(false);
+      setStatusText("Failed to start ingestion");
+      throw e;
+    }
+  };
+
   const waitForIngestionComplete = () => {
     return new Promise<void>((resolve) => {
+      if (!isAnalyzingRef.current) {
+        resolve();
+        return;
+      }
       completionResolvers.current.push(resolve);
     });
   };
@@ -168,6 +195,7 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
         cancelIngestion,
         dismissComplete,
         waitForIngestionComplete,
+        startIngestion,
       }}
     >
       {children}

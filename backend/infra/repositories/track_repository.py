@@ -78,6 +78,8 @@ class TrackRepository:
         max_danceability: Optional[float] = None,
         min_brightness: Optional[float] = None,
         max_brightness: Optional[float] = None,
+        min_year: Optional[int] = None,
+        max_year: Optional[int] = None,
         target_params: Optional[Dict[str, float]] = None,
         limit: int = 100, 
         offset: int = 0
@@ -86,6 +88,12 @@ class TrackRepository:
         
         # Vibe Search Logic (Sort by similarity to inferred features)
         if target_params:
+            # Extract year from target_params if not provided
+            if min_year is None and "year_min" in target_params:
+                min_year = int(target_params["year_min"])
+            if max_year is None and "year_max" in target_params:
+                max_year = int(target_params["year_max"])
+
             # Calculate Euclidean Distance Squared
             dist_expr = 0
             
@@ -150,6 +158,13 @@ class TrackRepository:
             query = query.where(Track.duration >= min_duration)
         if max_duration is not None:
             query = query.where(Track.duration <= max_duration)
+
+        # 5. Year
+        if min_year is not None:
+            query = query.where(Track.year >= min_year)
+        if max_year is not None:
+            query = query.where(Track.year <= max_year)
+
 
         # 5. Advanced Audio Features
         if min_energy is not None:

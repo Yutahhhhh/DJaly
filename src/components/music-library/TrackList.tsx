@@ -52,6 +52,7 @@ export function TrackList({
                 <th className="p-3 font-medium min-w-[200px]">
                   Title / Artist
                 </th>
+                <th className="p-3 font-medium w-[80px]">Year</th>
                 <th className="p-3 font-medium w-[120px]">Genre</th>
                 <th className="p-3 font-medium text-right w-[80px]">BPM</th>
                 <th className="p-3 font-medium text-center w-[80px]">Key</th>
@@ -114,6 +115,10 @@ export function TrackList({
                         >
                           {track.artist}
                         </div>
+                      </td>
+
+                      <td className="p-3 text-xs text-muted-foreground">
+                        {track.year || "-"}
                       </td>
 
                       {/* Genre Column (Metadata) */}

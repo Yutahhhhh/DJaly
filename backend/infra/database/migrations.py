@@ -132,6 +132,10 @@ MIGRATIONS = {
             updated_at TIMESTAMP
         );
         """
+    ],
+    2: [
+        "ALTER TABLE tracks ADD COLUMN year INTEGER DEFAULT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_year ON tracks (year);"
     ]
 }
 
@@ -347,6 +351,26 @@ def run_migrations():
             );
         """))
         session.commit()
+
+        # --- Schema Integrity Check (Fix for missing 'year' column) ---
+        try:
+            # Check if 'year' column exists in 'tracks' table
+            # DuckDB specific pragma
+            columns_info = session.exec(text("PRAGMA table_info(tracks)")).all()
+            column_names = [row[1] for row in columns_info]
+            
+            if "year" not in column_names:
+                # If 'year' is missing but version is already >= 2, force rollback to 1
+                # This triggers the migration version 2 again.
+                current_ver_check = session.exec(text("SELECT MAX(version) FROM schema_migrations")).first()
+                if current_ver_check and current_ver_check[0] and current_ver_check[0] >= 2:
+                    logger.warning("Detected missing 'year' column with DB version >= 2. Rolling back version to 1 to force migration.")
+                    session.exec(text("DELETE FROM schema_migrations WHERE version >= 2"))
+                    session.commit()
+        except Exception as e:
+            # Table might not exist yet (fresh install), ignore
+            logger.info(f"Schema check skipped (probably fresh install): {e}")
+        # --------------------------------------------------------------
 
         result = session.exec(text("SELECT MAX(version) FROM schema_migrations")).first()
         current_version = 0

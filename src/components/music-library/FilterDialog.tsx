@@ -12,6 +12,7 @@ import {
   Music2,
   KeyRound,
   Loader2,
+  Calendar,
 } from "lucide-react";
 import {
   Dialog,
@@ -190,6 +191,43 @@ export function FilterDialog({
           {/* Advanced Sliders - Only show when in Custom mode */}
           {localPreset === "custom" && (
             <div className="grid gap-6 px-1 animate-in fade-in slide-in-from-top-2 duration-300">
+              {/* Year Range */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <Label className="flex items-center gap-2 text-xs font-semibold">
+                    <Calendar className="h-3.5 w-3.5 text-blue-500" />
+                    Release Year
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Min (e.g. 1990)"
+                    className="h-8 text-xs"
+                    value={localFilters.minYear || ""}
+                    onChange={(e) =>
+                      setLocalFilters({
+                        ...localFilters,
+                        minYear: e.target.value ? parseInt(e.target.value) : null,
+                      })
+                    }
+                  />
+                  <span className="text-muted-foreground">-</span>
+                  <Input
+                    type="number"
+                    placeholder="Max (e.g. 2024)"
+                    className="h-8 text-xs"
+                    value={localFilters.maxYear || ""}
+                    onChange={(e) =>
+                      setLocalFilters({
+                        ...localFilters,
+                        maxYear: e.target.value ? parseInt(e.target.value) : null,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
               {/* Energy */}
               <div className="space-y-3">
                 <div className="flex justify-between items-center">

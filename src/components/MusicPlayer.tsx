@@ -393,6 +393,7 @@ export function MusicPlayer({
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-muted-foreground truncate">
                 {track.artist}
+                {track.year ? ` • ${track.year}` : ""}
               </span>
             </div>
           </div>

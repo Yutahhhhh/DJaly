@@ -89,11 +89,19 @@ class AudioAnalyzer:
                 result = self._format_result(filepath, tag, features)
             else:
                 # 最小限のメタデータのみ設定
+                year = None
+                if tag.year:
+                    try:
+                        year = int(str(tag.year).strip()[:4])
+                    except:
+                        pass
+
                 result = {
                     "filepath": filepath,
                     "title": tag.title or os.path.splitext(filename)[0],
                     "artist": tag.artist or "Unknown",
                     "album": tag.album or "Unknown",
+                    "year": year,
                     "duration": tag.duration or 0.0,
                     "bpm": 0.0, # Dummy
                     "key": "",
@@ -118,7 +126,7 @@ class AudioAnalyzer:
                     # 最もエナジーが高い区間を抽出
                     audio_for_embedding = self._extract_loudest_section(audio, target_duration)
 
-                    # 推論実行 (データ量が減った分、処理が高速化される)
+                    # 推論実行
                     embeddings = self.embedding_algo(audio_for_embedding)
                     
                     if embeddings.ndim == 2:
@@ -297,12 +305,20 @@ class AudioAnalyzer:
         
         beat_positions_list = features['beat_positions'].tolist() if isinstance(features['beat_positions'], np.ndarray) else []
 
+        year = None
+        if tag.year:
+            try:
+                year = int(str(tag.year).strip()[:4])
+            except:
+                pass
+
         return {
             "filepath": filepath,
             "title": tag.title or os.path.basename(filepath),
             "artist": tag.artist or "Unknown",
             "album": tag.album or "Unknown",
             "genre": tag.genre or "Unknown",
+            "year": year,
             "duration": safe_scalar(tag.duration or 0.0),
             "bpm": rounded_bpm,
             "key": detected_key, 

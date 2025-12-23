@@ -65,6 +65,7 @@ class IngestionDomainService:
                 "artist": meta["artist"],
                 "album": meta["album"],
                 "genre": new_genre,
+                "year": meta.get("year"),
                 "features_extra": {} 
             }
             return result
@@ -126,10 +127,26 @@ class IngestionDomainService:
                             "spectral_flux": track.spectral_flux,
                             "spectral_rolloff": track.spectral_rolloff,
                             "duration": track.duration,
-                            "genre": track.genre
+                            "genre": track.genre,
+                            "year": track.year
                         }
 
                         if not embedding:
+                            # Optimization: Check if file has valid metadata to avoid full analysis
+                            if is_metadata_incomplete:
+                                try:
+                                    # Quick check of file tags
+                                    tag_check = TinyTag.get(filepath)
+                                    meta_check = extract_metadata_smart(filepath, tag_check)
+                                    # If file has valid artist/title, we can skip full analysis
+                                    if meta_check["artist"] != "Unknown" and meta_check["title"] != "Unknown":
+                                        is_metadata_incomplete = False
+                                        # Update cache to ensure we save the new metadata
+                                        existing_data_cache.update(meta_check)
+                                        print(f"INFO: {filename} - Found valid metadata in file. Upgrading to lightweight analysis.")
+                                except Exception as e:
+                                    print(f"DEBUG: Metadata check failed: {e}")
+
                             if is_metadata_incomplete:
                                 skip_basic = False
                                 skip_waveform = True 
@@ -186,7 +203,12 @@ class IngestionDomainService:
                  if result.get("genre") == "Unknown": result["genre"] = meta_smart["genre"]
 
             if skip_basic and existing_data_cache:
-                result.update(existing_data_cache)
+                # DBの値を優先するが、DBが空でresult(ファイル)に値がある場合はresultを生かす
+                # 単純な update() だと DB=None, File=2000 のときに None で上書きされてしまうため、
+                # DBに有効な値がある場合のみ上書きする。
+                for key, db_val in existing_data_cache.items():
+                    if db_val is not None and db_val != "":
+                        result[key] = db_val
             
             if skip_basic:
                 if "embedding" not in result:

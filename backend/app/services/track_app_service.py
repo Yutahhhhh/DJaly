@@ -36,6 +36,8 @@ class TrackAppService:
         max_danceability: Optional[float] = None,
         min_brightness: Optional[float] = None,
         max_brightness: Optional[float] = None,
+        min_year: Optional[int] = None,
+        max_year: Optional[int] = None,
         vibe_prompt: Optional[str] = None,
         limit: int = 100, 
         offset: int = 0
@@ -80,6 +82,8 @@ class TrackAppService:
             max_danceability=max_danceability,
             min_brightness=min_brightness,
             max_brightness=max_brightness,
+            min_year=min_year,
+            max_year=max_year,
             target_params=target_params,
             limit=limit,
             offset=offset

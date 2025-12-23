@@ -14,5 +14,7 @@ export interface FilterState {
   maxDanceability: number;
   minBrightness: number;
   maxBrightness: number;
+  minYear: number | null;
+  maxYear: number | null;
   vibePrompt: string | null;
 }

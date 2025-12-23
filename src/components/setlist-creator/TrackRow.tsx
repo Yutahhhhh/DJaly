@@ -105,7 +105,7 @@ export const TrackRow = React.memo(
             </span>
           </div>
           <div className="text-[11px] text-muted-foreground truncate w-full">
-            {track.artist} {track.bpm > 0 && `• ${track.bpm.toFixed(0)} BPM`}{" "}
+            {track.artist} {track.year && `• ${track.year}`} {track.bpm > 0 && `• ${track.bpm.toFixed(0)} BPM`}{" "}
             {track.key && `• ${track.key}`}
           </div>
         </div>

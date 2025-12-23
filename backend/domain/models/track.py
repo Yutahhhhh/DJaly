@@ -23,6 +23,7 @@ class Track(SQLModel, table=True):
     artist: str = Field(index=True)
     album: str
     genre: str
+    year: Optional[int] = Field(default=None, index=True)
     
     # 解析データ (Librosa由来)
     # BPMは解析前はNone

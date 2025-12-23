@@ -147,3 +147,54 @@ def test_genre_expansion_search(client, session: Session, mocker):
     assert "Child Track" not in titles_normal
 
 
+
+def test_get_tracks_year_filtering(client, session: Session):
+    """リリース年によるフィルタリング機能のテスト"""
+    # 1. セットアップ
+    tracks = [
+        Track(filepath="/y1.mp3", title="90s Track", artist="A", album="B", genre="G", bpm=120, duration=100, year=1995),
+        Track(filepath="/y2.mp3", title="2000s Track", artist="A", album="B", genre="G", bpm=120, duration=100, year=2005),
+        Track(filepath="/y3.mp3", title="Recent Track", artist="A", album="B", genre="G", bpm=120, duration=100, year=2023),
+        Track(filepath="/y4.mp3", title="No Year Track", artist="A", album="B", genre="G", bpm=120, duration=100, year=None),
+    ]
+    for t in tracks: session.add(t)
+    session.commit()
+
+    # 2. 範囲指定 (2000 - 2010) -> 2005年の曲のみヒット
+    response = client.get("/api/tracks", params={"min_year": 2000, "max_year": 2010})
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "2000s Track"
+
+    # 3. 最小年指定 (2020以降) -> 2023年の曲のみヒット
+    response = client.get("/api/tracks", params={"min_year": 2020})
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "Recent Track"
+
+    # 4. 最大年指定 (1999以前) -> 1995年の曲のみヒット
+    response = client.get("/api/tracks", params={"max_year": 1999})
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "90s Track"
+
+def test_get_tracks_includes_year(client, session: Session):
+    """APIレスポンスにyearが含まれているか確認"""
+    track = Track(
+        filepath="/path/year.mp3", 
+        title="Year Track", 
+        artist="Artist", 
+        album="Album", 
+        genre="Pop", 
+        year=1999, 
+        bpm=120, 
+        duration=100
+    )
+    session.add(track)
+    session.commit()
+
+    response = client.get("/api/tracks")
+    data = response.json()
+    
+    assert len(data) == 1
+    assert data[0]["year"] == 1999

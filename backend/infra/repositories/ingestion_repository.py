@@ -23,6 +23,7 @@ class IngestionRepository:
             "artist": result.get("artist", ""),
             "album": result.get("album", ""),
             "genre": final_genre,
+            "year": result.get("year"),
             "bpm": result.get("bpm", 0),
             "key": result.get("key", ""),
             "scale": result.get("scale", ""),

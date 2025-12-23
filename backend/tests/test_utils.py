@@ -89,3 +89,24 @@ def test_update_file_metadata_mp3_lyrics(tmp_path, mocker):
     
     # Verify save was called
     mock_id3.save.assert_called_once()
+
+def test_metadata_extraction_with_year(tmp_path, mocker):
+    path = str(tmp_path / "year_song.mp3")
+    
+    # Mock TinyTag
+    mock_tag = mocker.Mock()
+    mock_tag.title = "Year Song"
+    mock_tag.artist = "Artist"
+    mock_tag.album = "Album"
+    mock_tag.genre = "Genre"
+    mock_tag.year = "1999" # String format often returned by libraries
+    
+    mocker.patch("tinytag.TinyTag.get", return_value=mock_tag)
+    
+    meta = metadata.extract_metadata_smart(path)
+    assert meta["year"] == 1999
+    
+    # Test invalid year
+    mock_tag.year = "invalid"
+    meta = metadata.extract_metadata_smart(path)
+    assert meta["year"] is None

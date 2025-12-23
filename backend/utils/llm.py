@@ -241,7 +241,7 @@ def generate_vibe_parameters(prompt_text: str, model_name: Optional[str] = None,
     
     system_prompt = """
     You are a professional music curator. Analyze the given user prompt (mood/genre/scene) and estimate the ideal audio features for a track that fits this vibe.
-    Return ONLY a JSON object with keys: bpm, energy, danceability, brightness, noisiness.
+    Return ONLY a JSON object with keys: bpm, energy, danceability, brightness, noisiness, year_min, year_max.
     
     Constraints:
     - bpm: integer (e.g. 80, 120, 140)
@@ -249,6 +249,11 @@ def generate_vibe_parameters(prompt_text: str, model_name: Optional[str] = None,
     - danceability: float between 0.0 and 1.0
     - brightness: float between 0.0 and 1.0
     - noisiness: float between 0.0 and 1.0
+    - year_min: integer (optional, e.g. 1990)
+    - year_max: integer (optional, e.g. 2023)
+    
+    If the user asks for "recent" or "new" tracks, set year_min to a recent year (e.g. 2020).
+    If the user asks for "old school" or "90s", set year_min and year_max accordingly.
     """
     full_prompt = f"{system_prompt}\n\nUser Prompt: {prompt_text}\n\nJSON:"
     
@@ -278,13 +283,6 @@ def generate_vibe_parameters(prompt_text: str, model_name: Optional[str] = None,
                         pass
             
             return params
-        return {}
-    except Exception as e:
-        logger.error(f"Error generating vibe parameters: {e}")
-        return {}
-        if start != -1 and end != -1:
-            json_str = response_text[start:end]
-            return json.loads(json_str)
         return {}
     except Exception as e:
         logger.error(f"Error generating vibe parameters: {e}")

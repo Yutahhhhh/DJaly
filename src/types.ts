@@ -7,6 +7,7 @@ export interface Track {
   bpm: number;
   key: string;
   genre: string;
+  year?: number;
   duration: number;
   // New Analysis Features
   energy: number; // 0.0 - 1.0

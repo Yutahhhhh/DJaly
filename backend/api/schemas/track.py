@@ -9,6 +9,7 @@ class TrackRead(SQLModel):
     artist: str
     album: str
     genre: str
+    year: Optional[int] = None
     duration: float
     bpm: float
     

@@ -15,6 +15,8 @@ export const INITIAL_FILTERS: FilterState = {
   maxDanceability: 1.0,
   minBrightness: 0.0,
   maxBrightness: 1.0,
+  minYear: null,
+  maxYear: null,
   vibePrompt: null,
 };
 

@@ -19,7 +19,7 @@ export function FileExplorer() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   
-  const { isAnalyzing, waitForIngestionComplete } = useIngestion();
+  const { isAnalyzing, waitForIngestionComplete, startIngestion } = useIngestion();
 
   // Modal State (Confirm Only)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,8 +83,8 @@ export function FileExplorer() {
     if (targets.length === 0) return;
 
     try {
-      // Start ingestion via API
-      await ingestService.ingest(targets, forceUpdate);
+      // Start ingestion via Context (handles state sync)
+      await startIngestion(targets, forceUpdate);
 
       // Close local modal immediately so GlobalProgressIndicator takes over
       setIsModalOpen(false);

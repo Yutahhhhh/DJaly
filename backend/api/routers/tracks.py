@@ -70,6 +70,8 @@ def get_tracks(
     max_danceability: Optional[float] = None,
     min_brightness: Optional[float] = None,
     max_brightness: Optional[float] = None,
+    min_year: Optional[int] = None,
+    max_year: Optional[int] = None,
     # Vibe Search
     vibe_prompt: Optional[str] = None,
     limit: int = 100, 
@@ -94,6 +96,8 @@ def get_tracks(
         max_danceability=max_danceability,
         min_brightness=min_brightness,
         max_brightness=max_brightness,
+        min_year=min_year,
+        max_year=max_year,
         vibe_prompt=vibe_prompt,
         limit=limit,
         offset=offset

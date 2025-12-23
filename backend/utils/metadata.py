@@ -59,11 +59,19 @@ def extract_metadata_smart(filepath: str, tag: Optional[TinyTag] = None) -> Dict
 
     filename_fallback = os.path.splitext(os.path.basename(filepath))[0]
 
+    year = None
+    if tag.year:
+        try:
+            year = int(str(tag.year).strip()[:4])
+        except:
+            pass
+
     res = {
         "title": (tag.title or filename_fallback).strip(),
         "artist": (tag.artist or "Unknown").strip(),
         "album": (tag.album or "Unknown").strip(),
-        "genre": (tag.genre or "Unknown").strip()
+        "genre": (tag.genre or "Unknown").strip(),
+        "year": year
     }
     return res
 
@@ -81,6 +89,8 @@ def check_metadata_changed(filepath: str, track: Any) -> bool:
         if current_meta["artist"] != (track.artist or "").strip():
             return True
         if current_meta["album"] != (track.album or "").strip():
+            return True
+        if current_meta.get("year") != track.year:
             return True
             
         return False
