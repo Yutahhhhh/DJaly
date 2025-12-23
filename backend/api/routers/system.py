@@ -77,63 +77,59 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
     ダッシュボード表示用の統計情報を一括取得する。
     DuckDBの集計機能を使用して高速に処理を行う。
     """
-    try:
-        # 1. Basic Counts
-        # 解析済み = bpm > 0
-        total_tracks = session.exec(select(func.count()).select_from(Track)).one()
-        analyzed_tracks = session.exec(select(func.count()).select_from(Track).where(Track.bpm > 0)).one()
-        unanalyzed_tracks = total_tracks - analyzed_tracks
-        
-        # 2. Genre Distribution (All)
-        # 大文字小文字を区別せず集計
-        genre_query = text("""
-            SELECT 
-                genre, 
-                COUNT(*) as count 
-            FROM tracks 
-            WHERE genre IS NOT NULL AND genre != 'Unknown' AND genre != ''
-            GROUP BY genre 
-            ORDER BY count DESC
-        """)
-        genre_rows = session.connection().execute(genre_query).fetchall()
-        
-        genre_distribution = [
-            {"name": row[0], "count": row[1]} for row in genre_rows
-        ]
+    
+    # 1. Basic Counts
+    # 解析済み = bpm > 0
+    total_tracks = session.exec(select(func.count()).select_from(Track)).one()
+    analyzed_tracks = session.exec(select(func.count()).select_from(Track).where(Track.bpm > 0)).one()
+    unanalyzed_tracks = total_tracks - analyzed_tracks
+    
+    # 2. Genre Distribution (All)
+    # 大文字小文字を区別せず集計
+    genre_query = text("""
+        SELECT 
+            genre, 
+            COUNT(*) as count 
+        FROM tracks 
+        WHERE genre IS NOT NULL AND genre != 'Unknown' AND genre != ''
+        GROUP BY genre 
+        ORDER BY count DESC
+    """)
+    genre_rows = session.connection().execute(genre_query).fetchall()
+    
+    genre_distribution = [
+        {"name": row[0], "count": row[1]} for row in genre_rows
+    ]
 
-        # 3. Unverified Genres Count
-        unverified_count = session.exec(
-            select(func.count()).select_from(Track).where(Track.is_genre_verified == False)
-        ).one()
+    # 3. Unverified Genres Count
+    unverified_count = session.exec(
+        select(func.count()).select_from(Track).where(Track.is_genre_verified == False)
+    ).one()
 
-        # 4. Recent Setlists
-        recent_setlists = session.exec(
-            select(Setlist).order_by(Setlist.updated_at.desc()).limit(5)
+    # 4. Recent Setlists
+    recent_setlists = session.exec(
+        select(Setlist).order_by(Setlist.updated_at.desc()).limit(5)
     ).all()
 
-        # 5. System Config Check
-        root_path = get_setting_value(session, "root_path", "")
-        llm_model = get_setting_value(session, "llm_model", "llama3.2")
-        
-        # LLM Status check (lightweight)
-        # 実際のリクエストはタイムアウトする可能性があるので、ここでは設定値の有無のみ確認し、
-        # 接続テストはフロントエンドで非同期に行うか、Health Check APIを利用する。
-        llm_configured = bool(llm_model)
+    # 5. System Config Check
+    root_path = get_setting_value(session, "root_path", "")
+    llm_model = get_setting_value(session, "llm_model", "llama3.2")
+    
+    # LLM Status check (lightweight)
+    # 実際のリクエストはタイムアウトする可能性があるので、ここでは設定値の有無のみ確認し、
+    # 接続テストはフロントエンドで非同期に行うか、Health Check APIを利用する。
+    llm_configured = bool(llm_model)
 
-        return {
-            "total_tracks": total_tracks,
-            "analyzed_tracks": analyzed_tracks,
-            "unanalyzed_tracks": unanalyzed_tracks,
-            "genre_distribution": genre_distribution,
-            "unverified_genres_count": unverified_count,
-            "recent_setlists": recent_setlists,
-            "config": {
-                "has_root_path": bool(root_path),
-                "llm_model": llm_model,
-                "llm_configured": llm_configured
-            }
+    return {
+        "total_tracks": total_tracks,
+        "analyzed_tracks": analyzed_tracks,
+        "unanalyzed_tracks": unanalyzed_tracks,
+        "genre_distribution": genre_distribution,
+        "unverified_genres_count": unverified_count,
+        "recent_setlists": recent_setlists,
+        "config": {
+            "has_root_path": bool(root_path),
+            "llm_model": llm_model,
+            "llm_configured": llm_configured
         }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Dashboard Error: {str(e)}")
+    }

@@ -8,7 +8,16 @@
   "permissions": [
     "core:default",
     "shell:allow-open",
-    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "bin/djaly-server",
+          "cmd": "djaly-server",
+          "sidecar": true
+        }
+      ]
+    },
     "fs:default",
     "dialog:default",
     "http:default",
