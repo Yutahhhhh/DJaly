@@ -11,6 +11,7 @@ pub fn run() {
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
         .plugin(tauri_plugin_devtools::init()) 
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -70,7 +71,10 @@ pub fn run() {
             let port = "48123"; // 競合しにくいポート番号
 
             let sidecar_command = app.shell().sidecar("djaly-server")
-                .unwrap()
+                .map_err(|e| {
+                    eprintln!("Failed to create sidecar command: {}", e);
+                    e
+                })?
                 .env("DJALY_PORT", port);
             
             // コマンドの実行結果を詳細にログ出力
@@ -78,7 +82,10 @@ pub fn run() {
 
             let (mut _rx, _child) = sidecar_command
                 .spawn()
-                .expect("Failed to spawn sidecar");
+                .map_err(|e| {
+                    eprintln!("Failed to spawn sidecar: {}", e);
+                    e
+                })?;
 
             // 非同期でログを出力するスレッドを作成（デバッグ用）
             tauri::async_runtime::spawn(async move {
