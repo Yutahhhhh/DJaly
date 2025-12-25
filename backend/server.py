@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # ポート番号を環境変数から取得（デフォルトは開発用の8001）
     # 本番環境ではTauri側からランダムな空きポートなどが渡されることを想定、
     # または競合しにくい固定ポート（例: 48123）を使用する
-    port = settings.DJALY_PORT
+    port = int(os.environ.get("DJALY_PORT", settings.DJALY_PORT))
 
     print(f"Starting Djaly Backend Server on port {port}...")
     print(f"User Data Directory: {settings.USER_DATA_DIR}")

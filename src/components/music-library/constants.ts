@@ -7,6 +7,7 @@ export const INITIAL_FILTERS: FilterState = {
   maxDuration: null,
   artist: "",
   album: "",
+  lyrics: "",
   genres: [],
   key: "",
   minEnergy: 0.0,

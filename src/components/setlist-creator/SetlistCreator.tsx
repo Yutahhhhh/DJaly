@@ -19,13 +19,7 @@ import { TrackRow } from "./TrackRow";
 import { setlistsService, Setlist } from "@/services/setlists";
 import { Track } from "@/types";
 
-export function SetlistCreator({
-  onPlay,
-  currentTrackId,
-}: {
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
-}) {
+export function SetlistCreator() {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [activeSetlist, setActiveSetlist] = useState<Setlist | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -218,17 +212,35 @@ export function SetlistCreator({
               }}
               onTrackSelect={setSelectedTrack}
               selectedTrackId={selectedTrack?.id || null}
-              onPlay={onPlay}
-              currentTrackId={currentTrackId}
             />
             {/* TrackSelectorのPropsにbridgeStateが存在しないエラーを回避しつつ
               型を安全にキャストして渡します。
             */}
             <TrackSelector
               referenceTrack={selectedTrack}
-              onAddTrack={(t: Track) => {
-                if (!tracks.some((ex) => ex.id === t.id))
-                  commitTracksToDB([...tracks, t]);
+              onAddTrack={(t: Track, wordplayData?: any) => {
+                if (!tracks.some((ex) => ex.id === t.id)) {
+                  const newTracks = [...tracks, t];
+                  commitTracksToDB(newTracks).then(() => {
+                      if (wordplayData && activeSetlist) {
+                          // Reload tracks to get the new setlist_track_id
+                          setlistsService.getTracks(activeSetlist.id).then(updatedTracks => {
+                              // Find the newly added track (last one with matching track_id)
+                              // Since we just added it to the end.
+                              const addedTrack = updatedTracks.find(tr => tr.id === t.id && !tr.wordplay_json); 
+                              // Note: !tr.wordplay_json check is to avoid updating existing ones if we were to support duplicates, 
+                              // but here we only add if not exists.
+                              
+                              if (addedTrack) {
+                                  setlistsService.updateWordplay(addedTrack.setlist_track_id, wordplayData).then(() => {
+                                      // Refresh tracks to show the icon
+                                      setlistsService.getTracks(activeSetlist.id).then(setTracks);
+                                  });
+                              }
+                          });
+                      }
+                  });
+                }
               }}
               onInjectTracks={(
                 ts: Track[],
@@ -242,8 +254,6 @@ export function SetlistCreator({
                 commitTracksToDB(nt);
               }}
               currentSetlistTracks={tracks}
-              onPlay={onPlay}
-              currentTrackId={currentTrackId}
               bridgeState={{
                 start: bridgeStart,
                 end: bridgeEnd,
@@ -267,7 +277,6 @@ export function SetlistCreator({
               id="overlay"
               track={activeDragItem.track}
               type={activeDragItem.type as any}
-              onPlay={() => {}}
             />
           </div>
         ) : null}

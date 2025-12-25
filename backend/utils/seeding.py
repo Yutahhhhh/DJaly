@@ -1,143 +1,9 @@
-import logging
 import json
-from sqlalchemy import text
+import logging
 from sqlmodel import Session, select
-from infra.database.connection import engine
 from models import Prompt, Preset
 
 logger = logging.getLogger(__name__)
-
-MIGRATIONS = {
-    1: [
-        # --- Sequences ---
-        "CREATE SEQUENCE IF NOT EXISTS track_id_seq START 1;",
-        "CREATE SEQUENCE IF NOT EXISTS setlist_id_seq START 1;",
-        "CREATE SEQUENCE IF NOT EXISTS setlist_track_id_seq START 1;",
-        "CREATE SEQUENCE IF NOT EXISTS prompt_id_seq START 1;",
-        "CREATE SEQUENCE IF NOT EXISTS preset_id_seq START 1;",
-
-        # --- Tracks Table (Lightweight) ---
-        """
-        CREATE TABLE IF NOT EXISTS tracks (
-            id INTEGER PRIMARY KEY DEFAULT nextval('track_id_seq'),
-            filepath VARCHAR UNIQUE,
-            title VARCHAR,
-            artist VARCHAR,
-            album VARCHAR,
-            genre VARCHAR,
-            duration DOUBLE,
-            bpm DOUBLE,
-            
-            -- Basic Features
-            key VARCHAR,
-            scale VARCHAR,
-            energy DOUBLE,
-            danceability DOUBLE,
-            
-            -- Niche / Detailed Features
-            loudness DOUBLE,
-            brightness DOUBLE,
-            noisiness DOUBLE,
-            contrast DOUBLE,
-            
-            -- Essentia Advanced Features (New)
-            loudness_range DOUBLE DEFAULT 0.0, -- Dynamics (dB)
-            spectral_flux DOUBLE DEFAULT 0.0,  -- Change Intensity
-            spectral_rolloff DOUBLE DEFAULT 0.0, -- Sharpness/Timbre
-            
-            is_genre_verified BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP
-        );
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_tracks_created_at ON tracks (created_at);",
-        "CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks (title);",
-        "CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks (artist);",
-
-        # --- Track Analyses Table (Heavy Data) ---
-        """
-        CREATE TABLE IF NOT EXISTS track_analyses (
-            track_id INTEGER PRIMARY KEY,
-            beat_positions JSON DEFAULT '[]',
-            waveform_peaks JSON DEFAULT '[]',
-            features_extra_json VARCHAR DEFAULT '{}'
-        );
-        """,
-
-        # --- Setlists Tables ---
-        """
-        CREATE TABLE IF NOT EXISTS setlists (
-            id INTEGER PRIMARY KEY DEFAULT nextval('setlist_id_seq'),
-            name VARCHAR,
-            description VARCHAR,
-            display_order INTEGER DEFAULT 0,
-            genre VARCHAR,
-            target_duration DOUBLE,
-            rating INTEGER,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS setlist_tracks (
-            id INTEGER PRIMARY KEY DEFAULT nextval('setlist_track_id_seq'),
-            setlist_id INTEGER,
-            track_id INTEGER,
-            position INTEGER,
-            transition_note VARCHAR,
-            created_at TIMESTAMP
-        );
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_setlist_tracks_setlist_id ON setlist_tracks (setlist_id);",
-        "CREATE INDEX IF NOT EXISTS idx_setlist_tracks_track_id ON setlist_tracks (track_id);",
-
-        # --- Settings Table ---
-        """
-        CREATE TABLE IF NOT EXISTS settings (
-            key VARCHAR PRIMARY KEY,
-            value VARCHAR
-        );
-        """,
-
-        # --- Prompts & Presets Tables ---
-        """
-        CREATE TABLE IF NOT EXISTS prompts (
-            id INTEGER PRIMARY KEY DEFAULT nextval('prompt_id_seq'),
-            name VARCHAR,
-            content VARCHAR,
-            is_default BOOLEAN DEFAULT FALSE,
-            display_order INTEGER DEFAULT 0,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS presets (
-            id INTEGER PRIMARY KEY DEFAULT nextval('preset_id_seq'),
-            name VARCHAR,
-            description VARCHAR,
-            preset_type VARCHAR DEFAULT 'all',
-            filters_json VARCHAR,
-            prompt_id INTEGER,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        );
-        """,
-
-        # --- Track Embeddings Table (Vector Data) ---
-        """
-        CREATE TABLE IF NOT EXISTS track_embeddings (
-            track_id INTEGER PRIMARY KEY,
-            model_name VARCHAR DEFAULT 'musicnn',
-            embedding_json VARCHAR DEFAULT '[]',
-            updated_at TIMESTAMP
-        );
-        """
-    ],
-    2: [
-        "ALTER TABLE tracks ADD COLUMN year INTEGER DEFAULT NULL;",
-        "CREATE INDEX IF NOT EXISTS idx_tracks_year ON tracks (year);"
-    ]
-}
 
 def seed_initial_data(session: Session):
     """初期データ投入 (Essentiaの特徴量を考慮した最新プリセット)"""
@@ -174,51 +40,28 @@ def seed_initial_data(session: Session):
             "name": "☕️ Warmup / Lounge",
             "description": "オープニング向け。音圧変化が少なく(Low Dyn)、心地よい(Low Flux)選曲。",
             "preset_type": "search",
-            "filters": {
-                "maxEnergy": 0.55, 
-                "maxBpm": 124, 
-                "minDanceability": 0.4,
-                "maxLoudnessRange": 6.0,
-                "maxSpectralFlux": 0.8
-            },
+            "filters": {},
             "prompt_content": "Act as an opening DJ. Select deep, steady tracks that set a mood without demanding attention. Avoid big drops."
         },
         {
             "name": "💣 Peak Time Bangers",
             "description": "メインフロア直撃。高エナジー、高音圧、派手な展開。",
             "preset_type": "search",
-            "filters": {
-                "minEnergy": 0.75, 
-                "minDanceability": 0.7, 
-                "minBrightness": 0.5,
-                "minSpectralFlux": 1.2
-            },
+            "filters": {},
             "prompt_content": "It is peak time. Choose the most explosive, high-energy tracks available. Focus on tracks with big build-ups."
         },
         {
             "name": "⚙️ Hypnotic / Driving",
             "description": "テクノ/ハウス向け。淡々としたグルーヴ(Low Flux)だが力強い(High Energy)。",
             "preset_type": "search",
-            "filters": {
-                "minEnergy": 0.65, 
-                "maxBrightness": 0.6, 
-                "key": "Minor",
-                "maxSpectralFlux": 0.6,
-                "maxLoudnessRange": 5.0
-            },
+            "filters": {},
             "prompt_content": "Create a hypnotic, driving atmosphere suitable for techno. Prioritize consistent grooves and locked-in rhythms over melodies."
         },
         {
             "name": "😭 Emotional / Anthem",
             "description": "終盤向け。ダイナミクスレンジが広く(High Dyn)、ドラマチックな展開。",
             "preset_type": "search",
-            "filters": {
-                "minEnergy": 0.5, 
-                "maxEnergy": 0.9, 
-                "minBrightness": 0.6, 
-                "key": "Major",
-                "minLoudnessRange": 9.0
-            },
+            "filters": {},
             "prompt_content": "Create an emotional setlist. Look for tracks with high 'Dynamics' (Loudness Range) that indicate dramatic breakdowns and euphoric drops."
         }
     ]
@@ -340,69 +183,3 @@ def seed_initial_data(session: Session):
             )
             session.add(preset)
             session.commit()
-
-def run_migrations():
-    """DBマイグレーションを実行する"""
-    with Session(engine) as session:
-        session.exec(text("""
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """))
-        session.commit()
-
-        # --- Schema Integrity Check (Fix for missing 'year' column) ---
-        try:
-            # Check if 'year' column exists in 'tracks' table
-            # DuckDB specific pragma
-            columns_info = session.exec(text("PRAGMA table_info(tracks)")).all()
-            column_names = [row[1] for row in columns_info]
-            
-            if "year" not in column_names:
-                # If 'year' is missing but version is already >= 2, force rollback to 1
-                # This triggers the migration version 2 again.
-                current_ver_check = session.exec(text("SELECT MAX(version) FROM schema_migrations")).first()
-                if current_ver_check and current_ver_check[0] and current_ver_check[0] >= 2:
-                    logger.warning("Detected missing 'year' column with DB version >= 2. Rolling back version to 1 to force migration.")
-                    session.exec(text("DELETE FROM schema_migrations WHERE version >= 2"))
-                    session.commit()
-        except Exception as e:
-            # Table might not exist yet (fresh install), ignore
-            logger.info(f"Schema check skipped (probably fresh install): {e}")
-        # --------------------------------------------------------------
-
-        result = session.exec(text("SELECT MAX(version) FROM schema_migrations")).first()
-        current_version = 0
-        if result is not None:
-            val = result[0]
-            if val is not None:
-                current_version = val
-        
-        logger.info(f"Current DB version: {current_version}")
-
-        sorted_versions = sorted(MIGRATIONS.keys())
-        initial_setup = False
-
-        for version in sorted_versions:
-            if version > current_version:
-                logger.info(f"Applying migration version {version}...")
-                try:
-                    for sql in MIGRATIONS[version]:
-                        if sql.strip():
-                            session.exec(text(sql))
-                    
-                    session.exec(text(f"INSERT INTO schema_migrations (version) VALUES ({version})"))
-                    session.commit()
-                    logger.info(f"Migration version {version} applied successfully.")
-
-                    if version == 1:
-                        initial_setup = True
-                except Exception as e:
-                    logger.error(f"Migration version {version} failed: {e}")
-                    session.rollback()
-                    raise e
-                    
-        if initial_setup:
-            logger.info("Initial setup detected. Seeding default data...")
-            seed_initial_data(session)

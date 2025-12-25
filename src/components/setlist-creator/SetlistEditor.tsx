@@ -14,8 +14,6 @@ export interface SetlistEditorProps {
   onRemoveTrack: (index: number) => void;
   onTrackSelect: (track: Track) => void;
   selectedTrackId: number | null;
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
 }
 
 export function SetlistEditor({
@@ -23,8 +21,6 @@ export function SetlistEditor({
   onRemoveTrack,
   onTrackSelect,
   selectedTrackId,
-  onPlay,
-  currentTrackId,
 }: SetlistEditorProps) {
   const { setNodeRef } = useDroppable({ id: "setlist-editor-droppable" });
   const totalDuration = tracks.reduce(
@@ -64,9 +60,7 @@ export function SetlistEditor({
                   id={`setlist-${track.id}`}
                   track={track}
                   type="SETLIST_ITEM"
-                  isPlaying={currentTrackId === track.id}
                   isSelected={selectedTrackId === track.id}
-                  onPlay={() => onPlay(track)}
                   onSelect={() => onTrackSelect(track)}
                   onRemove={() => onRemoveTrack(index)}
                 />

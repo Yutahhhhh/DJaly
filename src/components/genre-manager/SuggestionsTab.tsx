@@ -3,6 +3,7 @@ import {
   genreService,
   GenreAnalysisResult,
   GenreUpdateResult,
+  AnalysisMode,
 } from "@/services/genres";
 import { tracksService } from "@/services/tracks";
 import { Track } from "@/types";
@@ -28,15 +29,17 @@ import { Progress } from "@/components/ui/progress";
 
 interface SuggestionsTabProps {
   onPlay: (track: Track) => void;
+  mode?: AnalysisMode;
 }
 
-export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
+export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay, mode = "both" }) => {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Batch Analysis State
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
+  // const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("both"); // Removed
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
@@ -53,7 +56,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
   const fetchTracks = async () => {
     setLoading(true);
     try {
-      const data = await genreService.getUnknownTracks(0, 50);
+      const data = await genreService.getUnknownTracks(0, 50, mode);
       setTracks(data);
     } catch (error) {
       console.error("Failed to fetch tracks", error);
@@ -64,15 +67,15 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
 
   useEffect(() => {
     fetchTracks();
-  }, []);
+  }, [mode]);
 
   const handleAnalyze = async (track: Track) => {
     setAnalyzingId(track.id);
     setCurrentTrack(track);
     try {
-      const result = await genreService.analyzeTrackWithLlm(track.id);
+      const result = await genreService.analyzeTrackWithLlm(track.id, false, mode);
       setAnalysisResult(result);
-      setEditedGenre(result.genre);
+      setEditedGenre(mode === "subgenre" ? (result.subgenre || "") : result.genre);
       setIsDialogOpen(true);
     } catch (error: any) {
       console.error("Failed to analyze", error);
@@ -122,7 +125,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
     document.body.removeChild(link);
   };
 
-  const handleBatchAnalyze = async () => {
+  const handleBatchAnalyze = async (targetMode: AnalysisMode) => {
     if (tracks.length === 0) return;
     if (isPreparing) return;
     
@@ -131,7 +134,9 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
     // First, get ALL unknown IDs to know the scope
     let allIds: number[] = [];
     try {
-      allIds = await genreService.getAllUnknownTrackIds();
+      // If targetMode is "both", we want all unverified tracks regardless of current view mode
+      // If targetMode is specific, we use the current view mode logic (which filters by subgenre emptiness if mode=subgenre)
+      allIds = await genreService.getAllUnknownTrackIds(targetMode === "both" ? "genre" : mode);
     } catch (e) {
       console.error("Failed to get all IDs", e);
       alert("Failed to start: Could not fetch track list.");
@@ -167,7 +172,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
     const processChunk = async (chunkIds: number[]) => {
         if (abortRef.current) return;
         try {
-            const results = await genreService.analyzeTracksBatchWithLlm(chunkIds);
+            const results = await genreService.analyzeTracksBatchWithLlm(chunkIds, targetMode);
             allResults.push(...results);
         } catch (error: any) {
             console.error("Chunk failed", error);
@@ -220,7 +225,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
 
   return (
     <div className="h-full flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between px-4 pt-4">
         <div>
           <h3 className="text-lg font-semibold">Unknown Genre Tracks</h3>
           <p className="text-sm text-muted-foreground">
@@ -229,26 +234,46 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
         </div>
         <div className="flex gap-2">
           {isBatchAnalyzing ? (
-             <Button variant="destructive" onClick={handleStopBatch}>
-               <StopCircle className="mr-2 h-4 w-4" />
-               Stop Analysis
-             </Button>
+            <Button variant="destructive" onClick={handleStopBatch}>
+              <StopCircle className="mr-2 h-4 w-4" />
+              Stop Analysis
+            </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={fetchTracks} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={fetchTracks}
+                disabled={loading}
+              >
                 Refresh
               </Button>
-              <Button
-                onClick={handleBatchAnalyze}
-                disabled={loading || tracks.length === 0 || isPreparing}
-              >
-                {isPreparing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Wand2 className="mr-2 h-4 w-4" />
-                )}
-                Analyze All Remaining
-              </Button>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => handleBatchAnalyze(mode)}
+                  disabled={loading || tracks.length === 0 || isPreparing}
+                  variant="secondary"
+                >
+                  {isPreparing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="mr-2 h-4 w-4" />
+                  )}
+                  Analyze {mode === "subgenre" ? "Subgenres" : "Genres"}
+                </Button>
+
+                <Button
+                  onClick={() => handleBatchAnalyze("both")}
+                  disabled={loading || tracks.length === 0 || isPreparing}
+                >
+                  {isPreparing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="mr-2 h-4 w-4" />
+                  )}
+                  Analyze All
+                </Button>
+              </div>
             </>
           )}
         </div>
@@ -257,17 +282,19 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay }) => {
       {isBatchAnalyzing && (
         <div className="bg-muted p-4 rounded-md space-y-2">
           <div className="flex justify-between text-sm">
-            <span>Processing... {processedCount} / {batchTotal}</span>
+            <span>
+              Processing... {processedCount} / {batchTotal}
+            </span>
             <span>{Math.round(batchProgress)}%</span>
           </div>
-          <Progress value={batchProgress} className="h-2" /> 
+          <Progress value={batchProgress} className="h-2" />
           <p className="text-xs text-muted-foreground">
             Analyzing in batches of 50. Changes are auto-applied.
           </p>
         </div>
       )}
 
-      <ScrollArea className="flex-1 border rounded-md">
+      <ScrollArea className="flex-1 border-t">
         <div className="p-4 space-y-2">
           {loading ? (
             <div className="flex justify-center p-8">

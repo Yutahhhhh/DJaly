@@ -12,6 +12,7 @@ export interface Setlist {
 export interface SetlistTrack extends Track {
   setlist_track_id: number;
   position: number;
+  wordplay_json?: string;
 }
 
 export const setlistsService = {
@@ -32,6 +33,9 @@ export const setlistsService = {
   },
   updateTracks: async (id: number, trackIds: number[]) => {
     return apiClient.post(`/setlists/${id}/tracks`, trackIds);
+  },
+  updateWordplay: async (setlistTrackId: number, wordplayData: any) => {
+    return apiClient.patch(`/setlist-tracks/${setlistTrackId}/wordplay`, { wordplay_json: JSON.stringify(wordplayData) });
   },
 
   getExportUrl: (id: number) => {

@@ -22,6 +22,7 @@ export function buildTrackSearchParams(
   if (filters.key) params["key"] = filters.key;
   if (filters.artist) params["artist"] = filters.artist;
   if (filters.album) params["album"] = filters.album;
+  if (filters.lyrics) params["lyrics"] = filters.lyrics;
   if (filters.genres && filters.genres.length > 0) {
     // API client handles array serialization usually, but let's check how it was done.
     // In the original code: params["genres"] = currentFilters.genres;

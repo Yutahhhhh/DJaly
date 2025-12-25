@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 from sqlmodel import Session, select
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
+from domain.models.lyrics import Lyrics
 import infra.database.connection as db_connection
 
 class IngestionRepository:
@@ -85,6 +86,17 @@ class IngestionRepository:
                     track_id=track_id, model_name=model_name, embedding_json=json.dumps(embedding_data)
                 )
                 session.add(new_embedding)
+
+        if "lyrics" in result and result["lyrics"]:
+            lyrics_content = result["lyrics"]
+            existing_lyrics = session.get(Lyrics, track_id)
+            if existing_lyrics:
+                existing_lyrics.content = lyrics_content
+                existing_lyrics.updated_at = datetime.now()
+                session.add(existing_lyrics)
+            else:
+                new_lyrics = Lyrics(track_id=track_id, content=lyrics_content)
+                session.add(new_lyrics)
 
     def save_track(self, result: Dict[str, Any], update_metadata: bool = True):
         try:

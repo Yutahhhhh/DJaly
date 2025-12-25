@@ -44,3 +44,6 @@ keys/
 backend/.coverage
 htmlcov/
 coverage.xml
+
+output.txt
+backup/*

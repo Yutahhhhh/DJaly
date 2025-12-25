@@ -7,19 +7,38 @@ cd "$(dirname "$0")"
 export ENV=dev
 source .venv/bin/activate
 
+# Load .env from project root if exists
+if [ -f "../.env" ]; then
+  echo "Loading environment variables from ../.env"
+  set -a
+  source ../.env
+  set +a
+fi
+
 # 環境変数の設定
 export OLLAMA_HOST=${OLLAMA_HOST:-http://localhost:11434}
 export DB_PATH="$(pwd)/../db_data/djaly.duckdb"
 export MUSIC_DIR="$(pwd)/../music_data"
-export DJALY_PORT=${DJALY_PORT:-8001}
+
+# ポート設定 (0の場合は8001に強制)
+if [ -z "$DJALY_PORT" ] || [ "$DJALY_PORT" = "0" ]; then
+    export DJALY_PORT=8001
+fi
+
+echo "Starting Djaly Backend on port $DJALY_PORT..."
+
 # Suppress TensorFlow/Essentia logs
 export TF_CPP_MIN_LOG_LEVEL=3
 
 # ポートを使用しているプロセスがあれば終了
 PID=$(lsof -ti:$DJALY_PORT)
 if [ ! -z "$PID" ]; then
-  echo "Killing process on port $DJALY_PORT (PID: $PID)..."
-  kill -9 $PID
+  echo "Stopping process on port $DJALY_PORT (PID: $PID)..."
+  kill $PID
+  # プロセスが終了するまで待機
+  while kill -0 $PID 2>/dev/null; do
+    sleep 0.5
+  done
 fi
 
 # サーバーの起動

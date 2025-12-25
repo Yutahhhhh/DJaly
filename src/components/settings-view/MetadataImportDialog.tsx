@@ -36,6 +36,8 @@ export function MetadataImportDialog({
         artist: u.new.artist ?? u.current.artist,
         album: u.new.album ?? u.current.album,
         genre: u.new.genre ?? u.current.genre,
+        subgenre: u.new.subgenre ?? u.current.subgenre,
+        year: u.new.year ?? u.current.year,
         is_genre_verified:
           u.new.is_genre_verified ?? u.current.is_genre_verified,
         bpm: 0,
@@ -65,6 +67,8 @@ export function MetadataImportDialog({
       artist: u.new.artist ?? u.current.artist,
       album: u.new.album ?? u.current.album,
       genre: u.new.genre ?? u.current.genre,
+      subgenre: u.new.subgenre ?? u.current.subgenre,
+      year: u.new.year ?? u.current.year,
       is_genre_verified: u.new.is_genre_verified ?? u.current.is_genre_verified,
       bpm: 0,
       key: "",
@@ -138,7 +142,6 @@ export function MetadataImportDialog({
             <div className="flex-1 border rounded-md overflow-hidden bg-background">
               <TrackList
                 tracks={visibleTracks}
-                onPlay={() => {}}
                 lastTrackElementRef={lastTrackElementRef}
                 analyzingId={null}
                 onAnalyze={() => {}}

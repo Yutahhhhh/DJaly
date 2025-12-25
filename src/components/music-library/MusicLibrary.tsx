@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, Search, X } from "lucide-react";
@@ -7,80 +7,51 @@ import { Badge } from "@/components/ui/badge";
 import { FilterDialog } from "./FilterDialog";
 import { TrackList } from "./TrackList";
 import { FilterState } from "./types";
-import { INITIAL_FILTERS, LIMIT } from "./constants";
-import { buildTrackSearchParams } from "./utils";
-import { tracksService } from "@/services/tracks";
 import { ingestService } from "@/services/ingest";
+import { useTrackSearch } from "./useTrackSearch";
+import { LIMIT } from "./constants";
 
 interface MusicLibraryProps {
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
   isPlayerLoading?: boolean;
 }
 
 export function MusicLibrary({
-  onPlay,
-  currentTrackId,
   isPlayerLoading,
 }: MusicLibraryProps) {
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<number | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [offset, setOffset] = useState(0);
 
-  // Search States
-  const [titleQuery, setTitleQuery] = useState("");
-  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
-  const [currentPreset, setCurrentPreset] = useState("custom");
-
-  // Popover open state
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-
-  // Debounce timer
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    query,
+    setQuery,
+    tracks,
+    loading,
+    filters,
+    currentPreset,
+    isFilterOpen,
+    setIsFilterOpen,
+    applyFilters,
+    clearAllFilters,
+    loadMore,
+    hasMore,
+    activeFilterCount,
+    setTracks,
+    search,
+  } = useTrackSearch({ limit: LIMIT });
 
   const observer = useRef<IntersectionObserver | null>(null);
   const lastTrackElementRef = useCallback(
     (node: HTMLTableRowElement | null) => {
-      if (isLoading) return;
+      if (loading) return;
       if (observer.current) observer.current.disconnect();
       observer.current = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMore) {
-          setOffset((prevOffset) => prevOffset + LIMIT);
+          loadMore();
         }
       });
       if (node) observer.current.observe(node);
     },
-    [isLoading, hasMore]
+    [loading, hasMore, loadMore]
   );
-
-  useEffect(() => {
-    fetchTracks();
-  }, [offset]);
-
-  // Handle Main Title Search with Debounce
-  const handleTitleSearch = (val: string) => {
-    setTitleQuery(val);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-
-    searchTimeoutRef.current = setTimeout(() => {
-      setOffset(0);
-      fetchTracks(true, val, filters);
-    }, 500);
-  };
-
-  // Apply Filters
-  const applyFilters = (
-    newFilters: FilterState,
-    presetName: string = "custom"
-  ) => {
-    setFilters(newFilters);
-    setCurrentPreset(presetName);
-    setIsFilterOpen(false);
-    setOffset(0);
-    setTimeout(() => fetchTracks(true, titleQuery, newFilters), 0);
-  };
 
   const clearFilter = (key: keyof FilterState) => {
     const newFilters = { ...filters };
@@ -105,60 +76,14 @@ export function MusicLibrary({
     applyFilters(newFilters, "custom");
   };
 
-  const clearAllFilters = () => {
-    setTitleQuery("");
-    applyFilters(INITIAL_FILTERS, "custom");
-  };
-
-  const fetchTracks = async (
-    reset = false,
-    currentTitle = titleQuery,
-    currentFilters = filters
-  ) => {
-    setIsLoading(true);
-    try {
-      const currentOffset = reset ? 0 : offset;
-      const params = buildTrackSearchParams(
-        currentTitle,
-        currentFilters,
-        LIMIT,
-        currentOffset
-      );
-
-      const response = await tracksService.getTracks(params);
-      setTracks((prev) => {
-        if (reset || currentOffset === 0) return response;
-
-        // 重複排除ロジックを追加
-        // IDが既に存在する場合は追加しないようにフィルタリング
-        const existingIds = new Set(prev.map((t) => t.id));
-        const uniqueNewTracks = response.filter((t) => !existingIds.has(t.id));
-
-        return [...prev, ...uniqueNewTracks];
-      });
-      
-      // Vibe Search (Preset) の場合はページングを無効化 (一貫性のため)
-      // 通常の検索の場合はページングを有効化
-      if (currentFilters.vibePrompt) {
-        setHasMore(false);
-      } else {
-        setHasMore(response.length === LIMIT);
-      }
-    } catch (e) {
-      console.error("Failed to fetch tracks", e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleAnalyze = async (track: Track) => {
     if (analyzingId) return;
     setAnalyzingId(track.id);
 
     try {
       await ingestService.ingest([track.filepath], true);
-      setOffset(0);
-      fetchTracks(true);
+      // Refresh tracks to get updated analysis
+      search(true);
     } catch (error) {
       console.error("Error calling analyze API", error);
     } finally {
@@ -172,18 +97,8 @@ export function MusicLibrary({
     );
   };
 
-  // Helper to count active filters
+  // Helper to count active filters for display logic (hook provides total count, but we need specific checks for badges)
   const isFeatureActive = (min: number, max: number) => min > 0 || max < 1;
-  const activeFilterCount = [
-    filters.bpm,
-    filters.key,
-    filters.artist,
-    filters.album,
-    filters.genres,
-    isFeatureActive(filters.minEnergy, filters.maxEnergy),
-    isFeatureActive(filters.minDanceability, filters.maxDanceability),
-    isFeatureActive(filters.minBrightness, filters.maxBrightness),
-  ].filter(Boolean).length;
 
   return (
     <div className="h-full flex flex-col p-4 gap-4">
@@ -205,13 +120,13 @@ export function MusicLibrary({
             <Input
               placeholder="Search by Title, Artist or Tags..."
               className="pl-9"
-              value={titleQuery}
-              onChange={(e) => handleTitleSearch(e.target.value)}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-            {titleQuery && (
+            {query && (
               <button
                 className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                onClick={() => handleTitleSearch("")}
+                onClick={() => setQuery("")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -300,9 +215,7 @@ export function MusicLibrary({
       {/* Track List */}
       <TrackList
         tracks={tracks}
-        isLoading={isLoading && tracks.length === 0}
-        onPlay={onPlay}
-        currentTrackId={currentTrackId}
+        isLoading={loading && tracks.length === 0}
         lastTrackElementRef={lastTrackElementRef}
         analyzingId={analyzingId}
         onAnalyze={handleAnalyze}

@@ -18,14 +18,19 @@ export const metadataService = {
     updates: { lyrics?: string; artwork_data?: string }
   ) => apiClient.patch(`/metadata/update`, { track_id: trackId, ...updates }),
 
-  // LLMを使用したコンテンツ取得（個別のエンドポイント）
-  fetchLyrics: (trackId: number) =>
-    apiClient.post<{ lyrics: string }>(`/metadata/fetch-lyrics`, {
-      track_id: trackId,
-    }),
-
   fetchArtworkInfo: (trackId: number) =>
     apiClient.post<{ info: string }>(`/metadata/fetch-artwork-info`, {
       track_id: trackId,
     }),
+
+  fetchLyricsSingle: (trackId: number) =>
+    apiClient.post<{ lyrics: string }>(`/metadata/fetch-lyrics-single`, {
+      track_id: trackId,
+    }),
+
+  getLyricsFromDB: (trackId: number) => 
+    apiClient.get<{ content: string; source: string; language: string }>(`/tracks/${trackId}/lyrics`),
+    
+  updateLyricsInDB: (trackId: number, content: string) =>
+    apiClient.put(`/tracks/${trackId}/lyrics`, { track_id: trackId, content }),
 };

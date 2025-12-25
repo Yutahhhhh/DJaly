@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from infra.database.connection import init_db
+from infra.database.connection import init_db, close_db
 from api.routers import (
     filesystem,
     genres,
@@ -11,16 +11,20 @@ from api.routers import (
     setlists,
     settings as settings_router,
     system,
-    tracks
+    tracks,
+    lyrics,
+    metadata
 )
 
 from config import settings
+import os
 
 # Lifespan event to handle startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()  # DuckDBの初期化 (Raw SQLによるSequence/Table作成)
     yield
+    close_db() # 終了時にDB接続を閉じる
 
 app = FastAPI(title="Djaly Backend API", lifespan=lifespan)
 
@@ -57,3 +61,5 @@ app.include_router(setlists.router)
 app.include_router(settings_router.router)
 app.include_router(system.router)
 app.include_router(tracks.router)
+app.include_router(lyrics.router)
+app.include_router(metadata.router)

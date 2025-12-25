@@ -116,54 +116,6 @@ class FilesystemAppService:
     def _clean_title_for_search(self, title: str) -> str:
         return re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
 
-    def fetch_lyrics(self, track_id: int) -> str:
-        track = self.session.get(Track, track_id)
-        if not track:
-            raise ValueError("Track not found")
-        
-        return self._fetch_lyrics_from_api(track.artist, track.title) or ""
-
-    def _fetch_lyrics_from_api(self, artist: str, title: str) -> str | None:
-        try:
-            params = {"artist_name": artist, "track_name": title}
-            resp = requests.get("https://lrclib.net/api/get", params=params, timeout=3)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("plainLyrics"):
-                    return data.get("plainLyrics")
-            
-            cleaned_title = self._clean_title_for_search(title)
-            if cleaned_title != title:
-                params["track_name"] = cleaned_title
-                resp = requests.get("https://lrclib.net/api/get", params=params, timeout=3)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("plainLyrics"):
-                        return data.get("plainLyrics")
-        except Exception as e:
-            print(f"Lrclib API Error: {e}")
-
-        try:
-            url = f"https://api.lyrics.ovh/v1/{artist}/{title}"
-            resp = requests.get(url, timeout=3)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("lyrics"):
-                    return data.get("lyrics")
-            
-            cleaned_title = self._clean_title_for_search(title)
-            if cleaned_title != title:
-                url = f"https://api.lyrics.ovh/v1/{artist}/{cleaned_title}"
-                resp = requests.get(url, timeout=3)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("lyrics"):
-                        return data.get("lyrics")
-        except Exception as e:
-            print(f"Lyrics.ovh API Error: {e}")
-        
-        return None
-
     def fetch_artwork_info(self, track_id: int) -> str:
         track = self.session.get(Track, track_id)
         if not track:

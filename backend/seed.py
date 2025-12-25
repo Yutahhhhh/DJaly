@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from sqlmodel import Session
 from infra.database.connection import engine
-from infra.database.migrations import seed_initial_data
+from utils.seeding import seed_initial_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
