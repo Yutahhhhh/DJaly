@@ -6,8 +6,6 @@ import uuid
 import json
 from typing import Generator
 from sqlmodel import Session, create_engine
-from alembic.config import Config
-from alembic import command
 
 # 1. パス解決: backendディレクトリをsys.pathに追加
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +21,6 @@ from utils.seeding import seed_initial_data
 def session_fixture(mocker) -> Generator[Session, None, None]:
     """
     テストごとに完全に独立したDB環境（物理ファイル）を構築する。
-    DuckDBの接続競合を避けるため、単一のエンジンを Alembic と共有します。
     """
     
     # ユニークなDBファイルパスを生成
@@ -45,24 +42,13 @@ def session_fixture(mocker) -> Generator[Session, None, None]:
     db_connection.DB_PATH = test_db_path
     db_connection.DATABASE_URL = f"duckdb:///{test_db_path}"
 
-    # 1. Raw SQLでテーブルとシーケンスを直接作成
+    # 1. Raw SQLでテーブル作成 + マイグレーション実行
     init_raw_db(engine)
-    
-    # 2. Alembicにテスト用エンジンを注入して stamp を実行
-    # これにより env.py が新しいエンジンを作ろうとしてロックエラーになるのを防ぎます
-    alembic_ini_path = os.path.join(BACKEND_DIR, "alembic.ini")
-    alembic_cfg = Config(alembic_ini_path)
-    alembic_cfg.set_main_option("script_location", os.path.join(BACKEND_DIR, "alembic"))
-    
-    # コネクションを再利用するように Alembic の設定にエンジンを渡す
-    with engine.begin() as connection:
-        alembic_cfg.attributes["connection"] = connection
-        command.stamp(alembic_cfg, "head")
 
-    # 3. アプリ起動時の init_db がテスト中に走って競合しないようモック化
+    # 2. アプリ起動時の init_db がテスト中に走って競合しないようモック化
     mocker.patch("infra.database.connection.init_db")
 
-    # 4. 初期データの投入 (Prompt, Preset等)
+    # 3. 初期データの投入 (Prompt, Preset等)
     with Session(engine) as s:
         seed_initial_data(s)
 

@@ -15,4 +15,3 @@ platformdirs
 pyinstaller
 pydantic-settings
 aiohttp
-alembic

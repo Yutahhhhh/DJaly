@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlmodel import Session
-from typing import List, Optional
+from typing import List, Optional, Dict
 from infra.database.connection import get_session
 from models import Track
 from api.schemas.genres import (
@@ -56,10 +56,18 @@ async def cancel_batch_analysis():
 @router.get("/api/genres/list", response_model=List[str])
 def get_all_genres(session: Session = Depends(get_session)):
     """
-    Get all unique genres existing in the database.
+    Get all unique genres.
     """
     service = GenreAppService(session)
     return service.get_all_genres()
+
+@router.get("/api/genres/subgenres", response_model=List[str])
+def get_all_subgenres(session: Session = Depends(get_session)):
+    """
+    Get all unique subgenres.
+    """
+    service = GenreAppService(session)
+    return service.get_all_subgenres()
 
 @router.get("/api/genres/unknown", response_model=List[TrackRead])
 def get_unknown_tracks(

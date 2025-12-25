@@ -56,6 +56,7 @@ class TrackRepository:
         artist: Optional[str] = None,
         album: Optional[str] = None,
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         key: Optional[str] = None,
         bpm: Optional[float] = None,
         bpm_range: float = 5.0,
@@ -146,16 +147,20 @@ class TrackRepository:
 
         # 6. ジャンルフィルタ
         if genres:
-            query = query.where(or_(col(Track.genre).in_(genres), col(Track.subgenre).in_(genres)))
+            query = query.where(col(Track.genre).in_(genres))
         
-        # 7. キー / スケールフィルタ
+        # 7. サブジャンルフィルタ
+        if subgenres:
+            query = query.where(col(Track.subgenre).in_(subgenres))
+        
+        # 8. キー / スケールフィルタ
         if key and key != "":
             if key in ["Major", "Minor"]:
                 query = query.where(col(Track.key).like(f"%{key}"))
             else:
                 query = query.where(Track.key == key)
         
-        # 8. BPMフィルタ (± bpm_range)
+        # 9. BPMフィルタ (± bpm_range)
         if bpm and bpm > 0:
             targets = [bpm, bpm * 0.5, bpm * 2.0]
             bpm_conditions = [
@@ -164,7 +169,7 @@ class TrackRepository:
             ]
             query = query.where(or_(*bpm_conditions))
         
-        # 9. その他オーディオ特徴量フィルタ
+        # 10. その他オーディオ特徴量フィルタ
         if min_energy is not None: query = query.where(Track.energy >= min_energy)
         if max_energy is not None: query = query.where(Track.energy <= max_energy)
         if min_danceability is not None: query = query.where(Track.danceability >= min_danceability)
@@ -183,6 +188,7 @@ class TrackRepository:
         artist: Optional[str] = None,
         album: Optional[str] = None,
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         key: Optional[str] = None,
         bpm: Optional[float] = None,
         bpm_range: float = 5.0,
@@ -215,6 +221,7 @@ class TrackRepository:
             artist=artist,
             album=album,
             genres=genres,
+            subgenres=subgenres,
             key=key,
             bpm=bpm,
             bpm_range=bpm_range,
@@ -254,6 +261,7 @@ class TrackRepository:
         artist: Optional[str] = None,
         album: Optional[str] = None,
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         key: Optional[str] = None,
         bpm: Optional[float] = None,
         bpm_range: float = 5.0,
@@ -283,6 +291,7 @@ class TrackRepository:
             artist=artist,
             album=album,
             genres=genres,
+            subgenres=subgenres,
             key=key,
             bpm=bpm,
             bpm_range=bpm_range,

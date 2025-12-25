@@ -7,6 +7,7 @@ export interface FilterState {
   album: string;
   lyrics: string;
   genres: string[]; // Changed from genre: string
+  subgenres: string[]; // Added: subgenres array
   key: string; // Added: "C Major", etc.
   // Advanced Features (0.0 - 1.0)
   minEnergy: number;

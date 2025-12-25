@@ -2,7 +2,7 @@ import pytest
 import json
 import os
 from sqlmodel import Session
-from utils import audio_math, filesystem, genres, llm, metadata, logger
+from utils import audio_math, filesystem, llm, metadata, logger
 from models import Track
 
 def test_audio_math_normalize_key():

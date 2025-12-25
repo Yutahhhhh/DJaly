@@ -22,13 +22,13 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
 import { presetsService, Preset } from "@/services/presets";
+import { genreService } from "@/services/genres";
 import { TrackRow } from "../TrackRow";
 import { Badge } from "@/components/ui/badge";
 import { DropZone } from "./DropZone";
 
 interface AutoTabProps {
   currentSetlistTracks: Track[];
-  availableGenres: string[];
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   bridgeState?: {
     start: Track | null;
@@ -40,7 +40,6 @@ interface AutoTabProps {
 
 export function AutoTab({
   currentSetlistTracks,
-  availableGenres,
   onInjectTracks,
   bridgeState,
 }: AutoTabProps) {
@@ -52,7 +51,10 @@ export function AutoTab({
 
   // Common Filters
   const [autoGenres, setAutoGenres] = useState<string[]>([]);
+  const [autoSubgenres, setAutoSubgenres] = useState<string[]>([]);
   const [length, setLength] = useState(5);
+  const [availableGenres, setAvailableGenres] = useState<string[]>([]);
+  const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
   // Infinite Mode State
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -71,6 +73,9 @@ export function AutoTab({
     presetsService.getAll("generation", true).then((data) => {
       setPresets(data);
     });
+    // Load available genres and subgenres
+    genreService.getAllGenres().then(setAvailableGenres);
+    genreService.getAllSubgenres().then(setAvailableSubgenres);
   }, []);
 
   // Bridge Mode: Default Start is last track if not set (optional convenience)
@@ -90,7 +95,8 @@ export function AutoTab({
         selectedPreset,
         length,
         seedIds.length > 0 ? seedIds : undefined,
-        autoGenres.length > 0 ? autoGenres : undefined
+        autoGenres.length > 0 ? autoGenres : undefined,
+        autoSubgenres.length > 0 ? autoSubgenres : undefined
       );
       setAutoTracks(data);
     } catch (e) {
@@ -109,7 +115,8 @@ export function AutoTab({
         startTrack.id,
         endTrack.id,
         length,
-        autoGenres.length > 0 ? autoGenres : undefined
+        autoGenres.length > 0 ? autoGenres : undefined,
+        autoSubgenres.length > 0 ? autoSubgenres : undefined
       );
       // Remove the start track from result if it's already in setlist
       // Pathfinding usually returns [Start, ...Intermediates, End]
@@ -236,9 +243,22 @@ export function AutoTab({
                 selected={autoGenres}
                 onChange={setAutoGenres}
                 placeholder="All Genres"
-                className="bg-background h-8 text-xs"
               />
             </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold text-muted-foreground">
+                Filter Subgenres
+              </Label>
+              <MultiSelect
+                options={availableSubgenres.map((s) => ({ label: s, value: s }))}
+                selected={autoSubgenres}
+                onChange={setAutoSubgenres}
+                placeholder="All Subgenres"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
             <div className="space-y-1">
               <div className="flex justify-between items-center">
                 <Label className="text-[10px] font-semibold text-muted-foreground">

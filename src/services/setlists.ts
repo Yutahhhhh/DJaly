@@ -47,12 +47,14 @@ export const setlistsService = {
   recommendNext: async (
     trackId: number,
     presetId?: number,
-    genres?: string[]
+    genres?: string[],
+    subgenres?: string[]
   ) => {
     return apiClient.get<Track[]>("/recommendations/next", {
       track_id: trackId,
       preset_id: presetId,
       genres: genres,
+      subgenres: subgenres,
     });
   },
 
@@ -60,13 +62,15 @@ export const setlistsService = {
     presetId: number,
     limit: number,
     seedTrackIds?: number[],
-    genres?: string[]
+    genres?: string[],
+    subgenres?: string[]
   ) => {
     return apiClient.post<Track[]>("/recommendations/auto", {
       preset_id: presetId,
       limit,
       seed_track_ids: seedTrackIds,
       genres: genres,
+      subgenres: subgenres,
     });
   },
 
@@ -74,13 +78,15 @@ export const setlistsService = {
     startTrackId: number,
     endTrackId: number,
     length: number,
-    genres?: string[]
+    genres?: string[],
+    subgenres?: string[]
   ) => {
     return apiClient.post<Track[]>("/recommendations/path", {
       start_track_id: startTrackId,
       end_track_id: endTrackId,
       length,
-      genres,
+      genres: genres,
+      subgenres: subgenres,
     });
   },
 };

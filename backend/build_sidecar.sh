@@ -23,6 +23,7 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
     --hidden-import="sklearn.utils._typedefs" \
     --hidden-import="sklearn.neighbors._partition_nodes" \
     --hidden-import="scipy.special.cython_special" \
+    --add-data="models/msd-musicnn-1.pb:models" \
     server.py
 
 # Tauriが期待するディレクトリにバイナリを移動し、アーキテクチャ名を付与

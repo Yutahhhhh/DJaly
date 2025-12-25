@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Track } from "@/types";
-import { genreService } from "@/services/genres";
 import { LibraryTab } from "./tabs/LibraryTab";
 import { RecommendTab } from "./tabs/RecommendTab";
 import { AutoTab } from "./tabs/AutoTab";
@@ -28,11 +27,6 @@ export function TrackSelector({
   bridgeState,
 }: TrackSelectorProps) {
   const [activeTab, setActiveTab] = useState("library");
-  const [availableGenres, setAvailableGenres] = useState<string[]>([]);
-
-  useEffect(() => {
-    genreService.getAllGenres().then(setAvailableGenres).catch(console.error);
-  }, []);
 
   return (
     <div
@@ -83,7 +77,6 @@ export function TrackSelector({
         >
           <RecommendTab
             referenceTrack={referenceTrack}
-            availableGenres={availableGenres}
             onAddTrack={onAddTrack}
             currentSetlistTracks={currentSetlistTracks}
           />
@@ -96,7 +89,6 @@ export function TrackSelector({
         >
           <AutoTab
             currentSetlistTracks={currentSetlistTracks}
-            availableGenres={availableGenres}
             onInjectTracks={onInjectTracks}
             bridgeState={bridgeState}
           />

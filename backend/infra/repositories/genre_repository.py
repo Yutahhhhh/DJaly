@@ -1,5 +1,5 @@
-from typing import List, Optional
-from sqlmodel import Session, select
+from typing import List, Optional, Dict
+from sqlmodel import Session, select, func
 from domain.models.track import Track
 
 class GenreRepository:
@@ -35,18 +35,24 @@ class GenreRepository:
         statement = select(Track).where(Track.genre != None).where(Track.genre != "Unknown")
         return self.session.exec(statement).all()
 
-    def get_all_unique_genres(self) -> List[str]:
-        # Get genres
-        g_stmt = select(Track.genre).where(Track.genre != None).distinct()
-        genres = set(self.session.exec(g_stmt).all())
-        
-        # Get subgenres
-        s_stmt = select(Track.subgenre).where(Track.subgenre != None).distinct()
-        subgenres = set(self.session.exec(s_stmt).all())
-        
-        # Combine and sort
-        all_genres = genres.union(subgenres)
-        return sorted([g for g in all_genres if g and g.strip()])
+    def get_all_genres(self) -> List[str]:
+        """Get all unique genres"""
+        stmt = select(Track.genre).where(
+            Track.genre != None,
+            Track.genre != "",
+            Track.genre != "Unknown"
+        ).distinct()
+        genres = self.session.exec(stmt).all()
+        return sorted([g for g in genres if g])
+
+    def get_all_subgenres(self) -> List[str]:
+        """Get all unique subgenres"""
+        stmt = select(Track.subgenre).where(
+            Track.subgenre != None,
+            Track.subgenre != ""
+        ).distinct()
+        subgenres = self.session.exec(stmt).all()
+        return sorted([s for s in subgenres if s])
 
     def get_all_tracks_with_genre_any(self) -> List[Track]:
         statement = select(Track).where(Track.genre != None)

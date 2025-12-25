@@ -3,19 +3,6 @@ from sqlmodel import Session, text, delete
 from models import Track
 from fastapi.testclient import TestClient
 
-def test_get_all_genres(client: TestClient, session: Session):
-    t1 = Track(filepath="/1.mp3", title="T1", artist="A", album="B", genre="Techno", bpm=120, duration=100)
-    t2 = Track(filepath="/2.mp3", title="T2", artist="A", album="B", genre="House", bpm=120, duration=100)
-    session.add(t1)
-    session.add(t2)
-    session.commit()
-    
-    response = client.get("/api/genres/list")
-    assert response.status_code == 200
-    genres = response.json()
-    assert "Techno" in genres
-    assert "House" in genres
-
 def test_get_unknown_tracks(client: TestClient, session: Session):
     # 既存データをクリア
     session.exec(delete(Track))
@@ -144,4 +131,50 @@ def test_get_cleanup_suggestions_mode(client: TestClient, session: Session):
     assert len(data) >= 1
     found_subgenre = any(g["primary_genre"] in ["Hard Techno", "Hard-Techno"] for g in data)
     assert found_subgenre
+
+def test_get_all_genres(client: TestClient, session: Session):
+    session.exec(delete(Track))
+    session.commit()
+    
+    t1 = Track(filepath="/1.mp3", title="T1", artist="A", album="B", genre="Techno", subgenre="Minimal", bpm=120, duration=100)
+    t2 = Track(filepath="/2.mp3", title="T2", artist="A", album="B", genre="House", subgenre="Deep House", bpm=120, duration=100)
+    t3 = Track(filepath="/3.mp3", title="T3", artist="A", album="B", genre="Techno", subgenre="Industrial", bpm=120, duration=100)
+    t4 = Track(filepath="/4.mp3", title="T4", artist="A", album="B", genre="", subgenre="", bpm=120, duration=100)
+    session.add(t1)
+    session.add(t2)
+    session.add(t3)
+    session.add(t4)
+    session.commit()
+    
+    response = client.get("/api/genres/list")
+    assert response.status_code == 200
+    genres = response.json()
+    assert isinstance(genres, list)
+    assert "Techno" in genres
+    assert "House" in genres
+    assert len(genres) == 2
+    assert "" not in genres
+
+def test_get_all_subgenres(client: TestClient, session: Session):
+    session.exec(delete(Track))
+    session.commit()
+    
+    t1 = Track(filepath="/1.mp3", title="T1", artist="A", album="B", genre="Techno", subgenre="Minimal", bpm=120, duration=100)
+    t2 = Track(filepath="/2.mp3", title="T2", artist="A", album="B", genre="House", subgenre="Deep House", bpm=120, duration=100)
+    t3 = Track(filepath="/3.mp3", title="T3", artist="A", album="B", genre="Techno", subgenre="Minimal", bpm=120, duration=100)
+    t4 = Track(filepath="/4.mp3", title="T4", artist="A", album="B", genre="Techno", subgenre="", bpm=120, duration=100)
+    session.add(t1)
+    session.add(t2)
+    session.add(t3)
+    session.add(t4)
+    session.commit()
+    
+    response = client.get("/api/genres/subgenres")
+    assert response.status_code == 200
+    subgenres = response.json()
+    assert isinstance(subgenres, list)
+    assert "Minimal" in subgenres
+    assert "Deep House" in subgenres
+    assert len(subgenres) == 2
+    assert "" not in subgenres
 

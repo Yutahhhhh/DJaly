@@ -162,36 +162,40 @@ class CsvAppService:
         if not update_map:
             return 0
 
-        # 2. Fetch all tracks to map filepath -> id
-        # Using yield_per or chunking might be better for millions, but for 10k-100k this is fine.
-        all_tracks = self.session.exec(select(Track.id, Track.filepath)).all()
+        # 2. Fetch all tracks to map filepath -> track objects
+        all_tracks = self.session.exec(select(Track)).all()
         
-        # 3. Prepare mappings for bulk update
-        mappings = []
-        for t_id, t_filepath in all_tracks:
-            norm_path = normalize_path(t_filepath)
+        # 3. Update tracks individually (safer for DuckDB with foreign key constraints)
+        updated_count = 0
+        for track in all_tracks:
+            norm_path = normalize_path(track.filepath)
             if norm_path in update_map:
                 data = update_map[norm_path]
-                update_dict = {"id": t_id}
                 
-                # Only include fields that are present in data (not None)
-                if data.get('title') is not None: update_dict['title'] = data['title']
-                if data.get('artist') is not None: update_dict['artist'] = data['artist']
-                if data.get('album') is not None: update_dict['album'] = data['album']
-                if data.get('genre') is not None: update_dict['genre'] = data['genre']
-                if data.get('subgenre') is not None: update_dict['subgenre'] = data['subgenre']
-                if data.get('year') is not None: update_dict['year'] = data['year']
+                # Only update fields that are present in data (not None)
+                if data.get('title') is not None: 
+                    track.title = data['title']
+                if data.get('artist') is not None: 
+                    track.artist = data['artist']
+                if data.get('album') is not None: 
+                    track.album = data['album']
+                if data.get('genre') is not None: 
+                    track.genre = data['genre']
+                if data.get('subgenre') is not None: 
+                    track.subgenre = data['subgenre']
+                if data.get('year') is not None: 
+                    track.year = data['year']
                 if data.get('is_genre_verified') is not None: 
-                    update_dict['is_genre_verified'] = data['is_genre_verified']
+                    track.is_genre_verified = data['is_genre_verified']
                 
-                mappings.append(update_dict)
+                self.session.add(track)
+                updated_count += 1
 
-        # 4. Execute bulk update
-        if mappings:
-            self.session.execute(update(Track), mappings)
+        # 4. Commit all changes
+        if updated_count > 0:
             self.session.commit()
             
-        return len(mappings)
+        return updated_count
 
     def export_tracks_to_csv(self) -> str:
         query = select(Track, TrackAnalysis).join(TrackAnalysis, Track.id == TrackAnalysis.track_id, isouter=True)

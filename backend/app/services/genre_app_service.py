@@ -36,7 +36,12 @@ class GenreAppService:
         return self.repository.get_all_unknown_track_ids(mode=mode.value if hasattr(mode, 'value') else mode)
 
     def get_all_genres(self) -> List[str]:
-        return self.repository.get_all_unique_genres()
+        """Get all unique genres"""
+        return self.repository.get_all_genres()
+
+    def get_all_subgenres(self) -> List[str]:
+        """Get all unique subgenres"""
+        return self.repository.get_all_subgenres()
 
     def analyze_track_with_llm(self, track_id: int, overwrite: bool = False, mode: AnalysisMode = AnalysisMode.BOTH) -> GenreAnalysisResponse:
         track = self.track_repository.get_by_id(track_id)
