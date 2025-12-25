@@ -1,86 +1,59 @@
-import { useState, useEffect } from "react";
+import {  useRef, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, Loader2, Sparkles, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Track } from "@/types";
-import { tracksService } from "@/services/tracks";
 import { TrackRow } from "../TrackRow";
 import {
   FilterDialog,
-  FilterState,
-  INITIAL_FILTERS,
-  buildTrackSearchParams,
 } from "@/components/music-library";
+import { useTrackSearch } from "@/components/music-library/useTrackSearch";
 
 interface LibraryTabProps {
   onAddTrack: (track: Track) => void;
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
   currentSetlistTracks: Track[];
 }
 
 export function LibraryTab({
   onAddTrack,
-  onPlay,
-  currentTrackId,
   currentSetlistTracks,
 }: LibraryTabProps) {
-  const [query, setQuery] = useState("");
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [loading, setLoading] = useState(false);
+  const {
+    query,
+    setQuery,
+    tracks,
+    loading,
+    filters,
+    currentPreset,
+    isFilterOpen,
+    setIsFilterOpen,
+    applyFilters,
+    clearAllFilters,
+    loadMore,
+    hasMore,
+    activeFilterCount,
+  } = useTrackSearch();
 
-  // Filter States
-  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
-  const [currentPreset, setCurrentPreset] = useState("custom");
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastTrackElementRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (loading) return;
+      if (observer.current) observer.current.disconnect();
+      observer.current = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMore) {
+          loadMore();
+        }
+      });
+      if (node) observer.current.observe(node);
+    },
+    [loading, hasMore, loadMore]
+  );
 
-  useEffect(() => {
-    const t = setTimeout(() => search(query, filters), 300);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  const search = async (currentTitle: string, currentFilters: FilterState) => {
-    setLoading(true);
-    try {
-      const params = buildTrackSearchParams(currentTitle, currentFilters, 50);
-      const data = await tracksService.getTracks(params);
-      setTracks(data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const applyFilters = (
-    newFilters: FilterState,
-    presetName: string = "custom"
-  ) => {
-    setFilters(newFilters);
-    setCurrentPreset(presetName);
-    setIsFilterOpen(false);
-    search(query, newFilters);
-  };
-
-  const clearAllFilters = () => {
-    setQuery("");
-    applyFilters(INITIAL_FILTERS, "custom");
-  };
-
-  const activeFilterCount = Object.keys(filters).filter((k) => {
-    const key = k as keyof FilterState;
-    if (key === "bpmRange") return false;
-    if (key === "minEnergy" || key === "maxEnergy")
-      return filters.minEnergy > 0 || filters.maxEnergy < 1;
-    if (key === "minDanceability" || key === "maxDanceability")
-      return filters.minDanceability > 0 || filters.maxDanceability < 1;
-    if (key === "minBrightness" || key === "maxBrightness")
-      return filters.minBrightness > 0 || filters.maxBrightness < 1;
-    
-    const val = filters[key];
-    if (Array.isArray(val)) return val.length > 0;
-    return val !== null && val !== "" && val !== 0;
-  }).length;
+  const filteredTracks = tracks.filter(
+    (t) => !currentSetlistTracks.some((st) => st.id === t.id)
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
@@ -132,28 +105,29 @@ export function LibraryTab({
             </div>
         )}
       </div>
+
       <ScrollArea className="flex-1">
-        {loading ? (
-          <div className="p-8 flex justify-center">
-            <Loader2 className="animate-spin h-6 w-6 opacity-20" />
-          </div>
-        ) : (
-          <div className="p-2 space-y-1">
-            {tracks
-              .filter((t) => !currentSetlistTracks.some((st) => st.id === t.id))
-              .map((t) => (
-                <TrackRow
-                  key={`lib-${t.id}`}
-                  id={`lib-${t.id}`}
-                  track={t}
-                  type="LIBRARY_ITEM"
-                  isPlaying={currentTrackId === t.id}
-                  onPlay={() => onPlay(t)}
-                  onAdd={() => onAddTrack(t)}
-                />
-              ))}
-          </div>
-        )}
+        <div className="p-2 space-y-1">
+          {filteredTracks.map((t, index) => (
+            <TrackRow
+              key={`lib-${t.id}`}
+              id={`lib-${t.id}`}
+              track={t}
+              type="LIBRARY_ITEM"
+              onAdd={() => onAddTrack(t)}
+              innerRef={
+                index === filteredTracks.length - 1
+                  ? lastTrackElementRef
+                  : undefined
+              }
+            />
+          ))}
+          {loading && (
+            <div className="p-4 flex justify-center">
+              <Loader2 className="animate-spin h-6 w-6 opacity-20" />
+            </div>
+          )}
+        </div>
       </ScrollArea>
 
       <FilterDialog

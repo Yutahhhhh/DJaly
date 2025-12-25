@@ -2,7 +2,8 @@
 set -e # エラーが発生したら即停止
 
 # 設定
-VERSION=$1
+# tauri.conf.json からバージョンを取得
+VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
 BINARY_NAME="djaly-server"
 OUTPUT_DIR="src-tauri/bin"
 
@@ -17,14 +18,14 @@ else
   exit 1
 fi
 
-# 引数チェック
 if [ -z "$VERSION" ]; then
-  echo "使用法: ./scripts/release.sh <version_tag>"
-  echo "例: ./scripts/release.sh v0.1.0"
+  echo "❌ バージョンを取得できませんでした。src-tauri/tauri.conf.json を確認してください。"
   exit 1
 fi
 
-echo "🚀 リリースプロセスを開始します: $VERSION"
+echo "🚀 リリースプロセスを開始します: v$VERSION"
+
+# --- 1. Python Backend Build ---
 
 # --- 1. Python Backend Build ---
 echo "📦 [1/4] Pythonバックエンドをビルド中..."
@@ -78,6 +79,7 @@ pyinstaller --clean --noconfirm --onefile --name $BINARY_NAME \
     --hidden-import="anyio" \
     --hidden-import="anyio._backends" \
     --hidden-import="anyio._backends._asyncio" \
+    --add-data "models/msd-musicnn-1.pb:models" \
     server.py
 
 cd ..
@@ -138,15 +140,15 @@ fi
 echo "アップロードファイル: $DMG_PATH"
 
 # 既存のリリースがある場合は削除して再作成
-if gh release view "$VERSION" >/dev/null 2>&1; then
-    echo "⚠️ 既存のリリース $VERSION が見つかりました。削除して再作成します..."
-    gh release delete "$VERSION" -y
+if gh release view "v$VERSION" >/dev/null 2>&1; then
+    echo "⚠️ 既存のリリース v$VERSION が見つかりました。削除して再作成します..."
+    gh release delete "v$VERSION" -y
 fi
 
 # リリース作成とアップロード
 # --draft: 下書きとして作成（公開前に確認したい場合）
 # --generate-notes: コミットログからリリースノートを自動生成
-gh release create "$VERSION" "$DMG_PATH" --title "Djaly $VERSION" --generate-notes
+gh release create "v$VERSION" "$DMG_PATH" --title "Djaly v$VERSION" --generate-notes
 
 echo "🎉 リリース完了！ GitHubを確認してください。"
 echo ""

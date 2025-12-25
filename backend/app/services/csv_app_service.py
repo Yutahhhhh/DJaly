@@ -2,8 +2,10 @@ import csv
 import io
 import json
 import logging
+import unicodedata
 from typing import List, Dict, Any
 from sqlmodel import Session, select
+from sqlalchemy import update
 from domain.models.track import Track, TrackAnalysis
 from domain.models.preset import Preset
 from domain.models.prompt import Prompt
@@ -48,7 +50,7 @@ class CsvAppService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        headers = ["filepath", "title", "artist", "album", "genre", "is_genre_verified"]
+        headers = ["filepath", "title", "artist", "album", "genre", "subgenre", "year", "is_genre_verified"]
         writer.writerow(headers)
         
         for track in tracks:
@@ -58,6 +60,8 @@ class CsvAppService:
                 track.artist,
                 track.album,
                 track.genre,
+                track.subgenre,
+                track.year,
                 track.is_genre_verified
             ])
             
@@ -66,8 +70,12 @@ class CsvAppService:
     def analyze_metadata_import(self, csv_content: str) -> MetadataImportAnalysisResult:
         reader = self._parse_csv_content(csv_content)
         
+        # Helper for path normalization (NFC for macOS compatibility)
+        def normalize_path(p: str) -> str:
+            return unicodedata.normalize('NFC', p) if p else ""
+        
         existing_tracks = self.session.exec(select(Track)).all()
-        path_map = {t.filepath: t for t in existing_tracks}
+        path_map = {normalize_path(t.filepath): t for t in existing_tracks}
         
         updates = []
         not_found = []
@@ -77,6 +85,8 @@ class CsvAppService:
             if not filepath:
                 continue
                 
+            normalized_filepath = normalize_path(filepath)
+            
             is_verified_raw = row.get('is_genre_verified')
             is_verified = None
             if is_verified_raw is not None and is_verified_raw != "":
@@ -88,30 +98,30 @@ class CsvAppService:
                 artist=row.get('artist'),
                 album=row.get('album'),
                 genre=row.get('genre'),
+                subgenre=row.get('subgenre'),
+                year=int(row.get('year')) if row.get('year') else None,
                 is_genre_verified=is_verified
             )
             
-            if filepath in path_map:
-                current_track = path_map[filepath]
+            if normalized_filepath in path_map:
+                current_track = path_map[normalized_filepath]
                 has_changes = False
                 
-                if import_row.title and import_row.title != current_track.title: has_changes = True
-                if import_row.artist and import_row.artist != current_track.artist: has_changes = True
-                if import_row.album and import_row.album != current_track.album: has_changes = True
-                if import_row.genre and import_row.genre != current_track.genre: has_changes = True
+                # Helper to normalize strings for comparison (None -> "")
+                def norm(s): return (s or "").strip()
+                
+                if import_row.title is not None and norm(import_row.title) != norm(current_track.title): has_changes = True
+                if import_row.artist is not None and norm(import_row.artist) != norm(current_track.artist): has_changes = True
+                if import_row.album is not None and norm(import_row.album) != norm(current_track.album): has_changes = True
+                if import_row.genre is not None and norm(import_row.genre) != norm(current_track.genre): has_changes = True
+                if import_row.subgenre is not None and norm(import_row.subgenre) != norm(current_track.subgenre): has_changes = True
+                if import_row.year is not None and import_row.year != current_track.year: has_changes = True
                 if import_row.is_genre_verified is not None and import_row.is_genre_verified != current_track.is_genre_verified: has_changes = True
                 
                 if has_changes:
                     updates.append({
-                        "filepath": filepath,
-                        "current": {
-                            "title": current_track.title,
-                            "artist": current_track.artist,
-                            "album": current_track.album,
-                            "genre": current_track.genre,
-                            "is_genre_verified": current_track.is_genre_verified
-                        },
-                        "new": import_row.model_dump()
+                        "current": current_track,
+                        "new": import_row
                     })
             else:
                 not_found.append(import_row)
@@ -122,29 +132,66 @@ class CsvAppService:
             not_found=not_found
         )
 
-    def execute_metadata_import(self, data: MetadataImportExecuteRequest) -> int:
-        update_count = 0
-        
-        for item in data.updates:
-            filepath = item.get("filepath")
-            new_data = item.get("new") or item.get("data")
+    def execute_metadata_import(self, req: MetadataImportExecuteRequest) -> int:
+        if not req.updates:
+            return 0
+
+        # Helper for path normalization
+        def normalize_path(p: str) -> str:
+            return unicodedata.normalize('NFC', p) if p else ""
+
+        # 1. Collect all filepaths from request
+        update_map = {} # normalized_path -> data
+        for update_item in req.updates:
+            # Frontend sends { "current": ..., "new": ... } from analysis result
+            # We need to extract 'new' which contains the MetadataImportRow data
+            data = update_item.get("new")
             
-            if not filepath or not new_data:
+            # Fallback if the structure is different (e.g. { "filepath":..., "data":... })
+            if not data:
+                data = update_item.get("data")
+            
+            if not data:
                 continue
                 
-            track = self.session.exec(select(Track).where(Track.filepath == filepath)).first()
-            if track:
-                if new_data.get("title") is not None: track.title = new_data["title"]
-                if new_data.get("artist") is not None: track.artist = new_data["artist"]
-                if new_data.get("album") is not None: track.album = new_data["album"]
-                if new_data.get("genre") is not None: track.genre = new_data["genre"]
-                if new_data.get("is_genre_verified") is not None: track.is_genre_verified = new_data["is_genre_verified"]
+            filepath = data.get("filepath") or update_item.get("filepath")
+            
+            if filepath:
+                update_map[normalize_path(filepath)] = data
+
+        if not update_map:
+            return 0
+
+        # 2. Fetch all tracks to map filepath -> id
+        # Using yield_per or chunking might be better for millions, but for 10k-100k this is fine.
+        all_tracks = self.session.exec(select(Track.id, Track.filepath)).all()
+        
+        # 3. Prepare mappings for bulk update
+        mappings = []
+        for t_id, t_filepath in all_tracks:
+            norm_path = normalize_path(t_filepath)
+            if norm_path in update_map:
+                data = update_map[norm_path]
+                update_dict = {"id": t_id}
                 
-                self.session.add(track)
-                update_count += 1
+                # Only include fields that are present in data (not None)
+                if data.get('title') is not None: update_dict['title'] = data['title']
+                if data.get('artist') is not None: update_dict['artist'] = data['artist']
+                if data.get('album') is not None: update_dict['album'] = data['album']
+                if data.get('genre') is not None: update_dict['genre'] = data['genre']
+                if data.get('subgenre') is not None: update_dict['subgenre'] = data['subgenre']
+                if data.get('year') is not None: update_dict['year'] = data['year']
+                if data.get('is_genre_verified') is not None: 
+                    update_dict['is_genre_verified'] = data['is_genre_verified']
                 
-        self.session.commit()
-        return update_count
+                mappings.append(update_dict)
+
+        # 4. Execute bulk update
+        if mappings:
+            self.session.execute(update(Track), mappings)
+            self.session.commit()
+            
+        return len(mappings)
 
     def export_tracks_to_csv(self) -> str:
         query = select(Track, TrackAnalysis).join(TrackAnalysis, Track.id == TrackAnalysis.track_id, isouter=True)
@@ -154,7 +201,7 @@ class CsvAppService:
         writer = csv.writer(output)
         
         headers = [
-            "filepath", "title", "artist", "album", "genre", 
+            "filepath", "title", "artist", "album", "genre", "subgenre", "year",
             "bpm", "key", "energy", "danceability", "brightness", 
             "loudness", "noisiness", "contrast", "duration",
             "loudness_range", "spectral_flux", "spectral_rolloff",
@@ -172,7 +219,7 @@ class CsvAppService:
             peaks_json = json.dumps(waveform_peaks) if waveform_peaks else "[]"
 
             writer.writerow([
-                track.filepath, track.title, track.artist, track.album, track.genre,
+                track.filepath, track.title, track.artist, track.album, track.genre, track.subgenre, track.year,
                 track.bpm, track.key, track.energy, track.danceability, track.brightness,
                 track.loudness, track.noisiness, track.contrast, track.duration,
                 track.loudness_range, track.spectral_flux, track.spectral_rolloff,
@@ -226,6 +273,8 @@ class CsvAppService:
                     artist=row.get('artist', ''),
                     album=row.get('album', ''),
                     genre=row.get('genre', ''),
+                    subgenre=row.get('subgenre', ''),
+                    year=int(row.get('year')) if row.get('year') else None,
                     bpm=safe_float(row.get('bpm')),
                     key=row.get('key', ''),
                     energy=safe_float(row.get('energy')),

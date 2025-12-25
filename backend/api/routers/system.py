@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from pydantic import BaseModel
 from infra.database.connection import get_session, get_setting_value
 from utils.llm import check_llm_status
-from models import Track, Setlist
+from models import Track, Setlist, Lyrics
 
 import subprocess
 import platform
@@ -106,12 +106,17 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
         select(func.count()).select_from(Track).where(Track.is_genre_verified == False)
     ).one()
 
-    # 4. Recent Setlists
+    # 4. Lyrics Count
+    lyrics_count = session.exec(
+        select(func.count()).select_from(Lyrics).where(Lyrics.content != None, Lyrics.content != "")
+    ).one()
+
+    # 5. Recent Setlists
     recent_setlists = session.exec(
         select(Setlist).order_by(Setlist.updated_at.desc()).limit(5)
     ).all()
 
-    # 5. System Config Check
+    # 6. System Config Check
     root_path = get_setting_value(session, "root_path", "")
     llm_model = get_setting_value(session, "llm_model", "llama3.2")
     
@@ -126,6 +131,7 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
         "unanalyzed_tracks": unanalyzed_tracks,
         "genre_distribution": genre_distribution,
         "unverified_genres_count": unverified_count,
+        "lyrics_tracks_count": lyrics_count,
         "recent_setlists": recent_setlists,
         "config": {
             "has_root_path": bool(root_path),

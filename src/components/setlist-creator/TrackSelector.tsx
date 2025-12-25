@@ -5,14 +5,13 @@ import { genreService } from "@/services/genres";
 import { LibraryTab } from "./tabs/LibraryTab";
 import { RecommendTab } from "./tabs/RecommendTab";
 import { AutoTab } from "./tabs/AutoTab";
+import { WordTab } from "./tabs/WordTab";
 
 interface TrackSelectorProps {
   referenceTrack: Track | null;
   onAddTrack: (track: Track) => void;
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   currentSetlistTracks: Track[];
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
   bridgeState?: {
     start: Track | null;
     end: Track | null;
@@ -26,8 +25,6 @@ export function TrackSelector({
   onAddTrack,
   onInjectTracks,
   currentSetlistTracks,
-  onPlay,
-  currentTrackId,
   bridgeState,
 }: TrackSelectorProps) {
   const [activeTab, setActiveTab] = useState("library");
@@ -52,7 +49,7 @@ export function TrackSelector({
         className="flex-1 flex flex-col min-h-0"
       >
         <div className="p-2 border-b bg-muted/20 shrink-0">
-          <TabsList className="w-full grid grid-cols-3">
+          <TabsList className="w-full grid grid-cols-4">
             <TabsTrigger value="library" className="text-xs">
               Library
             </TabsTrigger>
@@ -61,6 +58,9 @@ export function TrackSelector({
             </TabsTrigger>
             <TabsTrigger value="auto" className="text-xs">
               Auto Gen
+            </TabsTrigger>
+            <TabsTrigger value="word" className="text-xs">
+              Word
             </TabsTrigger>
           </TabsList>
         </div>
@@ -72,8 +72,6 @@ export function TrackSelector({
         >
           <LibraryTab
             onAddTrack={onAddTrack}
-            onPlay={onPlay}
-            currentTrackId={currentTrackId}
             currentSetlistTracks={currentSetlistTracks}
           />
         </TabsContent>
@@ -87,8 +85,6 @@ export function TrackSelector({
             referenceTrack={referenceTrack}
             availableGenres={availableGenres}
             onAddTrack={onAddTrack}
-            onPlay={onPlay}
-            currentTrackId={currentTrackId}
             currentSetlistTracks={currentSetlistTracks}
           />
         </TabsContent>
@@ -102,9 +98,18 @@ export function TrackSelector({
             currentSetlistTracks={currentSetlistTracks}
             availableGenres={availableGenres}
             onInjectTracks={onInjectTracks}
-            onPlay={onPlay}
-            currentTrackId={currentTrackId}
             bridgeState={bridgeState}
+          />
+        </TabsContent>
+
+        {/* --- Word Tab --- */}
+        <TabsContent
+          value="word"
+          className="flex-1 flex flex-col p-0 m-0 min-h-0 data-[state=active]:flex"
+        >
+          <WordTab
+            sourceTrack={referenceTrack}
+            onAddTrack={onAddTrack}
           />
         </TabsContent>
       </Tabs>

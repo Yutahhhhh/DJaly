@@ -15,34 +15,57 @@ import {
   Activity,
   StopCircle,
   FileAudio,
+  Music,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIngestion } from "@/contexts/IngestionContext";
+import { useMetadata } from "@/contexts/MetadataContext";
 
 export function GlobalProgressIndicator() {
   const {
-    isAnalyzing,
-    progress,
-    statusText,
-    currentFile,
-    stats,
-    showComplete,
+    isAnalyzing: isIngesting,
+    progress: ingestProgress,
+    statusText: ingestStatus,
+    currentFile: ingestFile,
+    stats: ingestStats,
+    showComplete: ingestComplete,
     cancelIngestion,
-    dismissComplete,
+    dismissComplete: dismissIngestComplete,
   } = useIngestion();
 
+  const {
+    isUpdating: isMetadataUpdating,
+    progress: metadataProgress,
+    statusText: metadataStatus,
+    currentTrack: metadataTrack,
+    stats: metadataStats,
+    cancelUpdate: cancelMetadataUpdate,
+  } = useMetadata();
+
   const [isOpen, setIsOpen] = useState(false);
+
+  // Determine active task
+  const isWorking = isIngesting || isMetadataUpdating;
+  const showComplete = ingestComplete; // Metadata doesn't have explicit complete state yet
+
+  // Derived values based on priority (Ingestion > Metadata)
+  const activeType = isIngesting ? "ingestion" : isMetadataUpdating ? "metadata" : null;
+  
+  const progress = isIngesting ? ingestProgress : metadataProgress;
+  const statusText = isIngesting ? ingestStatus : metadataStatus;
+  const currentItem = isIngesting ? ingestFile : metadataTrack;
+  const stats = isIngesting ? ingestStats : metadataStats;
 
   // Auto-close logic when complete
   useEffect(() => {
     if (showComplete) {
       const timer = setTimeout(() => {
         setIsOpen(false);
-        dismissComplete();
+        dismissIngestComplete();
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [showComplete, dismissComplete]);
+  }, [showComplete, dismissIngestComplete]);
 
   const getFileName = (path: string) => {
     if (!path) return "";
@@ -50,14 +73,23 @@ export function GlobalProgressIndicator() {
   };
 
   const handleCancel = async () => {
-    await cancelIngestion();
+    if (isIngesting) {
+      await cancelIngestion();
+    } else if (isMetadataUpdating) {
+      await cancelMetadataUpdate();
+    }
     setIsOpen(false);
   };
 
   // 表示すべき状態でない場合は何もレンダリングしない
-  if (!isAnalyzing && !showComplete && !isOpen) {
+  if (!isWorking && !showComplete && !isOpen) {
     return null;
   }
+
+  const title = isIngesting ? "Analyzing Library" : "Updating Metadata";
+  const description = isIngesting 
+    ? "Analyzing audio features, BPM, and generating embeddings."
+    : "Fetching and updating track metadata.";
 
   return (
     <>
@@ -68,20 +100,20 @@ export function GlobalProgressIndicator() {
           onClick={() => setIsOpen(true)}
           className={cn(
             "h-12 rounded-full shadow-lg border pl-3 pr-5 gap-3 transition-all duration-300",
-            isAnalyzing
+            isWorking
               ? "bg-background/80 backdrop-blur-md hover:bg-background/90 border-primary/20"
               : showComplete
               ? "bg-green-500 hover:bg-green-600 text-white border-green-600"
               : "bg-background"
           )}
         >
-          {isAnalyzing ? (
+          {isWorking ? (
             <>
               <div className="relative flex items-center justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
               </div>
               <div className="flex flex-col items-start text-xs leading-none gap-0.5">
-                <span className="font-semibold">Analyzing</span>
+                <span className="font-semibold">{activeType === "ingestion" ? "Analyzing" : "Updating"}</span>
                 <span className="text-muted-foreground tabular-nums">
                   {Math.round(progress)}% • {stats.current}/{stats.total}
                 </span>
@@ -103,10 +135,10 @@ export function GlobalProgressIndicator() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {isAnalyzing ? (
+              {isWorking ? (
                 <>
                   <Activity className="h-5 w-5 text-primary animate-pulse" />
-                  Analyzing Library...
+                  {title}
                 </>
               ) : showComplete ? (
                 <>
@@ -114,13 +146,11 @@ export function GlobalProgressIndicator() {
                   Analysis Complete
                 </>
               ) : (
-                "Analysis Status"
+                "Task Status"
               )}
             </DialogTitle>
             <DialogDescription>
-              {isAnalyzing
-                ? "Analyzing audio features, BPM, and generating embeddings."
-                : "Review the results of the analysis."}
+              {isWorking ? description : "Review the results."}
             </DialogDescription>
           </DialogHeader>
 
@@ -130,7 +160,7 @@ export function GlobalProgressIndicator() {
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Progress</span>
                 <span>
-                  {stats.current} / {stats.total} Files
+                  {stats.current} / {stats.total} {activeType === "ingestion" ? "Files" : "Tracks"}
                 </span>
               </div>
               <Progress value={progress} className="h-2" />
@@ -140,15 +170,15 @@ export function GlobalProgressIndicator() {
             <div className="bg-muted/50 rounded-lg p-3 space-y-2 border overflow-hidden">
               <div className="flex items-start gap-3">
                 <div className="h-8 w-8 bg-background rounded-full flex items-center justify-center shrink-0 border">
-                  {isAnalyzing ? (
+                  {isWorking ? (
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                   ) : (
-                    <FileAudio className="h-4 w-4 text-muted-foreground" />
+                    activeType === "ingestion" ? <FileAudio className="h-4 w-4 text-muted-foreground" /> : <Music className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0 grid gap-0.5">
-                  <p className="text-sm font-medium truncate" title={getFileName(currentFile)}>
-                    {getFileName(currentFile) || "Waiting..."}
+                  <p className="text-sm font-medium truncate" title={getFileName(currentItem)}>
+                    {getFileName(currentItem) || "Waiting..."}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
                     {statusText}
@@ -173,14 +203,14 @@ export function GlobalProgressIndicator() {
           </div>
 
           <DialogFooter className="sm:justify-between gap-2">
-            {isAnalyzing ? (
+            {isWorking ? (
               <Button
                 variant="destructive"
                 onClick={handleCancel}
                 className="w-full sm:w-auto"
               >
                 <StopCircle className="h-4 w-4 mr-2" />
-                Stop Analysis
+                Stop {activeType === "ingestion" ? "Analysis" : "Update"}
               </Button>
             ) : (
               <Button

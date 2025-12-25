@@ -12,6 +12,8 @@ export interface CsvImportRow {
   artist: string;
   album?: string;
   genre?: string;
+  subgenre?: string;
+  year?: number;
   bpm?: number;
   key?: string;
   energy?: number;
@@ -31,6 +33,8 @@ export interface MetadataImportRow {
   artist?: string;
   album?: string;
   genre?: string;
+  subgenre?: string;
+  year?: number;
   is_genre_verified?: boolean;
 }
 

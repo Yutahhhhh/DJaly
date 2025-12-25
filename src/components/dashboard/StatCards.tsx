@@ -7,6 +7,7 @@ import {
   Wand2,
   Settings,
   XCircle,
+  Mic,
 } from "lucide-react";
 import { DashboardStats, SystemHealth } from "@/services/system";
 
@@ -131,6 +132,21 @@ export function StatCards({
           >
             Manage Genres &rarr;
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Lyrics Count */}
+      <Card>
+        <CardContent className="p-4 flex items-center gap-4">
+          <div className="bg-indigo-100 p-3 rounded-full text-indigo-600">
+            <Mic className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">
+              With Lyrics
+            </p>
+            <h3 className="text-2xl font-bold">{stats.lyrics_tracks_count}</h3>
+          </div>
         </CardContent>
       </Card>
 

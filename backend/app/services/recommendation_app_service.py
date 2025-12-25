@@ -57,12 +57,19 @@ class RecommendationAppService:
         suggested_genre = max(genre_scores, key=genre_scores.get)
         return {"suggested_genre": suggested_genre, "reason": None}
 
-    def get_grouped_suggestions(self, limit: int = 10, offset: int = 0, threshold: float = 0.85, summary_only: bool = False) -> List[GroupedSuggestionSummary]:
+    def get_grouped_suggestions(
+        self, 
+        limit: int = 10, 
+        offset: int = 0, 
+        threshold: float = 0.85, 
+        summary_only: bool = False,
+        mode: str = "genre"
+    ) -> List[GroupedSuggestionSummary]:
         parents = self.repository.get_parent_vectors()
         if not parents:
             return []
 
-        candidate_matrix = self.repository.get_candidate_vectors()
+        candidate_matrix = self.repository.get_candidate_vectors(mode=mode)
         
         if candidate_matrix.size == 0:
             parents.sort(key=lambda x: x[0])

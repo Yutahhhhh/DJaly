@@ -22,8 +22,6 @@ interface RecommendTabProps {
   referenceTrack: Track | null;
   availableGenres: string[];
   onAddTrack: (track: Track) => void;
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
   currentSetlistTracks: Track[];
 }
 
@@ -31,8 +29,6 @@ export function RecommendTab({
   referenceTrack,
   availableGenres,
   onAddTrack,
-  onPlay,
-  currentTrackId,
   currentSetlistTracks,
 }: RecommendTabProps) {
   const [recTracks, setRecTracks] = useState<Track[]>([]);
@@ -118,9 +114,6 @@ export function RecommendTab({
                 onChange={setRecGenres}
                 placeholder="All Genres"
                 className="bg-background"
-                creatable={true}
-                customPrefix="expand:"
-                createLabel="Expand Search"
               />
             </div>
           </>
@@ -152,8 +145,6 @@ export function RecommendTab({
                     id={`rec-${t.id}`}
                     track={t}
                     type="LIBRARY_ITEM"
-                    isPlaying={currentTrackId === t.id}
-                    onPlay={() => onPlay(t)}
                     onAdd={() => onAddTrack(t)}
                   />
                 ))}

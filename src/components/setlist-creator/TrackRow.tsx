@@ -1,116 +1,110 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { Play, GripVertical, X, Plus } from "lucide-react";
+import { GripVertical, X, Plus, MessageSquareQuote } from "lucide-react";
 import { Track } from "@/types";
-import { formatDuration } from "@/lib/utils";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { cn } from "@/lib/utils";
+import { TrackRow as BaseTrackRow } from "@/components/track-row";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface TrackRowProps {
   id: string;
   track: Track;
   type: "SETLIST_ITEM" | "LIBRARY_ITEM" | "RECOMMEND_ITEM";
-  isPlaying?: boolean;
   isSelected?: boolean;
-  onPlay: () => void;
+  disableDnD?: boolean;
   onSelect?: () => void;
   onRemove?: () => void;
   onAdd?: () => void;
+  innerRef?: React.Ref<HTMLDivElement>;
 }
 
-export const TrackRow = React.memo(
-  ({
-    id,
-    track,
-    type,
-    isPlaying,
-    isSelected,
-    onPlay,
-    onSelect,
-    onRemove,
-    onAdd,
-  }: TrackRowProps) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging,
-    } = useSortable({
-      id: id,
-      data: { type, track },
-    });
+const TrackRowContent = ({
+  track,
+  isSelected,
+  onSelect,
+  onRemove,
+  onAdd,
+  dragHandleProps,
+  style,
+  innerRef,
+  isDragging,
+}: Omit<TrackRowProps, "id" | "type" | "disableDnD"> & {
+  dragHandleProps?: any;
+  style?: React.CSSProperties;
+  innerRef?: (node: HTMLElement | null) => void;
+  isDragging?: boolean;
+}) => {
+  const wordplayData = React.useMemo(() => {
+    if ('wordplay_json' in track && (track as any).wordplay_json) {
+      try {
+        return JSON.parse((track as any).wordplay_json);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }, [track]);
 
-    const style = {
-      // translate3dではなくTranslate(2D)を使用してWebKitの描画を高速化
-      transform: CSS.Translate.toString(transform),
-      // ドラッグ中のラグを解消するために transition: none を徹底
-      transition: isDragging ? "none" : transition,
-      zIndex: isDragging ? 100 : undefined,
-    };
-
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={cn(
-          "group flex items-center gap-2 p-2 rounded-md border bg-card transition-colors cursor-default select-none w-full overflow-hidden",
-          // ドラッグされている「元」のアイテムだけを薄くする（Overlayは除外）
-          isDragging &&
-            id !== "overlay" &&
-            "opacity-20 border-primary bg-primary/5",
-          isSelected && "ring-2 ring-primary z-10",
-          isPlaying && "bg-accent/50 border-primary/30"
-        )}
+  return (
+    <div className="relative group/row">
+      {wordplayData && (
+        <div className="absolute -top-3 left-12 z-30">
+          <Popover>
+            <PopoverTrigger asChild>
+              <div 
+                className="cursor-pointer bg-background border rounded-full p-1 shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors" 
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MessageSquareQuote className="h-3 w-3 text-primary" />
+              </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-3" side="right" align="start">
+              <div className="font-medium mb-2 flex items-center gap-2 text-sm">
+                <MessageSquareQuote className="h-4 w-4 text-primary" /> 
+                Wordplay Connection
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="bg-muted/50 p-2 rounded border border-border/50">
+                  <div className="text-xs text-muted-foreground mb-1">Source Phrase</div>
+                  <div className="italic">"{wordplayData.source_phrase}"</div>
+                </div>
+                <div className="flex justify-center text-muted-foreground text-xs">
+                  ↓ via <span className="font-bold mx-1 text-primary">{wordplayData.keyword}</span>
+                </div>
+                <div className="bg-primary/5 p-2 rounded border border-primary/20">
+                  <div className="text-xs text-muted-foreground mb-1">Target Phrase</div>
+                  <div className="italic">"{wordplayData.target_phrase}"</div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+      <BaseTrackRow
+        track={track}
+        viewType="list"
+        isSelected={isSelected}
         onClick={onSelect}
-      >
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/50 hover:text-foreground shrink-0 z-20"
-        >
-          <GripVertical className="h-4 w-4" />
-        </div>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0 rounded-full z-20"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPlay();
-          }}
-        >
-          <Play
-            className={cn(
-              "h-4 w-4",
-              isPlaying && "fill-green-500 text-green-500"
-            )}
-          />
-        </Button>
-
-        {/* レイアウト溢れ防止の核心: flex-1 min-w-0 */}
-        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-          <div className="flex items-center justify-between gap-2 w-full overflow-hidden">
-            <span
-              className="font-medium truncate text-sm flex-1"
-              title={track.title}
-            >
-              {track.title}
-            </span>
-            <span className="text-[10px] font-mono text-muted-foreground shrink-0 tabular-nums">
-              {formatDuration(track.duration)}
-            </span>
+        innerRef={innerRef}
+        style={style}
+        className={isDragging ? "opacity-20 border-primary bg-primary/5" : ""}
+        showMeta={true} // Use standard meta rendering
+      prefix={
+        dragHandleProps ? (
+          <div
+            {...dragHandleProps}
+            className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/50 hover:text-foreground shrink-0 z-20"
+          >
+            <GripVertical className="h-4 w-4" />
           </div>
-          <div className="text-[11px] text-muted-foreground truncate w-full">
-            {track.artist} {track.year && `• ${track.year}`} {track.bpm > 0 && `• ${track.bpm.toFixed(0)} BPM`}{" "}
-            {track.key && `• ${track.key}`}
-          </div>
-        </div>
-
+        ) : (
+          <div className="w-2" />
+        )
+      }
+      suffix={
         <div className="flex gap-1 shrink-0 z-20 ml-1">
+          {/* Duration is now handled by BaseTrackRow */}
           {onAdd && (
             <Button
               variant="ghost"
@@ -138,9 +132,48 @@ export const TrackRow = React.memo(
             </Button>
           )}
         </div>
-      </div>
-    );
+      }
+    />
+    </div>
+  );
+};
+
+const SortableTrackRow = (props: TrackRowProps) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: props.id,
+    data: { type: props.type, track: props.track },
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? "none" : transition,
+    zIndex: isDragging ? 100 : undefined,
+  };
+
+  return (
+    <TrackRowContent
+      {...props}
+      innerRef={setNodeRef}
+      style={style}
+      dragHandleProps={{ ...attributes, ...listeners }}
+      isDragging={isDragging && props.id !== "overlay"}
+    />
+  );
+};
+
+export const TrackRow = React.memo((props: TrackRowProps) => {
+  if (props.disableDnD) {
+    return <TrackRowContent {...props} innerRef={props.innerRef as any} />;
   }
-);
+  return <SortableTrackRow {...props} />;
+});
 
 TrackRow.displayName = "TrackRow";
+

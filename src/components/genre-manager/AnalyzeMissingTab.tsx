@@ -10,12 +10,16 @@ import { Loader2 } from "lucide-react";
 import { Track } from "@/types";
 import { GenreGroup } from "./GenreGroup";
 
+import { AnalysisMode } from "@/services/genres";
+
 interface AnalyzeMissingTabProps {
   onPlay: (track: Track) => void;
+  mode?: AnalysisMode;
 }
 
 export const AnalyzeMissingTab: React.FC<AnalyzeMissingTabProps> = ({
   onPlay,
+  mode = "both"
 }) => {
   const [groups, setGroups] = useState<GroupedSuggestionSummary[]>([]);
   const [loadedSuggestions, setLoadedSuggestions] = useState<
@@ -55,7 +59,9 @@ export const AnalyzeMissingTab: React.FC<AnalyzeMissingTabProps> = ({
       const currentOffset = reset ? 0 : offset;
       const data = await genreService.getGroupedSuggestions(
         currentOffset,
-        LIMIT
+        LIMIT,
+        0.85,
+        mode
       );
 
       if (data.length < LIMIT) {
@@ -71,7 +77,17 @@ export const AnalyzeMissingTab: React.FC<AnalyzeMissingTabProps> = ({
   };
 
   useEffect(() => {
-    fetchGroups(offset === 0);
+    // Reset when mode changes
+    setOffset(0);
+    setHasMore(true);
+    setGroups([]);
+    fetchGroups(true);
+  }, [mode]);
+
+  useEffect(() => {
+    if (offset > 0) {
+      fetchGroups(false);
+    }
   }, [offset]);
 
   const handleExpandGroup = async (parentId: number) => {
@@ -151,7 +167,7 @@ export const AnalyzeMissingTab: React.FC<AnalyzeMissingTabProps> = ({
     <div className="h-full flex flex-col">
       <div className="p-4 border-b flex justify-between items-center shrink-0">
         <div>
-          <h3 className="font-medium">Group by Similarity</h3>
+          <h3 className="font-medium">Group by Similarity ({mode})</h3>
           <p className="text-sm text-muted-foreground">
             Verified tracks are used as reference to find similar unverified
             tracks.
@@ -181,7 +197,7 @@ export const AnalyzeMissingTab: React.FC<AnalyzeMissingTabProps> = ({
                   subtitle={group.parent_track.artist}
                   badges={
                     <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">
-                      {group.parent_track.genre}
+                      {mode === "subgenre" ? (group.parent_track.subgenre || "No Subgenre") : group.parent_track.genre}
                     </span>
                   }
                   count={group.suggestion_count}

@@ -25,13 +25,17 @@ export interface GenreBatchUpdateRequest {
   target_track_ids: number[];
 }
 
+export type AnalysisMode = "genre" | "subgenre" | "both";
+
 export interface GenreLLMAnalyzeRequest {
   track_id: number;
   overwrite?: boolean;
+  mode?: AnalysisMode;
 }
 
 export interface GenreAnalysisResult {
   genre: string;
+  subgenre?: string;
   reason: string;
   confidence: string;
 }
@@ -58,19 +62,21 @@ export const genreService = {
 
   getUnknownTracks: async (
     offset: number = 0,
-    limit: number = 50
+    limit: number = 50,
+    mode: AnalysisMode = "genre"
   ): Promise<Track[]> => {
-    return apiClient.get<Track[]>("/genres/unknown", { offset, limit });
+    return apiClient.get<Track[]>("/genres/unknown", { offset, limit, mode });
   },
 
-  getAllUnknownTrackIds: async (): Promise<number[]> => {
-    return apiClient.get<number[]>("/genres/unknown-ids");
+  getAllUnknownTrackIds: async (mode: AnalysisMode = "genre"): Promise<number[]> => {
+    return apiClient.get<number[]>("/genres/unknown-ids", { mode });
   },
 
   getGroupedSuggestions: async (
     offset: number = 0,
     limit: number = 10,
-    threshold: number = 0.85
+    threshold: number = 0.85,
+    mode: AnalysisMode = "genre"
   ): Promise<GroupedSuggestionSummary[]> => {
     return apiClient.get<GroupedSuggestionSummary[]>(
       "/genres/grouped-suggestions",
@@ -78,6 +84,7 @@ export const genreService = {
         offset,
         limit,
         threshold,
+        mode,
       }
     );
   },
@@ -96,19 +103,23 @@ export const genreService = {
 
   analyzeTrackWithLlm: async (
     trackId: number,
-    overwrite: boolean = false
+    overwrite: boolean = false,
+    mode: AnalysisMode = "both"
   ): Promise<GenreAnalysisResult> => {
     return apiClient.post<GenreAnalysisResult>("/genres/llm-analyze", {
       track_id: trackId,
       overwrite,
+      mode,
     });
   },
 
   analyzeTracksBatchWithLlm: async (
-    trackIds: number[]
+    trackIds: number[],
+    mode: AnalysisMode = "both"
   ): Promise<GenreUpdateResult[]> => {
     return apiClient.post<GenreUpdateResult[]>("/genres/batch-llm-analyze", {
       track_ids: trackIds,
+      mode,
     });
   },
 
@@ -134,19 +145,21 @@ export const genreService = {
     );
   },
 
-  getCleanupSuggestions: async (): Promise<GenreCleanupGroup[]> => {
-    return apiClient.get<GenreCleanupGroup[]>("/genres/cleanup-suggestions");
+  getCleanupSuggestions: async (mode: AnalysisMode = "genre"): Promise<GenreCleanupGroup[]> => {
+    return apiClient.get<GenreCleanupGroup[]>("/genres/cleanup-suggestions", { mode });
   },
 
   executeCleanup: async (
     targetGenre: string,
-    trackIds: number[]
+    trackIds: number[],
+    mode: AnalysisMode = "genre"
   ): Promise<{ updated_count: number; genre: string }> => {
     return apiClient.post<{ updated_count: number; genre: string }>(
       "/genres/cleanup-execute",
       {
         target_genre: targetGenre,
         track_ids: trackIds,
+        mode,
       }
     );
   },

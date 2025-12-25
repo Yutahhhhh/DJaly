@@ -18,16 +18,28 @@ class RecommendationRepository:
         except:
             return None
 
-    def get_candidate_vectors(self) -> np.ndarray:
-        stmt = select(TrackEmbedding.embedding_json).join(Track).where(Track.is_genre_verified == False)
-        candidates = self.session.exec(stmt).all()
+    def get_candidate_vectors(self, mode: str = "genre") -> np.ndarray:
+        query = select(TrackEmbedding.embedding_json).join(Track)
+        
+        if mode == "subgenre":
+            query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
+        else:
+            query = query.where(Track.is_genre_verified == False)
+            
+        candidates = self.session.exec(query).all()
         vectors = [self._parse_embedding(emb) for emb in candidates]
         vectors = [v for v in vectors if v is not None]
         return np.array(vectors) if vectors else np.array([])
 
-    def get_candidates_with_ids(self) -> Tuple[List[int], np.ndarray]:
-        stmt = select(Track.id, TrackEmbedding.embedding_json).join(TrackEmbedding).where(Track.is_genre_verified == False)
-        results = self.session.exec(stmt).all()
+    def get_candidates_with_ids(self, mode: str = "genre") -> Tuple[List[int], np.ndarray]:
+        query = select(Track.id, TrackEmbedding.embedding_json).join(TrackEmbedding)
+        
+        if mode == "subgenre":
+            query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
+        else:
+            query = query.where(Track.is_genre_verified == False)
+            
+        results = self.session.exec(query).all()
         ids = []
         vectors = []
         for tid, emb in results:

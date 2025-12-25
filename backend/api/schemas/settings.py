@@ -8,6 +8,8 @@ class CsvImportRow(BaseModel):
     artist: str
     album: Optional[str] = ""
     genre: Optional[str] = ""
+    subgenre: Optional[str] = ""
+    year: Optional[int] = None
     bpm: Optional[float] = 0.0
     key: Optional[str] = ""
     energy: Optional[float] = 0.0
@@ -55,6 +57,8 @@ class MetadataImportRow(BaseModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     genre: Optional[str] = None
+    subgenre: Optional[str] = None
+    year: Optional[int] = None
     is_genre_verified: Optional[bool] = None
 
 class MetadataImportAnalysisResult(BaseModel):
@@ -79,7 +83,7 @@ class PresetImportAnalysisResult(BaseModel):
     """プリセットインポート解析結果"""
     total_rows: int
     new_presets: List[PresetImportRow]
-    updates: List[Dict[str, Any]] # { "current": Preset, "new": PresetImportRow }
+    updates: List[Dict[str, Any]]
     duplicates: List[PresetImportRow]
 
 class PresetImportExecuteRequest(BaseModel):

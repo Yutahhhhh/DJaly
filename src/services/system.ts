@@ -10,6 +10,7 @@ export interface DashboardStats {
     count: number;
   }[];
   unverified_genres_count: number;
+  lyrics_tracks_count: number;
   recent_setlists: Setlist[];
   config: {
     has_root_path: boolean;

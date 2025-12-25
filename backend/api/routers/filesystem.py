@@ -57,19 +57,6 @@ def update_metadata_content(
     
     return {"status": "success"}
 
-@router.post("/api/metadata/fetch-lyrics")
-def fetch_lyrics(
-    track_id: int = Body(..., embed=True),
-    session: Session = Depends(get_session)
-):
-    """歌詞を検索・取得する (APIのみ使用 - LLM生成は行わない)"""
-    service = FilesystemAppService(session)
-    try:
-        lyrics = service.fetch_lyrics(track_id)
-        return {"lyrics": lyrics}
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Track not found")
-
 @router.post("/api/metadata/fetch-artwork-info")
 def fetch_artwork_info(
     track_id: int = Body(..., embed=True),

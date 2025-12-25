@@ -7,6 +7,7 @@ export interface Track {
   bpm: number;
   key: string;
   genre: string;
+  subgenre?: string;
   year?: number;
   duration: number;
   // New Analysis Features
@@ -17,4 +18,5 @@ export interface Track {
   noisiness: number; // 0.0 - 1.0
   loudness: number; // dB (negative)
   is_genre_verified?: boolean;
+  has_lyrics?: boolean;
 }

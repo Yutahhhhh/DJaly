@@ -1,55 +1,29 @@
-import React, { useState } from "react";
+import React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Save } from "lucide-react";
-import { genreService } from "@/services/genres";
 import { AnalyzeMissingTab } from "./AnalyzeMissingTab";
 import { SuggestionsTab } from "./SuggestionsTab";
 import { CleanupTab } from "./CleanupTab";
 import { Track } from "@/types";
 
+import { AnalysisMode } from "@/services/genres";
+
 interface GenreManagerProps {
   onPlay: (track: Track) => void;
+  mode: AnalysisMode;
 }
 
-export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay }) => {
-  const [isApplying, setIsApplying] = useState(false);
-
-  const handleApplyToFiles = async () => {
-    if (!confirm("Are you sure you want to write DB genres to ALL file tags? This cannot be undone.")) {
-      return;
-    }
-    
-    setIsApplying(true);
-    try {
-      const result = await genreService.applyGenresToFiles([]);
-      alert(`Applied genres to files.\nSuccess: ${result.success}\nFailed: ${result.failed}`);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to apply genres to files.");
-    } finally {
-      setIsApplying(false);
-    }
-  };
+export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay, mode }) => {
+  const title = mode === "genre" ? "Genre Manager" : mode === "subgenre" ? "Subgenre Manager" : "Genre & Subgenre Manager";
 
   return (
     <div className="h-full flex flex-col p-6 space-y-6">
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Genre Manager</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
           <p className="text-muted-foreground">
-            Manage and organize your music library genres using AI and similarity
-            analysis.
+            Manage and organize your music library {mode}s using AI and similarity analysis.
           </p>
         </div>
-        <Button 
-          onClick={handleApplyToFiles} 
-          disabled={isApplying}
-          variant="outline"
-        >
-          <Save className="mr-2 h-4 w-4" />
-          {isApplying ? "Applying..." : "Sync to Files"}
-        </Button>
       </div>
 
       <Tabs defaultValue="cleanup" className="flex-1 flex flex-col min-h-0">
@@ -64,19 +38,19 @@ export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay }) => {
             value="cleanup"
             className="flex-1 p-0 m-0 min-h-0 data-[state=inactive]:hidden"
           >
-            <CleanupTab onPlay={onPlay} />
+            <CleanupTab onPlay={onPlay} mode={mode} />
           </TabsContent>
           <TabsContent
             value="missing"
             className="flex-1 p-0 m-0 min-h-0 data-[state=inactive]:hidden"
           >
-            <AnalyzeMissingTab onPlay={onPlay} />
+            <AnalyzeMissingTab onPlay={onPlay} mode={mode} />
           </TabsContent>
           <TabsContent
             value="suggestions"
             className="flex-1 p-0 m-0 min-h-0 data-[state=inactive]:hidden"
           >
-            <SuggestionsTab onPlay={onPlay} />
+            <SuggestionsTab onPlay={onPlay} mode={mode} />
           </TabsContent>
         </div>
       </Tabs>

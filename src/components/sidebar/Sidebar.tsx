@@ -70,9 +70,9 @@ export function Sidebar({
         />
         <NavButton
           icon={<Tags className="h-5 w-5" />}
-          label="Genres"
-          isActive={activeView === "genres"}
-          onClick={() => onNavigate("genres")}
+          label="Tags"
+          isActive={activeView === "tags"}
+          onClick={() => onNavigate("tags")}
           isOpen={isOpen}
         />
         <NavButton
