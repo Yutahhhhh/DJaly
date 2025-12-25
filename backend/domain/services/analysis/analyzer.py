@@ -54,7 +54,11 @@ class AudioAnalyzer:
         self.embedding_algo = None
         
         # Use path relative to this file to ensure it works regardless of CWD
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if getattr(sys, 'frozen', False):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            
         model_path = os.path.join(base_dir, "models", "msd-musicnn-1.pb")
         
         if os.path.exists(model_path):
@@ -312,6 +316,11 @@ class AudioAnalyzer:
             except:
                 pass
 
+        # Extract lyrics if available in tags
+        lyrics = None
+        if hasattr(tag, 'extra') and isinstance(tag.extra, dict):
+            lyrics = tag.extra.get('lyrics')
+
         return {
             "filepath": filepath,
             "title": tag.title or os.path.basename(filepath),
@@ -319,6 +328,7 @@ class AudioAnalyzer:
             "album": tag.album or "Unknown",
             "genre": tag.genre or "Unknown",
             "year": year,
+            "lyrics": lyrics,
             "duration": safe_scalar(tag.duration or 0.0),
             "bpm": rounded_bpm,
             "key": detected_key, 

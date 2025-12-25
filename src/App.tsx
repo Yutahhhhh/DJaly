@@ -5,15 +5,16 @@ import { PromptManager } from "@/components/prompt-manager";
 import { SettingsView } from "@/components/settings-view";
 import { FileExplorer } from "@/components/file-explorer";
 import { SetlistCreator } from "@/components/setlist-creator";
-import { GenreManager } from "@/components/genre-manager/GenreManager";
+import { TagManager } from "@/components/tag-manager/TagManager";
 import { MusicPlayer } from "@/components/MusicPlayer";
 import { GlobalProgressIndicator } from "@/components/GlobalProgressIndicator";
 import { IngestionProvider } from "@/contexts/IngestionContext";
-import { Track } from "@/types";
+import { MetadataProvider } from "@/contexts/MetadataContext";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 import { API_BASE_URL } from "@/services/api-client";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Updater } from "@/components/Updater";
+import { usePlayerStore } from "@/stores/playerStore";
 
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
@@ -21,7 +22,7 @@ function App() {
   const [isServerReady, setIsServerReady] = useState(false);
 
   // Music Player State
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
+  const { currentTrack } = usePlayerStore();
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
 
   // Server Health Check
@@ -55,24 +56,19 @@ function App() {
       case "library":
         return (
           <MusicLibrary
-            onPlay={(track) => setCurrentTrack(track)}
-            currentTrackId={currentTrack?.id}
             isPlayerLoading={isPlayerLoading}
           />
         );
       case "setlists":
         return (
-          <SetlistCreator
-            onPlay={(track) => setCurrentTrack(track)}
-            currentTrackId={currentTrack?.id}
-          />
+          <SetlistCreator />
         );
       case "explorer":
         return <FileExplorer />;
       case "prompts":
         return <PromptManager />;
-      case "genres":
-        return <GenreManager onPlay={(track) => setCurrentTrack(track)} />;
+      case "tags":
+        return <TagManager />;
       case "settings":
         return <SettingsView />;
       default:
@@ -82,8 +78,9 @@ function App() {
 
   return (
     <IngestionProvider>
-      <Updater />
-      <div className="h-screen w-full bg-background text-foreground flex overflow-hidden">
+      <MetadataProvider>
+        <Updater />
+        <div className="h-screen w-full bg-background text-foreground flex overflow-hidden">
         <Sidebar
           activeView={activeView}
           onNavigate={setActiveView}
@@ -101,11 +98,11 @@ function App() {
         <GlobalProgressIndicator />
 
         <MusicPlayer
-          track={currentTrack}
-          onClose={() => setCurrentTrack(null)}
           onLoadingChange={setIsPlayerLoading}
         />
+        <GlobalProgressIndicator />
       </div>
+      </MetadataProvider>
     </IngestionProvider>
   );
 }

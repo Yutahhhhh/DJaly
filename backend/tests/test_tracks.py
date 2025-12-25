@@ -26,6 +26,15 @@ def test_get_tracks_filtering(client, session: Session):
     # 120 と 122 がヒットするはず
     assert len(response.json()) == 2
 
+    # 5. Subgenre Filter (using genres param)
+    t4 = Track(filepath="/path/4.mp3", title="D-Track", artist="Art3", album="Album3", genre="House", subgenre="Deep House", bpm=120, duration=100)
+    session.add(t4)
+    session.commit()
+    
+    response = client.get("/api/tracks", params={"genres": ["Deep House"]})
+    assert len(response.json()) == 1
+    assert response.json()[0]["title"] == "D-Track"
+
 def test_update_track_genre(client, session: Session):
     """ジャンル更新APIのテスト"""
     track = Track(filepath="/p/1.mp3", title="T", artist="A", album="AlbumT", genre="Old", bpm=120, duration=100)

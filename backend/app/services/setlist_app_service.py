@@ -58,10 +58,11 @@ class SetlistAppService:
     def get_setlist_tracks(self, setlist_id: int) -> List[Dict[str, Any]]:
         results = self.repository.get_tracks(setlist_id)
         tracks = []
-        for st, t in results:
+        for st, t, lyrics_content in results:
             t_dict = t.model_dump()
             t_dict["setlist_track_id"] = st.id
             t_dict["position"] = st.position
+            t_dict["has_lyrics"] = bool(lyrics_content and lyrics_content.strip())
             tracks.append(t_dict)
         return tracks
 
@@ -70,10 +71,26 @@ class SetlistAppService:
         if not setlist:
             return False
         
+        # Fetch existing tracks to preserve metadata
+        existing_tracks = self.repository.get_tracks(setlist_id)
+        
+        # Map track_id to list of wordplay_json (FIFO queue)
+        metadata_map = {}
+        for st, _, _ in existing_tracks:
+            if st.wordplay_json:
+                if st.track_id not in metadata_map:
+                    metadata_map[st.track_id] = []
+                metadata_map[st.track_id].append(st.wordplay_json)
+        
         self.repository.clear_tracks(setlist_id)
         
         for i, tid in enumerate(track_ids):
             st = SetlistTrack(setlist_id=setlist_id, track_id=tid, position=i)
+            
+            # Restore metadata if available
+            if tid in metadata_map and metadata_map[tid]:
+                st.wordplay_json = metadata_map[tid].pop(0)
+                
             self.repository.add_track(st)
         
         self.session.commit()
@@ -89,7 +106,7 @@ class SetlistAppService:
 
         lines = ["#EXTM3U"]
 
-        for st, track in results:
+        for st, track, lyrics_content in results:
             try:
                 duration = int(track.duration) if track.duration else -1
             except:

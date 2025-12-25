@@ -9,12 +9,51 @@ echo "📦 Building Backend (Sidecar)..."
 # backend/build_sidecar.sh の内容を参考に、release.sh と同じ手順でビルド
 cd backend
 source .venv/bin/activate
-# 必要な隠しインポートを含めてビルド
+# 必要な隠しインポートを含めてビルド (release.shと同期)
 pyinstaller --clean --noconfirm --onefile --name djaly-server \
+    --collect-all uvicorn \
+    --collect-all starlette \
+    --collect-all fastapi \
+    --collect-all h11 \
+    --hidden-import="uvicorn" \
+    --hidden-import="uvicorn.main" \
+    --hidden-import="uvicorn.config" \
+    --hidden-import="uvicorn.logging" \
+    --hidden-import="uvicorn.loops" \
+    --hidden-import="uvicorn.loops.auto" \
+    --hidden-import="uvicorn.loops.asyncio" \
+    --hidden-import="uvicorn.protocols" \
+    --hidden-import="uvicorn.protocols.http" \
+    --hidden-import="uvicorn.protocols.http.auto" \
+    --hidden-import="uvicorn.protocols.http.h11_impl" \
+    --hidden-import="uvicorn.protocols.http.httptools_impl" \
+    --hidden-import="uvicorn.protocols.websockets" \
+    --hidden-import="uvicorn.protocols.websockets.auto" \
+    --hidden-import="uvicorn.protocols.websockets.wsproto_impl" \
+    --hidden-import="uvicorn.protocols.websockets.websockets_impl" \
+    --hidden-import="uvicorn.lifespan" \
+    --hidden-import="uvicorn.lifespan.on" \
+    --hidden-import="uvicorn.lifespan.off" \
+    --hidden-import="uvicorn.server" \
+    --hidden-import="starlette" \
+    --hidden-import="starlette.routing" \
+    --hidden-import="starlette.middleware" \
+    --hidden-import="starlette.applications" \
+    --hidden-import="fastapi" \
     --hidden-import="fastapi.applications" \
     --hidden-import="sqlmodel" \
     --hidden-import="platformdirs" \
     --hidden-import="pydantic_settings" \
+    --hidden-import="sklearn.utils._typedefs" \
+    --hidden-import="sklearn.neighbors._partition_nodes" \
+    --hidden-import="scipy.special.cython_special" \
+    --hidden-import="h11" \
+    --hidden-import="h11._connection" \
+    --hidden-import="h11._state" \
+    --hidden-import="anyio" \
+    --hidden-import="anyio._backends" \
+    --hidden-import="anyio._backends._asyncio" \
+    --add-data "models/msd-musicnn-1.pb:models" \
     server.py
 
 # バイナリの移動

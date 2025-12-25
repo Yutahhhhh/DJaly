@@ -4,6 +4,7 @@ from datetime import datetime
 
 from domain.models.setlist import Setlist, SetlistTrack
 from domain.models.track import Track
+from domain.models.lyrics import Lyrics
 
 class SetlistRepository:
     def __init__(self, session: Session):
@@ -32,11 +33,12 @@ class SetlistRepository:
         self.session.delete(setlist)
         self.session.commit()
 
-    def get_tracks(self, setlist_id: int) -> List[tuple[SetlistTrack, Track]]:
+    def get_tracks(self, setlist_id: int) -> List[tuple[SetlistTrack, Track, Optional[str]]]:
         query = (
-            select(SetlistTrack, Track)
+            select(SetlistTrack, Track, Lyrics.content)
             .where(SetlistTrack.setlist_id == setlist_id)
             .where(SetlistTrack.track_id == Track.id)
+            .outerjoin(Lyrics, Track.id == Lyrics.track_id)
             .order_by(SetlistTrack.position)
         )
         return self.session.exec(query).all()

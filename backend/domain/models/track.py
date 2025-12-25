@@ -2,6 +2,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from sqlmodel import Field, SQLModel
 from sqlalchemy import JSON, Column
+from pydantic import ConfigDict
 import json
 
 class Track(SQLModel, table=True):
@@ -21,17 +22,15 @@ class Track(SQLModel, table=True):
     # メタデータ (TinyTag由来)
     title: str = Field(index=True)
     artist: str = Field(index=True)
-    album: str
+    album: Optional[str] = Field(default="", index=True)
     genre: str
+    subgenre: str = Field(default="")
     year: Optional[int] = Field(default=None, index=True)
     
-    # 解析データ (Librosa由来)
-    # BPMは解析前はNone
+    # 解析データ (Librosa/Essentia由来)
     bpm: float
-    # キー (例: 'C# maj')
     key: str = Field(default="")
     scale: str = Field(default="")
-    # 曲の長さ（秒）
     duration: float
     
     # --- Basic Audio Features (Scalar - 高速検索用) ---
@@ -52,9 +51,13 @@ class Track(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.now, index=True)
 
-    class Config:
-        # データベースとの整合性を保つための設定
-        arbitrary_types_allowed = True
+    # Pydantic V2 形式の Config 設定
+    # 以前の TypeError を解決するために extra="allow" を設定し、
+    # 検索結果に動的に lyrics などを注入できるようにしています。
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="allow"
+    )
 
 class TrackAnalysis(SQLModel, table=True):
     __tablename__ = "track_analyses"

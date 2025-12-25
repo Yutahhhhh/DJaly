@@ -30,8 +30,6 @@ interface AutoTabProps {
   currentSetlistTracks: Track[];
   availableGenres: string[];
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
-  onPlay: (track: Track) => void;
-  currentTrackId?: number | null;
   bridgeState?: {
     start: Track | null;
     end: Track | null;
@@ -44,8 +42,6 @@ export function AutoTab({
   currentSetlistTracks,
   availableGenres,
   onInjectTracks,
-  onPlay,
-  currentTrackId,
   bridgeState,
 }: AutoTabProps) {
   const [mode, setMode] = useState<"infinite" | "bridge">("infinite");
@@ -241,9 +237,6 @@ export function AutoTab({
                 onChange={setAutoGenres}
                 placeholder="All Genres"
                 className="bg-background h-8 text-xs"
-                creatable={true}
-                customPrefix="expand:"
-                createLabel="Expand Search"
               />
             </div>
             <div className="space-y-1">
@@ -325,8 +318,6 @@ export function AutoTab({
                       id={`auto-${t.id}-${idx}`}
                       track={t}
                       type="LIBRARY_ITEM"
-                      isPlaying={currentTrackId === t.id}
-                      onPlay={() => onPlay(t)}
                       onAdd={() => onInjectTracks([t], startTrack?.id)}
                     />
                   </div>

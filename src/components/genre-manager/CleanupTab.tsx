@@ -9,11 +9,14 @@ import { Loader2, Wand2 } from "lucide-react";
 import { Track } from "@/types";
 import { GenreGroup } from "./GenreGroup";
 
+import { AnalysisMode } from "@/services/genres";
+
 interface CleanupTabProps {
   onPlay: (track: Track) => void;
+  mode?: AnalysisMode;
 }
 
-export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
+export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay, mode = "both" }) => {
   const [groups, setGroups] = useState<GenreCleanupGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedTracks, setSelectedTracks] = useState<
@@ -23,7 +26,7 @@ export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
   const fetchGroups = async () => {
     setLoading(true);
     try {
-      const data = await genreService.getCleanupSuggestions();
+      const data = await genreService.getCleanupSuggestions(mode);
       setGroups(data);
     } catch (error) {
       console.error("Failed to fetch cleanup groups", error);
@@ -34,7 +37,7 @@ export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
 
   useEffect(() => {
     fetchGroups();
-  }, []);
+  }, [mode]);
 
   const toggleSelection = (primaryGenre: string, childId: number) => {
     setSelectedTracks((prev) => {
@@ -69,7 +72,7 @@ export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
     if (!targetIds || targetIds.length === 0) return;
 
     try {
-      await genreService.executeCleanup(primaryGenre, targetIds);
+      await genreService.executeCleanup(primaryGenre, targetIds, mode);
 
       // Remove processed items locally or reduce counts
       // For simplicity, just refetch or filter out fully processed groups
@@ -106,17 +109,21 @@ export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
     onPlay(track as Track);
   };
 
+  const title = mode === "subgenre" ? "Subgenre Cleanup" : "Genre Cleanup";
+  const description = mode === "subgenre" 
+    ? 'Detect and unify inconsistent subgenre names.'
+    : 'Detect and unify inconsistent genre names (e.g. "Hip-Hop" → "Hip Hop").';
+
   return (
     <div className="h-full flex flex-col">
       <div className="p-4 border-b flex justify-between items-center shrink-0">
         <div>
           <h3 className="font-medium flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-purple-500" />
-            Genre Cleanup
+            {title}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Detect and unify inconsistent genre names (e.g. "Hip-Hop" → "Hip
-            Hop").
+            {description}
           </p>
         </div>
         <Button
@@ -175,7 +182,7 @@ export const CleanupTab: React.FC<CleanupTabProps> = ({ onPlay }) => {
                 <div className="bg-green-50 text-green-600 p-3 rounded-full mb-3">
                   <Wand2 className="h-6 w-6" />
                 </div>
-                <p>No genre inconsistencies found!</p>
+                <p>No {mode} inconsistencies found!</p>
                 <p className="text-xs">Your library metadata looks clean.</p>
               </div>
             )}

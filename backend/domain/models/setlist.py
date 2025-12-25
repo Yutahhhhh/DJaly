@@ -24,4 +24,5 @@ class SetlistTrack(SQLModel, table=True):
     track_id: int = Field(foreign_key="tracks.id")
     position: int
     transition_note: Optional[str] = None
+    wordplay_json: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)

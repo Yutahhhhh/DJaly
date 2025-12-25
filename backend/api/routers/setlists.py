@@ -128,3 +128,20 @@ def generate_path_setlist(
         return service.generate_path_setlist(start_track_id, end_track_id, length, genres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+@router.patch("/api/setlist-tracks/{setlist_track_id}/wordplay")
+def update_setlist_track_wordplay(
+    setlist_track_id: int,
+    wordplay_json: str = Body(..., embed=True),
+    session: Session = Depends(get_session)
+):
+    from domain.models.setlist import SetlistTrack
+    
+    track = session.get(SetlistTrack, setlist_track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Setlist track not found")
+        
+    track.wordplay_json = wordplay_json
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+    return track

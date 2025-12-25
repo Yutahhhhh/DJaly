@@ -1,6 +1,12 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from enum import Enum
 from .track import TrackRead
+
+class AnalysisMode(str, Enum):
+    GENRE = "genre"
+    SUBGENRE = "subgenre"
+    BOTH = "both"
 
 class GenreBatchUpdateRequest(BaseModel):
     parent_track_id: int
@@ -13,13 +19,17 @@ class GenreBatchUpdateResponse(BaseModel):
 class GenreCleanupRequest(BaseModel):
     target_genre: str
     track_ids: List[int]
+    mode: AnalysisMode = AnalysisMode.GENRE
 
 class GenreLLMAnalyzeRequest(BaseModel):
     track_id: int
     overwrite: bool = False
+    mode: AnalysisMode = AnalysisMode.BOTH
 
 class GenreBatchLLMAnalyzeRequest(BaseModel):
     track_ids: List[int]
+    mode: AnalysisMode = AnalysisMode.BOTH
+    overwrite: bool = False
 
 class GenreUpdateResult(BaseModel):
     track_id: int
@@ -30,6 +40,7 @@ class GenreUpdateResult(BaseModel):
 
 class GenreAnalysisResponse(BaseModel):
     genre: str
+    subgenre: str = ""
     reason: str
     confidence: str
 

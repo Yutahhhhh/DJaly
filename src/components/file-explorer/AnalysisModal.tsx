@@ -92,7 +92,7 @@ export function AnalysisModal({
                     className="flex items-center justify-between text-sm p-1.5 hover:bg-muted rounded group"
                   >
                     <span
-                      className="truncate flex-1 mr-2 text-xs font-mono"
+                      className="truncate flex-1 mr-2 text-xs font-mono min-w-0"
                       title={path}
                     >
                       {getFileName(path)}

@@ -152,3 +152,26 @@ def update_file_genre(filepath: str, genre: str) -> bool:
     except Exception as e:
         print(f"Error updating genre: {e}")
         return False
+
+def update_file_tags_extended(filepath: str, title: str = None, artist: str = None, 
+                              album: str = None, year: int = None, genre: str = None, 
+                              lyrics: str = None) -> bool:
+    try:
+        # 1. Update Basic Tags
+        f = mutagen.File(filepath, easy=True)
+        if f is not None:
+            if title: f['title'] = [title]
+            if artist: f['artist'] = [artist]
+            if album: f['album'] = [album]
+            if year: f['date'] = [str(year)]
+            if genre: f['genre'] = [genre]
+            f.save()
+        
+        # 2. Update Lyrics
+        if lyrics is not None:
+            update_file_metadata(filepath, lyrics=lyrics)
+            
+        return True
+    except Exception as e:
+        print(f"Error updating extended tags: {e}")
+        return False

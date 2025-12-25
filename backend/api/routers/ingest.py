@@ -35,9 +35,8 @@ async def websocket_ingest(websocket: WebSocket):
     WebSocket Endpoint for monitoring ingestion progress.
     Just connects to the manager and listens for broadcasts.
     """
-    await ingestion_manager.connect(websocket)
-    
     try:
+        await ingestion_manager.connect(websocket)
         while True:
             # クライアントからのメッセージは現状不要だが、切断検知のために待機
             # 必要であれば "cancel" などのコマンドを受け付けることも可能
@@ -45,5 +44,5 @@ async def websocket_ingest(websocket: WebSocket):
     except WebSocketDisconnect:
         ingestion_manager.disconnect(websocket)
     except Exception as e:
-        print(f"WS Error: {e}")
+        # print(f"WS Error: {e}")
         ingestion_manager.disconnect(websocket)
