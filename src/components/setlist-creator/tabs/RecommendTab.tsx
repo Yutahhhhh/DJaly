@@ -16,18 +16,17 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
 import { presetsService, Preset } from "@/services/presets";
+import { genreService } from "@/services/genres";
 import { TrackRow } from "../TrackRow";
 
 interface RecommendTabProps {
   referenceTrack: Track | null;
-  availableGenres: string[];
   onAddTrack: (track: Track) => void;
   currentSetlistTracks: Track[];
 }
 
 export function RecommendTab({
   referenceTrack,
-  availableGenres,
   onAddTrack,
   currentSetlistTracks,
 }: RecommendTabProps) {
@@ -36,17 +35,23 @@ export function RecommendTab({
   const [recPresetId, setRecPresetId] = useState<number | null>(null);
   const [recPresets, setRecPresets] = useState<Preset[]>([]);
   const [recGenres, setRecGenres] = useState<string[]>([]);
+  const [recSubgenres, setRecSubgenres] = useState<string[]>([]);
+  const [availableGenres, setAvailableGenres] = useState<string[]>([]);
+  const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
   useEffect(() => {
     // Load presets for recommendation (using 'search' type or 'all' for now)
     presetsService.getAll("search").then(setRecPresets);
+    // Load available genres and subgenres
+    genreService.getAllGenres().then(setAvailableGenres);
+    genreService.getAllSubgenres().then(setAvailableSubgenres);
   }, []);
 
   useEffect(() => {
     if (referenceTrack) {
       fetchRecommendations();
     }
-  }, [referenceTrack, recPresetId, recGenres]);
+  }, [referenceTrack, recPresetId, recGenres, recSubgenres]);
 
   const fetchRecommendations = async () => {
     if (!referenceTrack) return;
@@ -55,7 +60,8 @@ export function RecommendTab({
       const data = await setlistsService.recommendNext(
         referenceTrack.id,
         recPresetId || undefined,
-        recGenres.length > 0 ? recGenres : undefined
+        recGenres.length > 0 ? recGenres : undefined,
+        recSubgenres.length > 0 ? recSubgenres : undefined
       );
       setRecTracks(data);
     } finally {
@@ -113,7 +119,18 @@ export function RecommendTab({
                 selected={recGenres}
                 onChange={setRecGenres}
                 placeholder="All Genres"
-                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Filter by Subgenres
+              </label>
+              <MultiSelect
+                options={availableSubgenres.map((s) => ({ label: s, value: s }))}
+                selected={recSubgenres}
+                onChange={setRecSubgenres}
+                placeholder="All Subgenres"
               />
             </div>
           </>

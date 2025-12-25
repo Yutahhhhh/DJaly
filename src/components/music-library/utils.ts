@@ -31,6 +31,9 @@ export function buildTrackSearchParams(
     // Let's change return type to Record<string, any> to be safe.
     params["genres"] = filters.genres as any;
   }
+  if (filters.subgenres && filters.subgenres.length > 0) {
+    params["subgenres"] = filters.subgenres as any;
+  }
   if (filters.minDuration)
     params["min_duration"] = filters.minDuration.toString();
   if (filters.maxDuration)

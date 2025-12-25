@@ -71,6 +71,7 @@ export function FilterDialog({
   const [presets, setPresets] = useState<Preset[]>([]);
   const [isLoadingPresets, setIsLoadingPresets] = useState(false);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
+  const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -84,8 +85,12 @@ export function FilterDialog({
   const fetchGenres = async () => {
     if (availableGenres.length > 0) return;
     try {
-      const genres = await genreService.getAllGenres();
+      const [genres, subgenres] = await Promise.all([
+        genreService.getAllGenres(),
+        genreService.getAllSubgenres(),
+      ]);
       setAvailableGenres(genres);
+      setAvailableSubgenres(subgenres);
     } catch (error) {
       console.error("Failed to load genres", error);
     }
@@ -445,15 +450,30 @@ export function FilterDialog({
                   {/* Genre Selector */}
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2 text-xs font-semibold">
-                      <Music2 className="h-3.5 w-3.5 text-pink-500" /> Genres
+                      <Music2 className="h-3.5 w-3.5 text-pink-500" /> Genres (親ジャンル)
                     </Label>
                     <MultiSelect
                       options={availableGenres.map((g) => ({ label: g, value: g }))}
                       selected={localFilters.genres || []}
-                      onChange={(selected) =>
-                        setLocalFilters({ ...localFilters, genres: selected })
+                      onChange={(genres) =>
+                        setLocalFilters({ ...localFilters, genres })
                       }
                       placeholder="Select genres..."
+                    />
+                  </div>
+
+                  {/* Subgenre Selector */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2 text-xs font-semibold">
+                      <Music2 className="h-3.5 w-3.5 text-purple-500" /> Subgenres (サブジャンル)
+                    </Label>
+                    <MultiSelect
+                      options={availableSubgenres.map((s) => ({ label: s, value: s }))}
+                      selected={localFilters.subgenres || []}
+                      onChange={(subgenres) =>
+                        setLocalFilters({ ...localFilters, subgenres })
+                      }
+                      placeholder="Select subgenres..."
                     />
                   </div>
                 </>

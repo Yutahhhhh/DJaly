@@ -3,7 +3,6 @@ from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackEmbedding
 import numpy as np
 import json
-from utils.genres import genre_expander
 
 class RecommendationRepository:
     def __init__(self, session: Session):
@@ -115,19 +114,8 @@ class RecommendationRepository:
             params["exclude_ids"] = tuple(exclude_ids)
 
         if genres:
-            # ★ AIによる動的ジャンル拡張 (ここでキャッシュまたはLLMを使用)
-            expanded_genres_set = set()
-            for g in genres:
-                subs = genre_expander.expand(self.session, g)
-                for s in subs:
-                    expanded_genres_set.add(s)
-            
-            for g in genres:
-                expanded_genres_set.add(g)
-
-            if expanded_genres_set:
-                query_str += " AND t.genre IN :genres"
-                params["genres"] = tuple(expanded_genres_set)
+            query_str += " AND (t.genre IN :genres OR t.subgenre IN :genres)"
+            params["genres"] = tuple(genres)
             
         # BPM Filter
         if "bpm" in vibe_params and vibe_params["bpm"] > 0:

@@ -9,6 +9,7 @@ export const INITIAL_FILTERS: FilterState = {
   album: "",
   lyrics: "",
   genres: [],
+  subgenres: [],
   key: "",
   minEnergy: 0.0,
   maxEnergy: 1.0,

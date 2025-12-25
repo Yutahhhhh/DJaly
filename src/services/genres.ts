@@ -60,6 +60,10 @@ export const genreService = {
     return apiClient.get<string[]>("/genres/list");
   },
 
+  getAllSubgenres: async (): Promise<string[]> => {
+    return apiClient.get<string[]>("/genres/subgenres");
+  },
+
   getUnknownTracks: async (
     offset: number = 0,
     limit: number = 50,

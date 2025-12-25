@@ -44,17 +44,3 @@ async def test_ingestion_manager_broadcast(mocker):
     # Broadcast progress
     await manager.broadcast({"type": "progress", "current": 1, "total": 10})
     assert mock_ws.send_json.called
-
-def test_genre_expander_cache(session, mocker):
-    from utils.genres import GenreExpander
-    expander = GenreExpander()
-    expander.cache = {"Techno": ["Minimal Techno"]}
-    
-    # Cache hit
-    res = expander.expand(session, "Techno")
-    assert "Minimal Techno" in res
-    
-    # Cache miss + LLM
-    mocker.patch("utils.genres.generate_text", return_value='["Deep House"]')
-    res = expander.expand(session, "House")
-    assert "Deep House" in res

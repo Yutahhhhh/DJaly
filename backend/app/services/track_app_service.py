@@ -5,7 +5,6 @@ from domain.models.track import Track
 from infra.repositories.track_repository import TrackRepository
 from utils.llm import generate_vibe_parameters
 from infra.database.connection import get_setting_value
-from utils.genres import genre_expander
 
 class TrackAppService:
     def __init__(self, session: Session):
@@ -25,6 +24,7 @@ class TrackAppService:
         artist: Optional[str] = None,
         album: Optional[str] = None,
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         key: Optional[str] = None,
         bpm: Optional[float] = None,
         bpm_range: float = 5.0,
@@ -51,29 +51,13 @@ class TrackAppService:
             model_name = get_setting_value(self.session, "llm_model") or "llama3.2"
             target_params = generate_vibe_parameters(vibe_prompt, model_name=model_name, session=self.session)
             
-        # Genre Expansion Logic
-        search_genres = genres
-        if genres:
-            expanded_genres = []
-            for g in genres:
-                if g.startswith("expand:"):
-                    # 親ジャンル検索: "expand:House" -> "House" を展開
-                    target_genre = g[7:] # "expand:" の長さを削除
-                    sub_genres = genre_expander.expand(self.session, target_genre)
-                    expanded_genres.extend(sub_genres)
-                else:
-                    # 通常検索: そのまま追加
-                    expanded_genres.append(g)
-            
-            # Remove duplicates
-            search_genres = list(set(expanded_genres))
-
         return self.repository.search_tracks(
             status=status,
             title=title,
             artist=artist,
             album=album,
-            genres=search_genres,
+            genres=genres,
+            subgenres=subgenres,
             key=key,
             bpm=bpm,
             bpm_range=bpm_range,
@@ -102,6 +86,7 @@ class TrackAppService:
         artist: Optional[str] = None,
         album: Optional[str] = None,
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         key: Optional[str] = None,
         bpm: Optional[float] = None,
         bpm_range: float = 5.0,
@@ -126,29 +111,13 @@ class TrackAppService:
             model_name = get_setting_value(self.session, "llm_model") or "llama3.2"
             target_params = generate_vibe_parameters(vibe_prompt, model_name=model_name, session=self.session)
             
-        # Genre Expansion Logic
-        search_genres = genres
-        if genres:
-            expanded_genres = []
-            for g in genres:
-                if g.startswith("expand:"):
-                    # 親ジャンル検索: "expand:House" -> "House" を展開
-                    target_genre = g[7:] # "expand:" の長さを削除
-                    sub_genres = genre_expander.expand(self.session, target_genre)
-                    expanded_genres.extend(sub_genres)
-                else:
-                    # 通常検索: そのまま追加
-                    expanded_genres.append(g)
-            
-            # Remove duplicates
-            search_genres = list(set(expanded_genres))
-
         return self.repository.search_track_ids(
             status=status,
             title=title,
             artist=artist,
             album=album,
-            genres=search_genres,
+            genres=genres,
+            subgenres=subgenres,
             key=key,
             bpm=bpm,
             bpm_range=bpm_range,

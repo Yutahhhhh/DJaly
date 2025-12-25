@@ -61,6 +61,7 @@ export function MusicLibrary({
     else if (key === "artist") newFilters.artist = "";
     else if (key === "album") newFilters.album = "";
     else if (key === "genres") newFilters.genres = [];
+    else if (key === "subgenres") newFilters.subgenres = [];
     // Reset ranges to full
     else if (key.toString().includes("Energy")) {
       newFilters.minEnergy = 0.0;
