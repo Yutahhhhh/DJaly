@@ -1,26 +1,33 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { API_BASE_URL } from "@/services/api-client";
 import { metadataService, FileMetadata } from "@/services/metadata";
 import { usePlayerStore } from "@/stores/playerStore";
 import { MiniPlayer } from "./music-player/MiniPlayer";
 import { ExpandedPlayer } from "./music-player/ExpandedPlayer";
+import {
+  AUDIO_CONSTANTS,
+  safePlayAudio,
+  isAudioReadyForSeek,
+  isTimeOffTarget,
+  isInvalidZeroReset,
+} from "@/lib/utils";
 
 interface MusicPlayerProps {
   onLoadingChange?: (isLoading: boolean) => void;
 }
 
-export function MusicPlayer({
-  onLoadingChange,
-}: MusicPlayerProps) {
-  const { 
-    currentTrack: track, 
-    isPlaying, 
-    volume, 
-    setIsPlaying, 
-    setVolume, 
+export function MusicPlayer({ onLoadingChange }: MusicPlayerProps) {
+  const {
+    currentTrack: track,
+    isPlaying,
+    volume,
+    seekRequest,
+    setIsPlaying,
+    setVolume,
     setProgress: setStoreProgress,
     setDuration: setStoreDuration,
-    setTrack
+    setTrack,
+    clearSeekRequest,
   } = usePlayerStore();
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -33,74 +40,144 @@ export function MusicPlayer({
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // Sync volume
+  const targetSeekTimeRef = useRef<number | null>(null);
+  const isSeekingActiveRef = useRef<boolean>(false);
+
+  const performForcedSeek = useCallback(
+    (time: number) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      isSeekingActiveRef.current = true;
+      targetSeekTimeRef.current = time;
+      audio.currentTime = time;
+
+      if (audio.paused) {
+        safePlayAudio(audio);
+      }
+
+      AUDIO_CONSTANTS.SEEK_RETRY_DELAYS.forEach((delay, index) => {
+        setTimeout(() => {
+          if (!audio || targetSeekTimeRef.current === null) return;
+
+          if (isTimeOffTarget(audio.currentTime, targetSeekTimeRef.current)) {
+            audio.currentTime = targetSeekTimeRef.current;
+          }
+
+          if (index === AUDIO_CONSTANTS.SEEK_RETRY_DELAYS.length - 1) {
+            isSeekingActiveRef.current = false;
+            targetSeekTimeRef.current = null;
+            clearSeekRequest();
+          }
+        }, delay);
+      });
+    },
+    [clearSeekRequest]
+  );
+
+  const loadAudioSource = useCallback(
+    (audio: HTMLAudioElement) => {
+      if (!track) return;
+
+      const newSrc = `${API_BASE_URL}/stream?path=${encodeURIComponent(
+        track.filepath
+      )}`;
+
+      if (audio.src !== newSrc) {
+        audio.src = newSrc;
+        audio.load();
+      }
+
+      if (isPlaying && seekRequest === null) {
+        const playWhenReady = () => {
+          safePlayAudio(audio, () => setIsPlaying(false));
+          audio.removeEventListener("loadeddata", playWhenReady);
+        };
+
+        if (isAudioReadyForSeek(audio)) {
+          safePlayAudio(audio, () => setIsPlaying(false));
+        } else {
+          audio.addEventListener("loadeddata", playWhenReady);
+        }
+      }
+    },
+    [track, isPlaying, seekRequest, setIsPlaying]
+  );
+
+  const loadMetadata = useCallback(async () => {
+    if (!track) return;
+
+    try {
+      const [data, lyricsData] = await Promise.all([
+        metadataService.getMetadata(track.id),
+        metadataService.getLyricsFromDB(track.id).catch(() => ({ content: "" })),
+      ]);
+      setMetadata(data);
+      setEditedLyrics(lyricsData.content || data.lyrics || "");
+    } finally {
+      onLoadingChange?.(false);
+    }
+  }, [track, onLoadingChange]);
+
+  useEffect(() => {
+    if (!seekRequest || !audioRef.current) return;
+
+    const audio = audioRef.current;
+
+    if (isAudioReadyForSeek(audio)) {
+      performForcedSeek(seekRequest);
+    } else {
+      targetSeekTimeRef.current = seekRequest;
+      const onCanPlay = () => {
+        if (targetSeekTimeRef.current !== null) {
+          performForcedSeek(targetSeekTimeRef.current);
+        }
+        audio.removeEventListener("canplay", onCanPlay);
+      };
+      audio.addEventListener("canplay", onCanPlay);
+      safePlayAudio(audio, () => {
+        audio.removeEventListener("canplay", onCanPlay);
+        clearSeekRequest();
+      });
+    }
+  }, [seekRequest, performForcedSeek, clearSeekRequest]);
+
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
   }, [volume]);
 
-  // Sync play/pause
   useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        const playPromise = audioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((error) => {
-            // Ignore AbortError (happens when src changes quickly)
-            if (error.name !== "AbortError") {
-              setIsPlaying(false);
-            }
-          });
-        }
-      } else {
-        audioRef.current.pause();
+    const audio = audioRef.current;
+    if (!audio || !track || isSeekingActiveRef.current) return;
+
+    if (isPlaying) {
+      if (audio.paused) {
+        safePlayAudio(audio, () => setIsPlaying(false));
       }
-    }
-  }, [isPlaying]);
-
-  // 楽曲の読み込みとメタデータの取得
-  useEffect(() => {
-    if (track) {
-      onLoadingChange?.(true);
-      setMetadata(null);
-      setAiArtworkInfo(null);
-      setProgress(0);
-
-      if (audioRef.current) {
-        audioRef.current.src = `${API_BASE_URL}/stream?path=${encodeURIComponent(
-          track.filepath
-        )}`;
-        // Auto play is handled by the store state (play() sets isPlaying to true)
-        if (isPlaying) {
-          const playPromise = audioRef.current.play();
-          if (playPromise !== undefined) {
-            playPromise.catch((error) => {
-              if (error.name !== "AbortError") {
-                setIsPlaying(false);
-              }
-            });
-          }
-        }
-      }
-
-      // サービス層を使用してメタデータを取得
-      Promise.all([
-        metadataService.getMetadata(track.id),
-        metadataService.getLyricsFromDB(track.id).catch(() => ({ content: "" }))
-      ])
-        .then(([data, lyricsData]) => {
-          setMetadata(data);
-          const lyrics = lyricsData.content || data.lyrics || "";
-          setEditedLyrics(lyrics);
-        })
-        .finally(() => onLoadingChange?.(false));
     } else {
-      setIsPlaying(false);
+      if (!audio.paused) {
+        audio.pause();
+      }
     }
-  }, [track?.id]); // Only re-run if track ID changes
+  }, [isPlaying, track, setIsPlaying]);
 
-  // ファイルメタデータの更新適用
+  useEffect(() => {
+    if (!track) return;
+
+    onLoadingChange?.(true);
+    setMetadata(null);
+    setAiArtworkInfo(null);
+    setProgress(0);
+
+    if (audioRef.current) {
+      loadAudioSource(audioRef.current);
+    }
+
+    loadMetadata();
+  }, [track?.id, loadAudioSource, loadMetadata, onLoadingChange]);
+
   const handleApplyChanges = async (updates: {
     lyrics?: string;
     artwork_data?: string;
@@ -111,20 +188,73 @@ export function MusicPlayer({
       if (updates.lyrics !== undefined) {
         await metadataService.updateLyricsInDB(track.id, updates.lyrics);
       }
-      
       if (updates.artwork_data) {
-        await metadataService.updateMetadata(track.id, { artwork_data: updates.artwork_data });
+        await metadataService.updateMetadata(track.id, {
+          artwork_data: updates.artwork_data,
+        });
       }
-
-      // 更新後に最新状態を再ロード
       const updated = await metadataService.getMetadata(track.id);
       setMetadata(updated);
     } catch (e) {
-      console.error("Failed to apply metadata updates:", e);
+      console.error(e);
     } finally {
       setIsSaving(false);
     }
   };
+
+  const handleTimeUpdate = useCallback(() => {
+    if (!audioRef.current) return;
+
+    const cur = audioRef.current.currentTime;
+
+    if (
+      isSeekingActiveRef.current &&
+      targetSeekTimeRef.current !== null &&
+      isInvalidZeroReset(cur)
+    ) {
+      audioRef.current.currentTime = targetSeekTimeRef.current;
+      return;
+    }
+
+    setProgress(cur);
+    setStoreProgress(cur);
+  }, [setStoreProgress]);
+
+  const handleDurationChange = useCallback(() => {
+    if (audioRef.current) {
+      setStoreDuration(audioRef.current.duration);
+    }
+  }, [setStoreDuration]);
+
+  const handlePlaying = useCallback(() => {
+    if (seekRequest !== null) {
+      performForcedSeek(seekRequest);
+    }
+  }, [seekRequest, performForcedSeek]);
+
+  const handlePlay = useCallback(() => {
+    if (!isPlaying) setIsPlaying(true);
+  }, [isPlaying, setIsPlaying]);
+
+  const handlePause = useCallback(() => {
+    if (!isSeekingActiveRef.current && isPlaying) {
+      setIsPlaying(false);
+    }
+  }, [isPlaying, setIsPlaying]);
+
+  const handleEnded = useCallback(() => {
+    setIsPlaying(false);
+    setStoreProgress(0);
+  }, [setIsPlaying, setStoreProgress]);
+
+  const handleSeek = useCallback(
+    (ratio: number) => {
+      if (audioRef.current && audioRef.current.duration) {
+        audioRef.current.currentTime = ratio * audioRef.current.duration;
+      }
+    },
+    []
+  );
 
   if (!track) return null;
 
@@ -136,16 +266,15 @@ export function MusicPlayer({
     >
       <audio
         ref={audioRef}
-        onTimeUpdate={() => {
-            const currentTime = audioRef.current?.currentTime || 0;
-            setProgress(currentTime);
-            setStoreProgress(currentTime);
-        }}
-        onDurationChange={() => setStoreDuration(audioRef.current?.duration || 0)}
-        onEnded={() => setIsPlaying(false)}
+        preload="auto"
+        onPlay={handlePlay}
+        onPause={handlePause}
+        onEnded={handleEnded}
+        onTimeUpdate={handleTimeUpdate}
+        onDurationChange={handleDurationChange}
+        onPlaying={handlePlaying}
       />
 
-      {/* 展開時ビュー */}
       {isExpanded && (
         <ExpandedPlayer
           track={track}
@@ -163,7 +292,6 @@ export function MusicPlayer({
         />
       )}
 
-      {/* ミニプレイヤーエリア */}
       <MiniPlayer
         track={track}
         metadata={metadata}
@@ -173,19 +301,15 @@ export function MusicPlayer({
         volume={volume}
         isExpanded={isExpanded}
         onPlayPause={() => setIsPlaying(!isPlaying)}
-        onSkipBack={() => {}} // TODO: Implement skip back
-        onSkipForward={() => {}} // TODO: Implement skip forward
+        onSkipBack={() => {}}
+        onSkipForward={() => {}}
         onVolumeChange={setVolume}
         onToggleExpand={() => setIsExpanded(!isExpanded)}
         onClose={() => {
           setIsPlaying(false);
           setTrack(null);
         }}
-        onSeek={(ratio) => {
-          if (audioRef.current) {
-            audioRef.current.currentTime = ratio * audioRef.current.duration;
-          }
-        }}
+        onSeek={handleSeek}
       />
     </div>
   );

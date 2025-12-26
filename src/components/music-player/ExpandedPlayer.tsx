@@ -15,6 +15,7 @@ import { Track } from "@/types";
 import { ArtworkFetcher } from "@/components/ui/ArtworkFetcher";
 import { LyricsFetcher } from "@/components/ui/LyricsFetcher";
 import { Lrc } from "react-lrc";
+import { normalizeLyricsTimeTags, hasLyricsTimeTags } from "@/lib/utils";
 
 interface ExpandedPlayerProps {
   track: Track;
@@ -31,23 +32,6 @@ interface ExpandedPlayerProps {
   setAiArtworkInfo: (info: string | null) => void;
 }
 
-const hasTimeTags = (text: string) => {
-  return /\[\d{2}:\d{2}\.\d{2,3}(\.\d+)?\]/.test(text);
-};
-
-// Convert non-standard LRC format to standard format
-const normalizeTimeTags = (text: string) => {
-  // Convert [MM:SS.xx.x] to [MM:SS.xxx]
-  return text.replace(
-    /\[(\d{2}):(\d{2})\.(\d{2})\.(\d+)\]/g,
-    (_, min, sec, ms, extra) => {
-      // Combine ms and extra digit as milliseconds (pad to 3 digits)
-      const totalMs = (ms + extra).padEnd(3, '0').substring(0, 3);
-      return `[${min}:${sec}.${totalMs}]`;
-    }
-  );
-};
-
 export function ExpandedPlayer({
   track,
   metadata,
@@ -63,6 +47,7 @@ export function ExpandedPlayer({
   setAiArtworkInfo,
 }: ExpandedPlayerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const normalizedLyrics = normalizeLyricsTimeTags(editedLyrics);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-500">
@@ -186,10 +171,10 @@ export function ExpandedPlayer({
           </div>
           
           {editedLyrics && !isEditingLyrics ? (
-             hasTimeTags(editedLyrics) ? (
+             hasLyricsTimeTags(editedLyrics) ? (
                 <div className="flex-1 overflow-hidden bg-muted/5 rounded-md relative group">
                     <Lrc
-                    lrc={normalizeTimeTags(editedLyrics)}
+                    lrc={normalizedLyrics}
                     currentMillisecond={progress * 1000}
                     lineRenderer={({ index, active, line }) => (
                         <div

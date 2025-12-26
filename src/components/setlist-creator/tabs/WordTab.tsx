@@ -1,284 +1,381 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Track } from "@/types";
-import { lyricsService, AnalysisResult } from "@/services/lyrics";
+import { lyricsService } from "@/services/lyrics";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Search, Link as LinkIcon, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Loader2,
+  Link as LinkIcon,
+  Music,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePlayerStore } from "@/stores/playerStore";
+import { PlayButton } from "@/components/ui/PlayButton";
+import { normalizeLyricsTimeTags } from "@/lib/utils";
 
 interface WordTabProps {
   sourceTrack: Track | null;
   onAddTrack: (track: Track, wordplayData?: any) => void;
 }
 
-// API response type (matches backend)
-interface LyricSnippet {
-  track: Track;
-  snippet: string[];
-  match_line: number;
+interface KeywordMatch {
+  keyword: string;
+  count: number;
 }
 
 export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
-  const [lyrics, setLyrics] = useState<string[]>([]);
-  const [analysis, setAnalysis] = useState<AnalysisResult>({ words: [], phrases: [] });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<LyricSnippet[]>([]);
-  const [loadingLyrics, setLoadingLyrics] = useState(false);
-  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
-  const [loadingSearch, setLoadingSearch] = useState(false);
-  const [selectedSourceLine, setSelectedSourceLine] = useState<string | null>(null);
-  const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState("words");
+  const [lyricsText, setLyricsText] = useState("");
+  const [keywords, setKeywords] = useState<KeywordMatch[]>([]);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  useEffect(() => {
-    if (sourceTrack) {
-      fetchLyrics(sourceTrack.id);
-      fetchAnalysis(sourceTrack.id);
-      setIsLyricsExpanded(false); 
-    } else {
-      setLyrics([]);
-      setAnalysis({ words: [], phrases: [] });
-    }
-  }, [sourceTrack]);
+  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
+  const [isLyricsExpanded, setIsLyricsExpanded] = useState(true);
 
-  const fetchLyrics = async (trackId: number) => {
-    setLoadingLyrics(true);
-    try {
-      const data = await lyricsService.getLyrics(trackId);
-      if (data && data.content) {
-        setLyrics(data.content.split("\n"));
-      } else {
-        setLyrics(["No lyrics found."]);
+  const { playAt, currentTrack, isPlaying } = usePlayerStore();
+
+  // activeKeywordの最初のタイムスタンプを取得
+  const firstKeywordTimestamp = useMemo(() => {
+    if (!activeKeyword || !lyricsText) return null;
+
+    const lines = lyricsText.split("\n");
+    for (const line of lines) {
+      const timestampMatch = line.match(/\[(\d+):(\d+(?:\.\d+)?)\]/);
+      const cleanLine = line.replace(/\[.*\]/, "").trim();
+      
+      if (cleanLine.toLowerCase().includes(activeKeyword.toLowerCase()) && timestampMatch) {
+        return parseInt(timestampMatch[1]) * 60 + parseFloat(timestampMatch[2]);
       }
-    } catch (error) {
-      console.error("Failed to fetch lyrics", error);
-      setLyrics(["Failed to load lyrics."]);
-    } finally {
-      setLoadingLyrics(false);
     }
-  };
+    return null;
+  }, [activeKeyword, lyricsText]);
 
-  const fetchAnalysis = async (trackId: number) => {
-    setLoadingAnalysis(true);
-    setAnalysis({ words: [], phrases: [] });
-    try {
-      const data = await lyricsService.analyzeLyrics(trackId);
-      setAnalysis(data);
-    } catch (error) {
-      console.error("Failed to analyze lyrics", error);
-    } finally {
-      setLoadingAnalysis(false);
-    }
-  };
+  // データ取得
+  useEffect(() => {
+    if (!sourceTrack) return;
 
-  const handleSearch = async () => {
-    if (!searchQuery) return;
-    setLoadingSearch(true);
+    const load = async () => {
+      setLoading(true);
+      setSearchResults([]);
+      setActiveKeyword(null);
+      try {
+        const [lyData, kwData] = await Promise.all([
+          lyricsService.getLyrics(sourceTrack.id),
+          lyricsService.analyzeLyrics(sourceTrack.id),
+        ]);
+        setLyricsText(normalizeLyricsTimeTags(lyData.content || ""));
+        setKeywords(Array.isArray(kwData) ? kwData : []);
+      } catch (error) {
+        console.error("Failed to load wordplay data", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [sourceTrack?.id]);
+
+  // 検索実行
+  const handleKeywordSearch = async (kw: string) => {
+    setActiveKeyword(kw);
+    setSearching(true);
     try {
-      const excludeId = sourceTrack?.id;
-      const data = await lyricsService.searchLyrics(searchQuery, excludeId);
-      setSearchResults(data);
+      const results = await lyricsService.searchLyrics(kw, sourceTrack?.id);
+      console.log("[WordTab] Search results for keyword:", kw, results);
+      setSearchResults(results);
     } catch (error) {
       console.error("Search failed", error);
     } finally {
-      setLoadingSearch(false);
+      setSearching(false);
     }
   };
 
-  const handleLineClick = (line: string) => {
-    setSelectedSourceLine(line);
-    setSearchQuery(line);
-    setIsLyricsExpanded(false); 
-  };
-  
-  const handleKeywordClick = (keyword: string) => {
-      setSearchQuery(keyword);
-  };
+  const renderedLyrics = useMemo(() => {
+    if (!lyricsText) return null;
 
-  useEffect(() => {
-      if (searchQuery && searchQuery.length > 2) {
-          const timer = setTimeout(() => {
-              handleSearch();
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [searchQuery]);
+    const lines = lyricsText.split("\n");
+    return lines.map((line, lineIdx) => {
+      const timestampMatch = line.match(/\[(\d+):(\d+(?:\.\d+)?)\]/);
+      const timestamp = timestampMatch
+        ? parseInt(timestampMatch[1]) * 60 + parseFloat(timestampMatch[2])
+        : null;
+      const cleanLine = line.replace(/\[.*\]/, "").trim();
 
-  const getLineMatchInfo = (line: string) => {
-      if (!analysis.words.length && !analysis.phrases.length) return null;
-      
-      // Check both words and phrases
-      const wordMatches = analysis.words.filter(k => line.toLowerCase().includes(k.keyword.toLowerCase()));
-      const phraseMatches = analysis.phrases.filter(k => line.toLowerCase().includes(k.keyword.toLowerCase()));
-      
-      const allMatches = [...wordMatches, ...phraseMatches];
-      if (allMatches.length === 0) return null;
-      return allMatches;
-  };
+      if (!cleanLine) return <div key={lineIdx} className="h-4" />;
+
+      const lineKeywords = Array.isArray(keywords)
+        ? keywords.filter((k) =>
+            cleanLine.toLowerCase().includes(k.keyword.toLowerCase())
+          )
+        : [];
+
+      return (
+        <div
+          key={lineIdx}
+          className="group/line flex items-start gap-2 py-1 hover:bg-muted/30 rounded px-2 transition-colors"
+        >
+          <div className="flex-1 text-sm leading-relaxed">
+            {lineKeywords.length > 0 ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <span className="cursor-pointer border-b border-dashed border-primary/60 hover:text-primary transition-colors">
+                    {cleanLine}
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-56 p-2 shadow-2xl z-60"
+                  side="top"
+                  align="start"
+                >
+                  <div className="text-[10px] font-bold text-muted-foreground mb-2 uppercase">
+                    Keyword Search:
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {lineKeywords.map((k, ki) => (
+                      <Badge
+                        key={ki}
+                        variant={
+                          activeKeyword === k.keyword ? "default" : "secondary"
+                        }
+                        className="cursor-pointer hover:bg-primary hover:text-primary-foreground text-[11px]"
+                        onClick={() => handleKeywordSearch(k.keyword)}
+                      >
+                        {k.keyword} ({k.count})
+                      </Badge>
+                    ))}
+                  </div>
+                  {timestamp !== null && (
+                    <div className="mt-2 pt-2 border-t flex justify-end">
+                      <PlayButton
+                        track={sourceTrack!}
+                        timestamp={timestamp}
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-[10px] gap-1 px-2 hover:text-green-500 font-bold"
+                        iconClassName="h-3 w-3 fill-current"
+                      >
+                        Preview (3s before)
+                      </PlayButton>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <span className="text-muted-foreground/70">{cleanLine}</span>
+            )}
+          </div>
+          {timestamp !== null && (
+            <PlayButton
+              track={sourceTrack!}
+              timestamp={timestamp}
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 opacity-0 group-hover/line:opacity-100 shrink-0 mt-0.5 hover:text-green-500"
+              iconClassName="h-3 w-3"
+            />
+          )}
+        </div>
+      );
+    });
+  }, [lyricsText, keywords, activeKeyword, sourceTrack, playAt]);
+
+  if (!sourceTrack) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-10 text-center gap-4">
+        <MessageSquare className="h-12 w-12 opacity-20" />
+        <p className="text-sm italic">Select a track to start analysis.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden">
-      {/* Top Section: Source Lyrics (Expandable) */}
-      <div className="flex-none border-b bg-muted/10">
-        <div 
-            className="p-3 flex items-center justify-between cursor-pointer hover:bg-muted/20 transition-colors"
-            onClick={() => setIsLyricsExpanded(!isLyricsExpanded)}
-        >
-            <div className="flex flex-col overflow-hidden">
-                <span className="font-medium text-sm truncate">
-                    {sourceTrack ? `Source: ${sourceTrack.title}` : "Select a track"}
-                </span>
-                {selectedSourceLine ? (
-                    <span className="text-xs text-primary truncate mt-0.5">Selected: "{selectedSourceLine}"</span>
-                ) : (
-                    <span className="text-xs text-muted-foreground mt-0.5">Click to select phrase...</span>
-                )}
+    <div className="flex flex-col h-full bg-background overflow-hidden">
+      {/* Header: 曲名・再生ボタン・展開制御 */}
+      <div className="flex-none p-3 border-b bg-background z-20 shadow-sm flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-10 w-10 rounded bg-primary/10 flex items-center justify-center shrink-0">
+            <Music className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-sm font-bold truncate leading-none mb-1">
+                {sourceTrack.title}
+              </div>
+              <div className="text-[10px] text-muted-foreground truncate uppercase">
+                {sourceTrack.artist}
+              </div>
             </div>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 ml-2">
-                {isLyricsExpanded ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}
-            </Button>
-        </div>
-
-        {isLyricsExpanded && (
-            <div className="h-64 border-t animate-in slide-in-from-top-2 duration-200">
-                <ScrollArea className="h-full p-4">
-                {loadingLyrics ? (
-                    <div className="flex justify-center p-4"><Loader2 className="animate-spin" /></div>
-                ) : (
-                    <div className="space-y-1">
-                    {lyrics.map((line, i) => {
-                        const matchInfo = getLineMatchInfo(line);
-                        return (
-                            <div
-                                key={i}
-                                onClick={(e) => { e.stopPropagation(); handleLineClick(line); }}
-                                className={cn(
-                                    "p-1.5 rounded cursor-pointer text-sm hover:bg-accent hover:text-accent-foreground transition-colors flex justify-between items-center gap-2",
-                                    selectedSourceLine === line && "bg-primary/20 font-medium text-primary"
-                                )}
-                            >
-                                <span className="truncate">{line}</span>
-                                {matchInfo && (
-                                    <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap">
-                                        {matchInfo.reduce((acc, curr) => acc + curr.count, 0)} matches
-                                    </span>
-                                )}
-                            </div>
-                        );
-                    })}
-                    </div>
-                )}
-                </ScrollArea>
-            </div>
-        )}
-      </div>
-
-      {/* Bottom Section: Search & Results */}
-      <div className="flex-1 flex flex-col min-h-0 bg-background">
-        <div className="p-3 border-b space-y-3 flex-none">
-          <div className="relative">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search lyrics or keywords..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8"
+            {/* From再生ボタン */}
+            <PlayButton
+              track={sourceTrack}
+              timestamp={firstKeywordTimestamp}
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 w-8 shrink-0 transition-all rounded-full hover:bg-accent",
+                currentTrack?.id === sourceTrack.id && isPlaying
+                  ? "text-green-500"
+                  : "text-muted-foreground"
+              )}
+              iconClassName={cn(
+                "h-4 w-4",
+                currentTrack?.id === sourceTrack.id &&
+                  isPlaying &&
+                  "fill-current"
+              )}
+              showPauseWhenPlaying={true}
             />
           </div>
-          
-          {/* Keywords Tabs */}
-          {loadingAnalysis ? (
-             <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                 <Loader2 className="h-3 w-3 animate-spin" /> Analyzing lyrics with AI...
-             </div>
-          ) : (analysis.words.length > 0 || analysis.phrases.length > 0) && (
-            <Tabs defaultValue="words" value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 h-8">
-                    <TabsTrigger value="words" className="text-xs">Words ({analysis.words.length})</TabsTrigger>
-                    <TabsTrigger value="phrases" className="text-xs">Phrases ({analysis.phrases.length})</TabsTrigger>
-                </TabsList>
-                <TabsContent value="words" className="mt-2">
-                    <ScrollArea className="h-24 w-full rounded-md border p-2">
-                        <div className="flex flex-wrap gap-1">
-                        {analysis.words.map((item, i) => (
-                            <Badge 
-                                key={i} 
-                                variant="secondary" 
-                                className="cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors flex gap-1 items-center text-[10px] px-1.5 h-5"
-                                onClick={() => handleKeywordClick(item.keyword)}
-                            >
-                            {item.keyword}
-                            <span className="bg-background/50 px-1 rounded text-[9px] min-w-[0.8rem] text-center">{item.count}</span>
-                            </Badge>
-                        ))}
-                        </div>
-                    </ScrollArea>
-                </TabsContent>
-                <TabsContent value="phrases" className="mt-2">
-                    <ScrollArea className="h-24 w-full rounded-md border p-2">
-                        <div className="flex flex-wrap gap-1">
-                        {analysis.phrases.map((item, i) => (
-                            <Badge 
-                                key={i} 
-                                variant="outline" 
-                                className="cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors flex gap-1 items-center text-[10px] px-1.5 h-5 border-primary/30"
-                                onClick={() => handleKeywordClick(item.keyword)}
-                            >
-                            <Sparkles className="h-2 w-2 mr-0.5 text-yellow-500" />
-                            {item.keyword}
-                            <span className="bg-muted px-1 rounded text-[9px] min-w-[0.8rem] text-center">{item.count}</span>
-                            </Badge>
-                        ))}
-                        </div>
-                    </ScrollArea>
-                </TabsContent>
-            </Tabs>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {loading && (
+            <Loader2 className="h-4 w-4 animate-spin text-primary/50" />
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-[10px] font-bold uppercase gap-1 text-muted-foreground"
+            onClick={() => setIsLyricsExpanded(!isLyricsExpanded)}
+          >
+            {isLyricsExpanded ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+            {isLyricsExpanded ? "Collapse" : "Expand"}
+          </Button>
+        </div>
+      </div>
+
+      {/* 歌詞エリア */}
+      <div
+        className={cn(
+          "min-h-0 border-b relative bg-muted/5 transition-all duration-300 ease-in-out overflow-hidden",
+          isLyricsExpanded
+            ? "flex-3 opacity-100"
+            : "h-0 opacity-0 pointer-events-none"
+        )}
+      >
+        <ScrollArea className="h-full">
+          <div className="p-8 pb-16 font-serif max-w-2xl mx-auto">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-4 opacity-40">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="text-[10px] uppercase tracking-widest">
+                  Analyzing
+                </span>
+              </div>
+            ) : (
+              renderedLyrics
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+
+      {/* 接続先検索結果 */}
+      <div className="flex-2 min-h-0 flex flex-col bg-background">
+        <div className="px-4 py-2 border-b flex justify-between items-center shrink-0 bg-muted/20">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-muted-foreground uppercase">
+              Matched Links
+            </span>
+            {activeKeyword && (
+              <Badge className="bg-primary text-primary-foreground animate-in zoom-in-95 text-[10px]">
+                {activeKeyword}
+              </Badge>
+            )}
+          </div>
+          {searching && (
+            <Loader2 className="h-3 w-3 animate-spin text-primary" />
           )}
         </div>
 
-        <ScrollArea className="flex-1 p-3">
-          {loadingSearch ? (
-             <div className="flex justify-center p-4"><Loader2 className="animate-spin" /></div>
-          ) : (
-            <div className="space-y-3">
-              {searchResults.map((result, i) => (
-                <div key={i} className="border rounded-md p-3 space-y-2 hover:border-primary/50 transition-colors bg-card">
-                  <div className="flex justify-between items-start gap-2">
+        <ScrollArea className="flex-1">
+          <div className="p-4 space-y-3">
+            {searchResults.length > 0 ? (
+              searchResults.map((res, i) => (
+                <div
+                  key={i}
+                  className="group border rounded-xl p-4 bg-card hover:border-primary/40 transition-all shadow-sm"
+                >
+                  <div className="flex justify-between items-start gap-3 mb-3">
                     <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">{result.track.title}</div>
-                      <div className="text-xs text-muted-foreground truncate">{result.track.artist}</div>
+                      <div className="font-bold text-sm truncate leading-tight">
+                        {res.track.title}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground truncate mt-1">
+                        {res.track.artist}
+                      </div>
                     </div>
-                    <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="h-7 text-xs gap-1 shrink-0"
-                        onClick={() => onAddTrack(result.track, {
-                            source_phrase: selectedSourceLine || "",
-                            target_phrase: result.snippet[1] || "", 
-                            keyword: searchQuery
-                        })}
-                    >
-                        <LinkIcon className="h-3 w-3" /> Connect
-                    </Button>
+                    <div className="flex gap-1.5 shrink-0">
+                      {res.timestamp !== null && (
+                        <PlayButton
+                          track={res.track}
+                          timestamp={res.timestamp}
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 hover:text-green-500"
+                          iconClassName="h-3.5 w-3.5 fill-current"
+                        />
+                      )}
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="h-8 text-xs gap-1.5 px-4 font-bold"
+                        onClick={() =>
+                          onAddTrack(res.track, {
+                            source_phrase: activeKeyword || "",
+                            target_phrase: res.matched_text,
+                            keyword: activeKeyword,
+                          })
+                        }
+                      >
+                        <LinkIcon className="h-3.5 w-3.5" /> Connect
+                      </Button>
+                    </div>
                   </div>
-                  
-                  <div className="text-xs bg-muted/30 p-2 rounded italic text-muted-foreground">
-                    {result.snippet.map((line, j) => (
-                        <div key={j} className={cn("truncate", line.toLowerCase().includes(searchQuery.toLowerCase()) && "text-foreground font-medium")}>
-                            {line}
-                        </div>
+
+                  <div className="text-[11px] bg-muted/40 p-3 rounded-lg border-l-4 border-primary/20 italic text-muted-foreground/80 leading-relaxed font-serif">
+                    {res.snippet.map((line: string, j: number) => (
+                      <div
+                        key={j}
+                        className={cn(
+                          "truncate",
+                          line
+                            .toLowerCase()
+                            .includes(activeKeyword?.toLowerCase() || "") &&
+                            "text-foreground font-bold not-italic"
+                        )}
+                      >
+                        {line}
+                      </div>
                     ))}
                   </div>
                 </div>
-              ))}
-              {searchResults.length === 0 && searchQuery && !loadingSearch && (
-                  <div className="text-center text-muted-foreground text-sm py-8">No matches found</div>
-              )}
-            </div>
-          )}
+              ))
+            ) : activeKeyword && !searching ? (
+              <div className="text-center py-16 text-muted-foreground text-xs italic opacity-60">
+                No links found.
+              </div>
+            ) : (
+              !activeKeyword && (
+                <div className="text-center py-20 text-muted-foreground/30 text-[10px] flex flex-col items-center gap-4 uppercase font-black">
+                  <LinkIcon className="h-8 w-8 opacity-20" />
+                  Select a keyword in the lyrics
+                </div>
+              )
+            )}
+          </div>
         </ScrollArea>
       </div>
     </div>

@@ -1,7 +1,17 @@
 {
   find . -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.py" \) \
   -not -path "*/node_modules/*" \
-  -not -path "*/src/*" \
+  -not -path "*/src/components/settings-view/*" \
+  -not -path "*/src/components/prompt-manager/*" \
+  -not -path "*/src/components/dashboard/*" \
+  -not -path "*/src/components/file-explorer/*" \
+  -not -path "*/src/components/genre-manager/*" \
+  -not -path "*/src/components/music-library/*" \
+  -not -path "*/src/components/music-player/*" \
+  -not -path "*/src/components/prompt-manager/*" \
+  -not -path "*/src/components/genre-manager/*" \
+  -not -path "*/src/components/settings-vie/*" \
+  -not -path "*/tests/*" \
   -not -path "*/src-tauri/*" \
   -not -path "*/.wrangler/*" \
   -not -path "*/dist/*" \
