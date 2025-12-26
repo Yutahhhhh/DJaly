@@ -25,11 +25,11 @@ def get_analyzer() -> Optional[AudioAnalyzer]:
             _thread_local.analyzer = None
     return _thread_local.analyzer
 
-def analyze_track_file(filepath: str, high_precision: bool = True, skip_basic: bool = False, skip_waveform: bool = False) -> Optional[dict]:
+def analyze_track_file(filepath: str, high_precision: bool = True, skip_basic: bool = False, skip_waveform: bool = False, external_lyrics: Optional[str] = None) -> Optional[dict]:
     """
     Wrapper function for backward compatibility.
     """
     analyzer = get_analyzer()
     if analyzer:
-        return analyzer.analyze(filepath, skip_basic=skip_basic, skip_waveform=skip_waveform)
+        return analyzer.analyze(filepath, skip_basic=skip_basic, skip_waveform=skip_waveform, external_lyrics=external_lyrics)
     return None

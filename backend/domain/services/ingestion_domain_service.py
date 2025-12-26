@@ -98,10 +98,11 @@ class IngestionDomainService:
             try:
                 with open(lrc_path, 'r', encoding='utf-8') as f:
                     lyrics_content = f.read()
+                print(f"DEBUG: Found .lrc file for {filename}, content length: {len(lyrics_content) if lyrics_content else 0}", flush=True)
                 if lyrics_content:
                     await loop.run_in_executor(None, update_file_metadata, filepath, lyrics_content)
             except Exception as e:
-                print(f"WARNING: Failed to import .lrc file for {filename}: {e}")
+                print(f"WARNING: Failed to import .lrc file for {filename}: {e}", flush=True)
         
         skip_basic = False
         skip_waveform = False
@@ -151,11 +152,13 @@ class IngestionDomainService:
                         else:
                             # 完全に同一だが歌詞だけ新しく見つかった場合
                             if lyrics_content and lyrics_content != existing_data_cache.get("lyrics"):
+                                print(f"DEBUG: Lyrics updated for {filename} (existing: {bool(existing_data_cache.get('lyrics'))}, new: {len(lyrics_content)} chars)", flush=True)
                                 existing_data_cache["lyrics"] = lyrics_content
                                 result = {**existing_data_cache, "filepath": filepath}
                                 if save_to_db:
                                     await loop.run_in_executor(None, self.repository.save_track, result, True)
                                 return result
+                            print(f"DEBUG: Track {filename} skipped - no changes (lyrics_content: {bool(lyrics_content)}, existing: {bool(existing_data_cache.get('lyrics'))})", flush=True)
                             return None
                             
             except Exception as e:
@@ -173,7 +176,7 @@ class IngestionDomainService:
 
         try:
             result = await asyncio.wait_for(
-                loop.run_in_executor(executor, analyze_track_file, filepath, force_update, skip_basic, skip_waveform),
+                loop.run_in_executor(executor, analyze_track_file, filepath, force_update, skip_basic, skip_waveform, lyrics_content),
                 timeout=timeout
             )
         except:

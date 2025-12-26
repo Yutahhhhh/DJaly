@@ -7,7 +7,7 @@ import {
   ReactNode,
 } from "react";
 import { metadataSocket, MetadataMessage } from "@/services/metadata-socket";
-import { apiClient } from "@/services/api-client";
+import { metadataService } from "@/services/metadata";
 
 interface MetadataStats {
   total: number;
@@ -26,6 +26,7 @@ interface MetadataContextType {
   stats: MetadataStats;
   startUpdate: (type: "release_date" | "lyrics", overwrite: boolean, trackIds?: number[]) => Promise<void>;
   cancelUpdate: () => Promise<void>;
+  clearSkipCache: (type?: "release_date" | "lyrics") => Promise<void>;
 }
 
 const MetadataContext = createContext<MetadataContextType | undefined>(undefined);
@@ -79,7 +80,7 @@ export function MetadataProvider({ children }: { children: ReactNode }) {
 
   const startUpdate = async (type: "release_date" | "lyrics", overwrite: boolean, trackIds?: number[]) => {
     try {
-      await apiClient.post("/metadata/update", { type, overwrite, track_ids: trackIds });
+      await metadataService.startUpdate(type, overwrite, trackIds);
     } catch (error) {
       console.error("Failed to start update", error);
     }
@@ -87,9 +88,17 @@ export function MetadataProvider({ children }: { children: ReactNode }) {
 
   const cancelUpdate = async () => {
     try {
-      await apiClient.post("/metadata/cancel", {});
+      await metadataService.cancelUpdate();
     } catch (error) {
       console.error("Failed to cancel update", error);
+    }
+  };
+
+  const clearSkipCache = async (type?: "release_date" | "lyrics") => {
+    try {
+      await metadataService.clearSkipCache(type);
+    } catch (error) {
+      console.error("Failed to clear cache", error);
     }
   };
 
@@ -103,6 +112,7 @@ export function MetadataProvider({ children }: { children: ReactNode }) {
         stats,
         startUpdate,
         cancelUpdate,
+        clearSkipCache,
       }}
     >
       {children}

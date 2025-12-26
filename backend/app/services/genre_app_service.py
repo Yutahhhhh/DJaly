@@ -109,7 +109,6 @@ class GenreAppService:
                     track.subgenre = response.subgenre
                 
                 track.is_genre_verified = True
-                self.session.add(track)
                 self.session.commit()
                 self.session.refresh(track)
                 
@@ -224,7 +223,7 @@ class GenreAppService:
                 ))
             
             track.is_genre_verified = True
-            self.session.add(track)
+            # SQLModelは変更を自動追跡するため、session.add()は不要
         
         self.session.commit()
         logger.info(f"Batch analyzed {len(tracks)} tracks. Updated {len(updated_results)} tracks.")
@@ -263,7 +262,7 @@ class GenreAppService:
             track.genre = parent_track.genre
             track.subgenre = parent_track.subgenre
             track.is_genre_verified = True
-            self.session.add(track)
+            # SQLModelは変更を自動追跡するため、session.add()は不要
             updated_count += 1
             
         self.session.commit()
@@ -280,8 +279,8 @@ class GenreAppService:
             else:
                 track.genre = target_genre
             
-            track.is_genre_verified = True 
-            self.session.add(track)
+            track.is_genre_verified = True
+            # SQLModelは変更を自動追跡するため、session.add()は不要
             updated_count += 1
             
         self.session.commit()

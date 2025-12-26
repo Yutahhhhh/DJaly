@@ -1,14 +1,28 @@
 import asyncio
-from typing import List, Dict, Any, Optional
+import json
+import os
+from typing import List, Dict, Any, Optional, Set
 from fastapi import WebSocket
 from sqlmodel import Session, select, or_, func
-from infra.database.connection import engine
+from infra.database.connection import engine, DB_PATH
 from models import Track, Lyrics
 from utils.external_metadata import fetch_itunes_release_date, fetch_lrclib_lyrics
 from datetime import datetime
 from app.services.background_task_service import BackgroundTaskService
+from pathlib import Path
 
 class MetadataAppService(BackgroundTaskService):
+    # Cache file for tracks that couldn't be found
+    # DB_PATHと同じディレクトリ階層を使用
+    @property
+    def CACHE_DIR(self) -> Path:
+        db_dir = Path(DB_PATH).parent
+        return db_dir / "cache"
+    
+    @property
+    def SKIP_CACHE_FILE(self) -> Path:
+        return self.CACHE_DIR / "metadata_skip_cache.json"
+    
     def __init__(self):
         super().__init__()
         self.state.update({
@@ -16,6 +30,45 @@ class MetadataAppService(BackgroundTaskService):
             "current_track": "",
             "update_type": None
         })
+        self._skip_cache: Dict[str, Set[int]] = self._load_skip_cache()
+    
+    def _load_skip_cache(self) -> Dict[str, Set[int]]:
+        """Load skip cache from file."""
+        if not self.SKIP_CACHE_FILE.exists():
+            return {"release_date": set(), "lyrics": set()}
+        
+        try:
+            with open(self.SKIP_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+                return {
+                    "release_date": set(data.get("release_date", [])),
+                    "lyrics": set(data.get("lyrics", []))
+                }
+        except Exception as e:
+            print(f"Error loading skip cache: {e}")
+            return {"release_date": set(), "lyrics": set()}
+    
+    def _save_skip_cache(self):
+        """Save skip cache to file."""
+        try:
+            self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(self.SKIP_CACHE_FILE, 'w') as f:
+                data = {
+                    "release_date": list(self._skip_cache["release_date"]),
+                    "lyrics": list(self._skip_cache["lyrics"])
+                }
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving skip cache: {e}")
+    
+    def clear_skip_cache(self, update_type: Optional[str] = None):
+        """Clear skip cache for specific type or all types."""
+        if update_type:
+            if update_type in self._skip_cache:
+                self._skip_cache[update_type].clear()
+        else:
+            self._skip_cache = {"release_date": set(), "lyrics": set()}
+        self._save_skip_cache()
 
     async def start_update(self, update_type: str, overwrite: bool, track_ids: Optional[List[int]] = None) -> bool:
         return await self.start_task(self._run_update(update_type, overwrite, track_ids))
@@ -36,6 +89,13 @@ class MetadataAppService(BackgroundTaskService):
                 # Apply ID filter if provided
                 if track_ids is not None:
                     query = query.where(Track.id.in_(track_ids))
+                
+                # Filter out tracks in skip cache (unless overwriting with all IDs)
+                if track_ids is None or not overwrite:
+                    skip_ids = self._skip_cache.get(update_type, set())
+                    if skip_ids:
+                        query = query.where(Track.id.not_in(skip_ids))
+                        print(f"DEBUG: Excluding {len(skip_ids)} tracks from skip cache", flush=True)
                 
                 # If not overwriting, filter out tracks that already have data
                 if not overwrite:
@@ -74,15 +134,20 @@ class MetadataAppService(BackgroundTaskService):
 
                     try:
                         updated = False
+                        skipped_reason = None
+                        
                         if update_type == "release_date":
-                            updated = await self._update_release_date(session, track, overwrite)
+                            updated, skipped_reason = await self._update_release_date(session, track, overwrite)
                         elif update_type == "lyrics":
-                            updated = await self._update_lyrics(session, track, overwrite)
+                            updated, skipped_reason = await self._update_lyrics(session, track, overwrite)
                         
                         if updated:
                             self.state["updated"] += 1
                         else:
                             self.state["skipped"] += 1
+                            # Add to skip cache if it was not found (not just skipped because it already exists)
+                            if skipped_reason == "not_found":
+                                self._skip_cache[update_type].add(track.id)
                             
                     except Exception as e:
                         print(f"Error updating {track.id}: {e}")
@@ -98,7 +163,14 @@ class MetadataAppService(BackgroundTaskService):
                     sleep_time = 3.0 if update_type == "release_date" else 1.0
                     await asyncio.sleep(sleep_time) 
 
-            self.update_state(type="complete", message="Update complete")
+            # Save skip cache
+            self._save_skip_cache()
+            
+            cache_size = len(self._skip_cache.get(update_type, set()))
+            self.update_state(
+                type="complete", 
+                message=f"Update complete ({cache_size} tracks cached as not found)"
+            )
             await self.emit_state()
 
         except Exception as e:
@@ -108,10 +180,11 @@ class MetadataAppService(BackgroundTaskService):
         finally:
             self.is_running = False
 
-    async def _update_release_date(self, session: Session, track: Track, overwrite: bool) -> bool:
+    async def _update_release_date(self, session: Session, track: Track, overwrite: bool) -> tuple[bool, Optional[str]]:
+        """Update release date. Returns (updated, skip_reason)."""
         if track.year and not overwrite:
             # print(f"DEBUG: Skipping {track.artist} - {track.title} (Year exists: {track.year})")
-            return False
+            return False, "already_exists"
         
         print(f"DEBUG: Fetching release date for {track.artist} - {track.title}")
         release_date = await fetch_itunes_release_date(track.artist, track.title)
@@ -121,17 +194,17 @@ class MetadataAppService(BackgroundTaskService):
                 year = int(release_date[:4])
                 if track.year != year:
                     track.year = year
-                    session.add(track)
                     session.commit()
-                    return True
+                    return True, None
             except:
                 pass
-        return False
+        return False, "not_found"
 
-    async def _update_lyrics(self, session: Session, track: Track, overwrite: bool) -> bool:
+    async def _update_lyrics(self, session: Session, track: Track, overwrite: bool) -> tuple[bool, Optional[str]]:
+        """Update lyrics. Returns (updated, skip_reason)."""
         lyrics = session.get(Lyrics, track.id)
         if lyrics and lyrics.content and not overwrite:
-            return False
+            return False, "already_exists"
         
         data = await fetch_lrclib_lyrics(track.artist, track.title, track.album, track.duration)
         if data:
@@ -147,7 +220,7 @@ class MetadataAppService(BackgroundTaskService):
                 lyrics.updated_at = datetime.now()
                 session.add(lyrics)
                 session.commit()
-                return True
-        return False
+                return True, None
+        return False, "not_found"
 
 metadata_app_service = MetadataAppService()

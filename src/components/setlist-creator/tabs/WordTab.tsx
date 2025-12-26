@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Track } from "@/types";
-import { apiClient } from "@/services/api-client";
+import { lyricsService, AnalysisResult } from "@/services/lyrics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,20 +14,11 @@ interface WordTabProps {
   onAddTrack: (track: Track, wordplayData?: any) => void;
 }
 
+// API response type (matches backend)
 interface LyricSnippet {
   track: Track;
   snippet: string[];
   match_line: number;
-}
-
-interface KeywordAnalysis {
-  keyword: string;
-  count: number;
-}
-
-interface AnalysisResult {
-    words: KeywordAnalysis[];
-    phrases: KeywordAnalysis[];
 }
 
 export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
@@ -56,7 +47,7 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
   const fetchLyrics = async (trackId: number) => {
     setLoadingLyrics(true);
     try {
-      const data = await apiClient.get<{ content: string }>(`/tracks/${trackId}/lyrics`);
+      const data = await lyricsService.getLyrics(trackId);
       if (data && data.content) {
         setLyrics(data.content.split("\n"));
       } else {
@@ -74,7 +65,7 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
     setLoadingAnalysis(true);
     setAnalysis({ words: [], phrases: [] });
     try {
-      const data = await apiClient.post<AnalysisResult>(`/tracks/${trackId}/lyrics/analyze`, {});
+      const data = await lyricsService.analyzeLyrics(trackId);
       setAnalysis(data);
     } catch (error) {
       console.error("Failed to analyze lyrics", error);
@@ -87,11 +78,8 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
     if (!searchQuery) return;
     setLoadingSearch(true);
     try {
-      const params: any = { q: searchQuery };
-      if (sourceTrack) {
-          params.exclude_track_id = sourceTrack.id;
-      }
-      const data = await apiClient.get<LyricSnippet[]>("/lyrics/search", params);
+      const excludeId = sourceTrack?.id;
+      const data = await lyricsService.searchLyrics(searchQuery, excludeId);
       setSearchResults(data);
     } catch (error) {
       console.error("Search failed", error);

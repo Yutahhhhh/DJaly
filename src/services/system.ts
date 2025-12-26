@@ -32,4 +32,8 @@ export const systemService = {
   getDashboardStats: async () => {
     return apiClient.get<DashboardStats>("/dashboard");
   },
+  saveFile: (path: string, content: string) =>
+    apiClient.post("/system/save-file", { path, content }),
+  revealFile: (path: string) =>
+    apiClient.post("/system/reveal-file", { path }),
 };

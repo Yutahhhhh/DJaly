@@ -45,6 +45,7 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
     
     track_map = {}
     embedding_map = {}
+    lyrics_map = {}
     
     # 読み取り専用セッション。DuckDBの並列読み取りを阻害しないよう短く閉じる。
     with Session(db_connection.engine) as session:
@@ -55,6 +56,11 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
         # Embeddingの存在確認
         existing_embeddings = session.exec(select(TrackEmbedding)).all()
         embedding_map = {e.track_id: True for e in existing_embeddings}
+        
+        # Lyricsの存在確認
+        from domain.models.lyrics import Lyrics
+        existing_lyrics = session.exec(select(Lyrics)).all()
+        lyrics_map = {ly.track_id: True for ly in existing_lyrics}
     
     files_to_process = []
     skipped_count = 0
@@ -72,11 +78,17 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
                 has_embedding = existing_track.id in embedding_map
                 # 3. メタデータ（タイトル/アーティスト）が正常か
                 has_valid_meta = has_valid_metadata(existing_track)
+                # 4. .lrcファイルが存在するか（内容の差分チェックは後段で行う）
+                lrc_path = os.path.splitext(fp)[0] + ".lrc"
+                has_lrc_file = os.path.exists(lrc_path)
                 
                 if is_analyzed and has_embedding and has_valid_meta:
-                    # 4. ファイルタグ自体に変更がないか
-                    # ここで差分がなければ真にスキップ対象
-                    if not check_metadata_changed(fp, existing_track):
+                    # .lrcファイルがある場合、内容が変更されている可能性があるため処理する
+                    # （実際の差分チェックはingestion_domain_serviceで行われる）
+                    if has_lrc_file:
+                        should_skip = False
+                    # ファイルタグ自体に変更がないか
+                    elif not check_metadata_changed(fp, existing_track):
                         should_skip = True
         
         if should_skip:
