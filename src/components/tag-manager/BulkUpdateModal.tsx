@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { useMetadata } from "@/contexts/MetadataContext";
+import { Loader2, Check } from "lucide-react";
 
 interface BulkUpdateModalProps {
   isOpen: boolean;
@@ -21,8 +22,10 @@ interface BulkUpdateModalProps {
 }
 
 export function BulkUpdateModal({ isOpen, onClose, type, trackIds }: BulkUpdateModalProps) {
-  const { isUpdating, progress, statusText, currentTrack, stats, startUpdate, cancelUpdate } = useMetadata();
+  const { isUpdating, progress, statusText, currentTrack, stats, startUpdate, cancelUpdate, clearSkipCache } = useMetadata();
   const [overwrite, setOverwrite] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
 
   const title = type === "release_date" ? "Auto-Fill Release Dates" : "Auto-Fill Lyrics";
   const description = type === "release_date" 
@@ -33,6 +36,20 @@ export function BulkUpdateModal({ isOpen, onClose, type, trackIds }: BulkUpdateM
     startUpdate(type, overwrite, trackIds);
   };
 
+  const handleClearCache = async () => {
+    setClearingCache(true);
+    setCacheCleared(false);
+    try {
+      await clearSkipCache(type);
+      setCacheCleared(true);
+      setTimeout(() => {
+        setCacheCleared(false);
+      }, 2000);
+    } finally {
+      setClearingCache(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
@@ -40,9 +57,14 @@ export function BulkUpdateModal({ isOpen, onClose, type, trackIds }: BulkUpdateM
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {description}
-            {trackIds && (
+            {trackIds && !isUpdating && (
               <div className="mt-2 text-sm font-medium text-primary">
-                Targeting {trackIds.length} filtered tracks.
+                Up to {trackIds.length} filtered tracks (excluding cached skips)
+              </div>
+            )}
+            {isUpdating && stats.total > 0 && (
+              <div className="mt-2 text-sm font-medium text-primary">
+                Processing {stats.total} tracks
               </div>
             )}
           </DialogDescription>
@@ -63,6 +85,22 @@ export function BulkUpdateModal({ isOpen, onClose, type, trackIds }: BulkUpdateM
                 ? "Existing data will be replaced." 
                 : "Only tracks with missing data will be updated."}
             </p>
+            <div className="pt-2 border-t">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleClearCache}
+                disabled={clearingCache || cacheCleared}
+                className="w-full"
+              >
+                {clearingCache && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {cacheCleared && <Check className="mr-2 h-4 w-4" />}
+                {cacheCleared ? "Cache Cleared!" : "Clear Skip Cache"}
+              </Button>
+              <p className="text-xs text-muted-foreground mt-2">
+                Remove cached "not found" tracks to retry fetching them.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="grid gap-4 py-4 w-full">

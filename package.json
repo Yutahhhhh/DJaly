@@ -20,7 +20,10 @@
     "restore:db": "cp db_data/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
     "backup:db": "cp \"$HOME/Library/Application Support/Djaly/djaly.duckdb\" backup/djaly.duckdb",
     "log:watch": "tail -f \"$HOME/Library/Application Support/Djaly/logs/djaly.log\"",
+    "local:restore-db": "backend/.venv/bin/python backend/transfer_db.py backup/djaly.duckdb db_data/djaly.duckdb",
+    "prod:clean-db": "rm \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
     "prod:clean-db-w": "rm \"$HOME/Library/Application Support/Djaly/djaly.duckdb.wal\"",
+    "prod:restore-db": "backend/.venv/bin/python backend/transfer_db.py backup/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
     "test:backend": "backend/.venv/bin/pytest"
   },
   "dependencies": {

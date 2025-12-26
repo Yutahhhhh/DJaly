@@ -33,4 +33,13 @@ export const metadataService = {
     
   updateLyricsInDB: (trackId: number, content: string) =>
     apiClient.put(`/tracks/${trackId}/lyrics`, { track_id: trackId, content }),
+  
+  startUpdate: (type: "release_date" | "lyrics", overwrite: boolean, trackIds?: number[]) =>
+    apiClient.post("/metadata/update", { type, overwrite, track_ids: trackIds }),
+  
+  cancelUpdate: () =>
+    apiClient.post("/metadata/cancel", {}),
+  
+  clearSkipCache: (updateType?: "release_date" | "lyrics") =>
+    apiClient.post(`/metadata/clear-cache`, updateType ? { update_type: updateType } : {}),
 };

@@ -59,6 +59,12 @@ async def cancel_update():
     await metadata_app_service.cancel_update()
     return {"status": "success", "message": "Update cancelled"}
 
+@router.post("/api/metadata/clear-cache")
+async def clear_skip_cache(update_type: Optional[str] = Body(None, embed=True)):
+    """Clear skip cache for specific type (release_date/lyrics) or all if not specified."""
+    metadata_app_service.clear_skip_cache(update_type)
+    return {"status": "success", "message": "Cache cleared"}
+
 @router.websocket("/ws/metadata")
 async def websocket_metadata(websocket: WebSocket):
     try:

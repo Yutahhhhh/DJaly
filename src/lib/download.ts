@@ -1,4 +1,4 @@
-import { apiClient } from "@/services/api-client";
+import { systemService } from "@/services/system";
 import { isTauri } from "@tauri-apps/api/core";
 
 export async function downloadFile(url: string, defaultFilename: string) {
@@ -28,10 +28,10 @@ export async function downloadFile(url: string, defaultFilename: string) {
         const content = await response.text();
 
         // 3. バックエンド経由で保存
-        await apiClient.post("/system/save-file", { path, content });
+        await systemService.saveFile(path, content);
 
         // 4. Finder/Explorerで表示
-        await apiClient.post("/system/reveal-file", { path });
+        await systemService.revealFile(path);
 
       } catch (e) {
         console.error("Tauri save failed:", e);
