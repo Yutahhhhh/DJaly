@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { TrackSuggestion } from "@/services/genres";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PlayButton } from "@/components/ui/PlayButton";
 import {
   Loader2,
-  Play,
   ChevronRight,
   ChevronDown,
   ArrowRight,
@@ -48,7 +48,6 @@ export const GenreGroup: React.FC<GenreGroupProps> = ({
   onToggleSelection,
   onToggleAll,
   onConfirm,
-  onPlay,
   onExpand,
   confirmLabel = "Confirm",
   showCurrentGenre = false,
@@ -148,14 +147,13 @@ export const GenreGroup: React.FC<GenreGroupProps> = ({
                   checked={selectedIds.includes(suggestion.id)}
                   onCheckedChange={() => onToggleSelection(suggestion.id)}
                 />
-                <Button
+                <PlayButton
+                  track={suggestion}
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 opacity-0 group-hover/item:opacity-100 transition-opacity"
-                  onClick={() => onPlay(suggestion)}
-                >
-                  <Play className="h-3 w-3" />
-                </Button>
+                  iconClassName="h-3 w-3"
+                />
                 <div className="flex-1 min-w-0 flex items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">

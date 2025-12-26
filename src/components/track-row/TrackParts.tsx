@@ -1,8 +1,7 @@
 import { Track } from "@/types";
-import { Button } from "@/components/ui/button";
-import { Play, Pause, Mic } from "lucide-react";
+import { Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usePlayerStore } from "@/stores/playerStore";
+import { PlayButton } from "@/components/ui/PlayButton";
 
 interface TrackPlayButtonProps {
   track: Track;
@@ -15,33 +14,16 @@ export function TrackPlayButton({
   disabled,
   className,
 }: TrackPlayButtonProps) {
-  const { currentTrack, isPlaying, play, pause } = usePlayerStore();
-  const isCurrentTrack = currentTrack?.id === track.id;
-  const isTrackPlaying = isCurrentTrack && isPlaying;
-
-  const handlePlayClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isTrackPlaying) {
-      pause();
-    } else {
-      play(track);
-    }
-  };
-
   return (
-    <Button
+    <PlayButton
+      track={track}
       variant="ghost"
       size="icon"
       className={cn("h-8 w-8 hover:text-green-500 shrink-0", className)}
-      onClick={handlePlayClick}
+      iconClassName="h-4 w-4"
+      showPauseWhenPlaying={true}
       disabled={disabled}
-    >
-      {isTrackPlaying ? (
-        <Pause className="h-4 w-4 fill-green-500 text-green-500" />
-      ) : (
-        <Play className="h-4 w-4" />
-      )}
-    </Button>
+    />
   );
 }
 

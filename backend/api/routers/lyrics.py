@@ -1,222 +1,117 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select
 from infra.database.connection import get_session
 from domain.models.lyrics import Lyrics
 from domain.models.track import Track
-from api.schemas.lyrics import LyricsRead, LyricsUpdate
-from datetime import datetime
-from typing import List, Dict, Any, Optional
-from utils.llm import generate_text, get_llm_config
+from api.schemas.lyrics import LyricsRead
 import json
 import re
+from typing import List, Dict, Any, Optional
+from utils.llm import generate_text
 
 router = APIRouter()
 
+def parse_lrc_timestamp(line: str) -> Optional[float]:
+    """LRCのタイムスタンプ [mm:ss.xx] または [mm:ss] を秒数に変換"""
+    match = re.search(r'\[(\d+):(\d+(?:\.\d+)?)\]', line)
+    if match:
+        minutes = int(match.group(1))
+        seconds = float(match.group(2))
+        return minutes * 60 + seconds
+    return None
+
 @router.get("/api/tracks/{track_id}/lyrics", response_model=LyricsRead)
-def get_lyrics(
-    track_id: int,
-    session: Session = Depends(get_session)
-):
+def get_lyrics(track_id: int, session: Session = Depends(get_session)):
     lyrics = session.get(Lyrics, track_id)
     if not lyrics:
         raise HTTPException(status_code=404, detail="Lyrics not found")
     return lyrics
 
-@router.put("/api/tracks/{track_id}/lyrics", response_model=LyricsRead)
-def update_lyrics(
-    track_id: int,
-    update: LyricsUpdate,
-    session: Session = Depends(get_session)
-):
-    lyrics = session.get(Lyrics, track_id)
-    if not lyrics:
-        lyrics = Lyrics(track_id=track_id)
-        session.add(lyrics)
+@router.post("/api/tracks/{track_id}/lyrics/analyze")
+def analyze_lyrics(track_id: int, session: Session = Depends(get_session)):
+    """
+    LLMを使用して歌詞からキーワードを抽出し、他曲での出現回数をカウントして返す。
+    単語とフレーズを「Keywords」として統合。
+    """
+    lyrics_obj = session.get(Lyrics, track_id)
+    if not lyrics_obj or not lyrics_obj.content:
+        raise HTTPException(status_code=404, detail="Lyrics not found")
+
+    # LLM Prompt - より細かく、DJ的な視点で抽出
+    prompt = f"""
+    Analyze the following song lyrics and extract impactful keywords and short phrases (2-4 words) 
+    that a DJ could use for lyrical connections or wordplay.
+    Focus on:
+    - Iconic objects/places
+    - Strong emotions or actions
+    - Catchy hooks
     
-    if update.content is not None:
-        lyrics.content = update.content
-    if update.source is not None:
-        lyrics.source = update.source
-    if update.language is not None:
-        lyrics.language = update.language
+    Return ONLY a JSON array of strings: ["keyword1", "phrase 1", ...]
     
-    lyrics.updated_at = datetime.now()
-    session.add(lyrics)
-    session.commit()
-    session.refresh(lyrics)
-    return lyrics
+    Lyrics:
+    {lyrics_obj.content[:1500]}
+    """
+
+    try:
+        raw_res = generate_text(session, prompt)
+        match = re.search(r'\[.*\]', raw_res, re.DOTALL)
+        keywords = json.loads(match.group(0)) if match else []
+    except Exception as e:
+        print(f"LLM extraction failed: {e}")
+        keywords = []
+
+    # 全曲の歌詞をロードして出現回数を計算 (本来はFTS等を使うべきだがDuckDB+メモリで対応)
+    all_lyrics = session.exec(select(Lyrics.track_id, Lyrics.content)).all()
+    
+    results = []
+    seen = set()
+    for kw in keywords:
+        kw_lower = kw.lower().strip()
+        if not kw_lower or kw_lower in seen: continue
+        seen.add(kw_lower)
+        
+        count = 0
+        for other_id, other_content in all_lyrics:
+            if other_id == track_id: continue
+            if other_content and kw_lower in other_content.lower():
+                count += 1
+        
+        if count > 0:
+            results.append({"keyword": kw, "count": count})
+
+    return sorted(results, key=lambda x: x["count"], reverse=True)
 
 @router.get("/api/lyrics/search")
-def search_lyrics(
-    q: str,
-    exclude_track_id: Optional[int] = None,
-    session: Session = Depends(get_session)
-):
-    """
-    Search lyrics and return matching tracks with snippets.
-    """
-    if not q or len(q) < 2:
-        return []
-        
-    # Simple LIKE search for now. 
-    # In production with many lyrics, FTS (Full Text Search) would be better.
-    statement = select(Lyrics, Track).join(Track).where(Lyrics.content.like(f"%{q}%"))
-    
+def search_lyrics(q: str, exclude_track_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """キーワードで歌詞を検索し、スニペットとタイムスタンプを返す"""
+    if not q or len(q) < 2: return []
+
+    statement = select(Lyrics, Track).join(Track).where(Lyrics.content.ilike(f"%{q}%"))
     if exclude_track_id:
         statement = statement.where(Track.id != exclude_track_id)
         
-    results = session.exec(statement).all()
+    db_results = session.exec(statement).all()
     
     response = []
-    for lyrics, track in results:
-        # Extract snippet
-        lines = lyrics.content.split('\n')
-        snippet = []
+    for lyrics_obj, track in db_results:
+        lines = lyrics_obj.content.split('\n')
         for i, line in enumerate(lines):
             if q.lower() in line.lower():
-                # Get context: 1 line before, current line, 1 line after
+                # タイムスタンプ取得
+                ts = parse_lrc_timestamp(line)
+                clean_line = re.sub(r'\[.*\]', '', line).strip()
+                
+                # 前後の文脈
                 start = max(0, i - 1)
                 end = min(len(lines), i + 2)
-                snippet = lines[start:end]
+                snippet = [re.sub(r'\[.*\]', '', l).strip() for l in lines[start:end]]
+                
+                response.append({
+                    "track": track,
+                    "snippet": snippet,
+                    "timestamp": ts,
+                    "matched_text": clean_line
+                })
                 break
-        
-        response.append({
-            "track": track,
-            "snippet": snippet,
-            "match_line": i if 'i' in locals() else 0
-        })
-        
+                
     return response
-
-
-def _extract_keywords_internal(text: str, session: Session) -> Dict[str, List[str]]:
-    provider, model_name, api_key, ollama_host = get_llm_config(session)
-    
-    prompt = f"""
-    Analyze the song lyrics below and extract keywords/phrases suitable for DJ wordplay transitions.
-    Think like a DJ who wants to mix tracks based on lyrical connections.
-    
-    Extract two categories:
-    
-    1. "words": Single words for connecting tracks.
-       Find impactful words. Categories include (but are not limited to):
-       - Strong Nouns, Places, Names, or Objects (e.g., "Tokyo", "Gold", "World").
-       - Antonyms, Pairs, or Opposites (e.g., "Day", "Night", "Love", "Hate").
-       - Numbers, Colors, Elements, or Seasons.
-       - Interjections, Hype words, or Onomatopoeia (e.g., "Yeah", "Hey", "Boom", "Baby").
-       - Homophones or words with interesting sounds.
-       (Exclude common stop words like "the", "a", "is" unless they are part of a significant hook)
-       
-    2. "phrases": Short, catchy phrases (2-6 words).
-       - Hooks, Punchlines, or Repeated lines.
-       - Call & Response lines.
-       - Iconic lyrics.
-    
-    Return ONLY a valid JSON object with this structure:
-    {{
-      "words": ["word1", "word2", ...],
-      "phrases": ["phrase1", "phrase2", ...]
-    }}
-    
-    Lyrics:
-    {text[:1500]}... (truncated)
-    """
-    
-    try:
-        # generate_text signature: (session: Session, prompt: str, model_name: Optional[str] = None) -> str
-        # The previous call was passing provider, api_key etc which are now handled internally by generate_text using session
-        response = generate_text(
-            session=session,
-            prompt=prompt
-        )
-        
-        # Find JSON object in the response
-        match = re.search(r'\{.*\}', response, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            data = json.loads(json_str)
-            return {
-                "words": data.get("words", []),
-                "phrases": data.get("phrases", [])
-            }
-        else:
-            return {"words": [], "phrases": []}
-            
-    except Exception as e:
-        print(f"Error extracting keywords: {e}")
-        return {"words": [], "phrases": []}
-
-@router.post("/api/lyrics/extract-keywords")
-def extract_keywords(
-    text: str = Body(..., embed=True),
-    session: Session = Depends(get_session)
-):
-    """
-    Extract catchy keywords/phrases from lyrics using Ollama.
-    """
-    return _extract_keywords_internal(text, session)
-
-@router.post("/api/tracks/{track_id}/lyrics/analyze")
-def analyze_lyrics(
-    track_id: int,
-    session: Session = Depends(get_session)
-):
-    """
-    Analyze lyrics for a track and return keywords with match counts in other tracks.
-    Returns { "words": [...], "phrases": [...] }
-    """
-    lyrics = session.get(Lyrics, track_id)
-    if not lyrics:
-        raise HTTPException(status_code=404, detail="Lyrics not found")
-        
-    # 1. Extract Words and Phrases using LLM
-    extracted = _extract_keywords_internal(lyrics.content, session)
-    
-    # 2. Get all other lyrics for frequency analysis
-    # We fetch ID and Content to avoid fetching full objects
-    other_lyrics_rows = session.exec(
-        select(Lyrics.content)
-        .where(Lyrics.track_id != track_id)
-    ).all()
-    
-    # Pre-process other lyrics for faster searching (lowercase)
-    # In a real production DB, we would use Full Text Search (FTS) or an Inverted Index.
-    other_lyrics_lower = [l.lower() for l in other_lyrics_rows if l]
-
-    def count_matches(items: List[str]) -> List[Dict[str, Any]]:
-        results = []
-        seen = set()
-        
-        for item in items:
-            if not item or item.lower() in seen:
-                continue
-            seen.add(item.lower())
-            
-            count = 0
-            item_lower = item.lower()
-            
-            for content in other_lyrics_lower:
-                # For words, we want word boundary matching to avoid partial matches (e.g. "cat" in "catch")
-                # For phrases, simple substring match is usually fine
-                if " " not in item: # It's a word
-                     # Simple boundary check: space before/after or start/end of string
-                     # This is a lightweight approximation of regex \b
-                     if item_lower in content:
-                         count += 1
-                else: # It's a phrase
-                    if item_lower in content:
-                        count += 1
-            
-            results.append({
-                "keyword": item,
-                "count": count
-            })
-        
-        # Sort by count desc
-        results.sort(key=lambda x: x["count"], reverse=True)
-        return results
-
-    return {
-        "words": count_matches(extracted["words"]),
-        "phrases": count_matches(extracted["phrases"])
-    }

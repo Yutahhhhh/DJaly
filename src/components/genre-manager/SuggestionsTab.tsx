@@ -9,9 +9,9 @@ import { tracksService } from "@/services/tracks";
 import { Track } from "@/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PlayButton } from "@/components/ui/PlayButton";
 import {
   Loader2,
-  Play,
   Wand2,
   StopCircle,
 } from "lucide-react";
@@ -32,7 +32,7 @@ interface SuggestionsTabProps {
   mode?: AnalysisMode;
 }
 
-export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay, mode = "both" }) => {
+export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ mode = "both" }) => {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -311,14 +311,13 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ onPlay, mode = "
                 className="flex items-center justify-between p-3 border rounded-md hover:bg-accent/50 transition-colors"
               >
                 <div className="flex items-center gap-3 overflow-hidden">
-                  <Button
+                  <PlayButton
+                    track={track}
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 shrink-0"
-                    onClick={() => onPlay(track)}
-                  >
-                    <Play className="h-4 w-4" />
-                  </Button>
+                    iconClassName="h-4 w-4"
+                  />
                   <div className="min-w-0">
                     <div className="font-medium truncate">{track.title}</div>
                     <div className="text-sm text-muted-foreground truncate">

@@ -1,6 +1,4 @@
 import {
-  Pause,
-  Play,
   SkipBack,
   SkipForward,
   Volume2,
@@ -15,6 +13,7 @@ import { formatTime } from "@/lib/utils";
 import { Track } from "@/types";
 import { FileMetadata } from "@/services/metadata";
 import { Waveform } from "./Waveform";
+import { PlayButton } from "@/components/ui/PlayButton";
 
 interface MiniPlayerProps {
   track: Track;
@@ -36,12 +35,10 @@ interface MiniPlayerProps {
 export function MiniPlayer({
   track,
   metadata,
-  isPlaying,
   progress,
   duration,
   volume,
   isExpanded,
-  onPlayPause,
   onSkipBack,
   onSkipForward,
   onVolumeChange,
@@ -105,17 +102,13 @@ export function MiniPlayer({
           >
             <SkipBack className="h-4 w-4" />
           </Button>
-          <Button
+          <PlayButton
+            track={track}
             size="icon"
             className="h-10 w-10 rounded-full shadow-md bg-primary text-primary-foreground hover:scale-105 transition-transform"
-            onClick={onPlayPause}
-          >
-            {isPlaying ? (
-              <Pause className="h-5 w-5" />
-            ) : (
-              <Play className="h-5 w-5 ml-0.5" />
-            )}
-          </Button>
+            iconClassName="h-5 w-5"
+            showPauseWhenPlaying={true}
+          />
           <Button
             variant="ghost"
             size="icon"
