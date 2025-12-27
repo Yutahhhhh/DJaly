@@ -1,11 +1,11 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { GripVertical, X, Plus, MessageSquareQuote } from "lucide-react";
+import { GripVertical, X, Plus } from "lucide-react";
 import { Track } from "@/types";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { TrackRow as BaseTrackRow } from "@/components/track-row";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 interface TrackRowProps {
   id: string;
@@ -35,52 +35,8 @@ const TrackRowContent = ({
   innerRef?: (node: HTMLElement | null) => void;
   isDragging?: boolean;
 }) => {
-  const wordplayData = React.useMemo(() => {
-    if ('wordplay_json' in track && (track as any).wordplay_json) {
-      try {
-        return JSON.parse((track as any).wordplay_json);
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  }, [track]);
-
   return (
-    <div className="relative group/row">
-      {wordplayData && (
-        <div className="absolute -top-3 left-12 z-30">
-          <Popover>
-            <PopoverTrigger asChild>
-              <div 
-                className="cursor-pointer bg-background border rounded-full p-1 shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors" 
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MessageSquareQuote className="h-3 w-3 text-primary" />
-              </div>
-            </PopoverTrigger>
-            <PopoverContent className="w-80 p-3" side="right" align="start">
-              <div className="font-medium mb-2 flex items-center gap-2 text-sm">
-                <MessageSquareQuote className="h-4 w-4 text-primary" /> 
-                Wordplay Connection
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="bg-muted/50 p-2 rounded border border-border/50">
-                  <div className="text-xs text-muted-foreground mb-1">Source Phrase</div>
-                  <div className="italic">"{wordplayData.source_phrase}"</div>
-                </div>
-                <div className="flex justify-center text-muted-foreground text-xs">
-                  ↓ via <span className="font-bold mx-1 text-primary">{wordplayData.keyword}</span>
-                </div>
-                <div className="bg-primary/5 p-2 rounded border border-primary/20">
-                  <div className="text-xs text-muted-foreground mb-1">Target Phrase</div>
-                  <div className="italic">"{wordplayData.target_phrase}"</div>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-      )}
+    <div className="relative group/row w-full">
       <BaseTrackRow
         track={track}
         viewType="list"
@@ -88,52 +44,57 @@ const TrackRowContent = ({
         onClick={onSelect}
         innerRef={innerRef}
         style={style}
-        className={isDragging ? "opacity-20 border-primary bg-primary/5" : ""}
-        showMeta={true} // Use standard meta rendering
-      prefix={
-        dragHandleProps ? (
-          <div
-            {...dragHandleProps}
-            className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/50 hover:text-foreground shrink-0 z-20"
-          >
-            <GripVertical className="h-4 w-4" />
+        className={cn(
+          "transition-all",
+          isDragging ? "opacity-20 border-primary bg-primary/5" : "",
+          isSelected ? "bg-primary/5" : ""
+        )}
+        showMeta={true}
+        prefix={
+          <div className="flex items-center gap-1 shrink-0 z-20">
+            {dragHandleProps ? (
+              <div
+                {...dragHandleProps}
+                className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/30 hover:text-foreground transition-colors"
+              >
+                <GripVertical className="h-4 w-4" />
+              </div>
+            ) : (
+              <div className="w-2" />
+            )}
           </div>
-        ) : (
-          <div className="w-2" />
-        )
-      }
-      suffix={
-        <div className="flex gap-1 shrink-0 z-20 ml-1">
-          {/* Duration is now handled by BaseTrackRow */}
-          {onAdd && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-primary"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAdd();
-              }}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          )}
-          {onRemove && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove();
-              }}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      }
-    />
+        }
+        suffix={
+          <div className="flex gap-1 shrink-0 z-20 ml-2">
+            {onAdd && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-primary hover:bg-primary/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdd();
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            )}
+            {onRemove && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 };
@@ -176,4 +137,3 @@ export const TrackRow = React.memo((props: TrackRowProps) => {
 });
 
 TrackRow.displayName = "TrackRow";
-

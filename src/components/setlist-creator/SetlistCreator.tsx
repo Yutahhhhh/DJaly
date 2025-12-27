@@ -16,13 +16,13 @@ import { SetlistSidebar } from "./SetlistSidebar";
 import { SetlistEditor } from "./SetlistEditor";
 import { TrackSelector } from "./TrackSelector";
 import { TrackRow } from "./TrackRow";
-import { setlistsService, Setlist } from "@/services/setlists";
+import { setlistsService, Setlist, SetlistTrack } from "@/services/setlists";
 import { Track } from "@/types";
 
 export function SetlistCreator() {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [activeSetlist, setActiveSetlist] = useState<Setlist | null>(null);
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<SetlistTrack[]>([]);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
 
   const [activeDragItem, setActiveDragItem] = useState<{
@@ -32,7 +32,6 @@ export function SetlistCreator() {
   const [bridgeStart, setBridgeStart] = useState<Track | null>(null);
   const [bridgeEnd, setBridgeEnd] = useState<Track | null>(null);
 
-  // 【速度改善】 MouseSensor を使用し、WebKitの遅延を最小化
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: { distance: 5 },
@@ -62,17 +61,67 @@ export function SetlistCreator() {
     }
   };
 
-  const commitTracksToDB = async (newTracks: Track[]) => {
-    setTracks(newTracks);
+  /**
+   * DBへの永続化処理
+   * 各楽曲の wordplay_json をチェックし、前の楽曲との整合性が取れない場合は削除する
+   */
+  const commitTracksToDB = async (newTracks: (Track | SetlistTrack)[]) => {
     if (activeSetlist) {
+      // 1. 整合性チェック: 前の楽曲が変わっていたら wordplay_json を無効化する
+      const validatedTracks = newTracks.map((track, index) => {
+        const st = track as SetlistTrack;
+        if (!st.wordplay_json) return st;
+
+        try {
+          const wp = JSON.parse(st.wordplay_json);
+          const prevTrack = index > 0 ? newTracks[index - 1] : null;
+
+          // 前の曲が存在しない、またはワードプレイが想定している接続元IDと一致しない場合は不整合とみなす
+          // 型の揺れを考慮して loose equality ( != ) を使用
+          if (!prevTrack || wp.from_track_id != prevTrack.id) {
+            console.log(
+              `Wordplay inconsistency detected for track ${st.title}. Clearing metadata.`
+            );
+            return { ...st, wordplay_json: null };
+          }
+        } catch (e) {
+          return { ...st, wordplay_json: null };
+        }
+        return st;
+      });
+
+      // UIに即座に反映 (楽観的アップデート)
+      setTracks(validatedTracks as SetlistTrack[]);
+
       try {
-        await setlistsService.updateTracks(
-          activeSetlist.id,
-          newTracks.map((t) => t.id)
-        );
+        const updatePayload = validatedTracks.map((t) => ({
+          id: t.id,
+          wordplay_json: t.wordplay_json || null,
+        }));
+
+        // 保存実行
+        await setlistsService.updateTracks(activeSetlist.id, updatePayload);
+
+        // 最終的な状態をDBから取得
+        const updatedTracks = await setlistsService.getTracks(activeSetlist.id);
+        setTracks(updatedTracks);
       } catch (e) {
-        console.error(e);
+        console.error("Failed to commit tracks:", e);
+        // エラー時はバリデーション済みのローカルステートを維持 (サーバーとの同期は次回の操作に期待)
       }
+    } else {
+      setTracks(newTracks as SetlistTrack[]);
+    }
+  };
+
+  const handleDeleteWordplay = async (setlistTrackId: number) => {
+    if (!activeSetlist) return;
+    try {
+      await setlistsService.deleteWordplay(setlistTrackId);
+      const updatedTracks = await setlistsService.getTracks(activeSetlist.id);
+      setTracks(updatedTracks);
+    } catch (e) {
+      console.error("ワードプレイの削除に失敗しました:", e);
     }
   };
 
@@ -80,7 +129,6 @@ export function SetlistCreator() {
     setActiveDragItem(event.active.data.current as any);
   }, []);
 
-  // 【モーションの肝】 ドラッグ中に配列を操作して「避ける」動きを作る
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
       const { active, over } = event;
@@ -89,7 +137,6 @@ export function SetlistCreator() {
       const activeData = active.data.current;
       const overData = over.data.current;
 
-      // ライブラリからセットリストのコンテナ（空の場合や余白）に重なった時
       if (
         activeData?.type === "LIBRARY_ITEM" &&
         over.id === "setlist-editor-droppable"
@@ -98,11 +145,17 @@ export function SetlistCreator() {
         const isAlreadyInList = tracks.some((t) => t.id === track.id);
 
         if (!isAlreadyInList) {
-          setTracks([...tracks, track]);
+          setTracks([
+            ...tracks,
+            {
+              ...track,
+              setlist_track_id: 0,
+              position: tracks.length,
+            } as SetlistTrack,
+          ]);
         }
       }
 
-      // ライブラリからセットリストのアイテムの上に重なった時
       if (
         activeData?.type === "LIBRARY_ITEM" &&
         overData?.type === "SETLIST_ITEM"
@@ -114,12 +167,14 @@ export function SetlistCreator() {
         const overIndex = tracks.findIndex((t) => `setlist-${t.id}` === overId);
 
         if (!isAlreadyInList) {
-          // まだリストにない曲なら、その位置にプレビューとして挿入
           const newTracks = [...tracks];
-          newTracks.splice(overIndex, 0, track);
+          newTracks.splice(overIndex, 0, {
+            ...track,
+            setlist_track_id: 0,
+            position: overIndex,
+          } as SetlistTrack);
           setTracks(newTracks);
         } else {
-          // すでにリストにある（移動中）なら位置を入れ替え
           const oldIndex = tracks.findIndex((t) => t.id === track.id);
           if (oldIndex !== overIndex) {
             setTracks(arrayMove(tracks, oldIndex, overIndex));
@@ -127,7 +182,6 @@ export function SetlistCreator() {
         }
       }
 
-      // セットリスト内での並べ替えプレビュー
       if (
         activeData?.type === "SETLIST_ITEM" &&
         overData?.type === "SETLIST_ITEM"
@@ -151,15 +205,12 @@ export function SetlistCreator() {
       const { active, over } = event;
       setActiveDragItem(null);
       if (!over) {
-        // どこにもドロップされなかった場合、リロードしてプレビューをリセット
         if (activeSetlist) handleSelectSetlist(activeSetlist.id);
         return;
       }
 
       const activeData = active.data.current;
-      const overId = over.id as string;
 
-      // 【確定保存】 ここで初めてDBに書き込む
       if (
         activeData?.type === "SETLIST_ITEM" ||
         activeData?.type === "LIBRARY_ITEM"
@@ -168,14 +219,15 @@ export function SetlistCreator() {
           over.data.current?.type === "SETLIST_ITEM" ||
           over.id === "setlist-editor-droppable"
         ) {
+          // 移動完了時に整合性チェックを実行
           commitTracksToDB(tracks);
           return;
         }
       }
 
       if (activeData?.track) {
-        if (overId === "bridge-start") setBridgeStart(activeData.track);
-        if (overId === "bridge-end") setBridgeEnd(activeData.track);
+        if (over.id === "bridge-start") setBridgeStart(activeData.track);
+        if (over.id === "bridge-end") setBridgeEnd(activeData.track);
       }
     },
     [tracks, activeSetlist]
@@ -202,7 +254,7 @@ export function SetlistCreator() {
         />
 
         {activeSetlist ? (
-          <>
+          <div className="flex-1 flex min-w-0 divide-x divide-border">
             <SetlistEditor
               tracks={tracks}
               onRemoveTrack={(idx: number) => {
@@ -212,34 +264,36 @@ export function SetlistCreator() {
               }}
               onTrackSelect={setSelectedTrack}
               selectedTrackId={selectedTrack?.id || null}
+              onDeleteWordplay={handleDeleteWordplay}
             />
-            {/* TrackSelectorのPropsにbridgeStateが存在しないエラーを回避しつつ
-              型を安全にキャストして渡します。
-            */}
             <TrackSelector
               referenceTrack={selectedTrack}
-              onAddTrack={(t: Track, wordplayData?: any) => {
-                if (!tracks.some((ex) => ex.id === t.id)) {
-                  const newTracks = [...tracks, t];
-                  commitTracksToDB(newTracks).then(() => {
-                      if (wordplayData && activeSetlist) {
-                          // Reload tracks to get the new setlist_track_id
-                          setlistsService.getTracks(activeSetlist.id).then(updatedTracks => {
-                              // Find the newly added track (last one with matching track_id)
-                              // Since we just added it to the end.
-                              const addedTrack = updatedTracks.find(tr => tr.id === t.id && !tr.wordplay_json); 
-                              // Note: !tr.wordplay_json check is to avoid updating existing ones if we were to support duplicates, 
-                              // but here we only add if not exists.
-                              
-                              if (addedTrack) {
-                                  setlistsService.updateWordplay(addedTrack.setlist_track_id, wordplayData).then(() => {
-                                      // Refresh tracks to show the icon
-                                      setlistsService.getTracks(activeSetlist.id).then(setTracks);
-                                  });
-                              }
-                          });
+              onAddTrack={async (t: Track, wordplayData?: any) => {
+                if (activeSetlist) {
+                  const insertIndex = selectedTrack
+                    ? tracks.findIndex((tr) => tr.id === selectedTrack.id) + 1
+                    : tracks.length;
+
+                  const wordplayWithContext = wordplayData
+                    ? {
+                        ...wordplayData,
+                        from_track_id: selectedTrack?.id || null,
                       }
-                  });
+                    : null;
+
+                  const newTrackObj = {
+                    ...t,
+                    setlist_track_id: 0,
+                    position: insertIndex,
+                    wordplay_json: wordplayWithContext
+                      ? JSON.stringify(wordplayWithContext)
+                      : null,
+                  };
+
+                  const newTracks = [...tracks];
+                  newTracks.splice(insertIndex, 0, newTrackObj as SetlistTrack);
+
+                  await commitTracksToDB(newTracks);
                 }
               }}
               onInjectTracks={(
@@ -249,8 +303,11 @@ export function SetlistCreator() {
               ) => {
                 let nt = [...tracks];
                 const idx = nt.findIndex((t) => t.id === startId);
-                // 指定されたIDの後ろに挿入、見つからなければ末尾
-                nt.splice(idx !== -1 ? idx + 1 : nt.length, 0, ...ts);
+                const tsWithMeta = ts.map(
+                  (t) =>
+                    ({ ...t, setlist_track_id: 0, position: 0 } as SetlistTrack)
+                );
+                nt.splice(idx !== -1 ? idx + 1 : nt.length, 0, ...tsWithMeta);
                 commitTracksToDB(nt);
               }}
               currentSetlistTracks={tracks}
@@ -261,7 +318,7 @@ export function SetlistCreator() {
                 setEnd: setBridgeEnd,
               }}
             />
-          </>
+          </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground bg-muted/10 italic">
             Select a setlist to start editing
@@ -269,7 +326,6 @@ export function SetlistCreator() {
         )}
       </div>
 
-      {/* 【視覚効果】 ドラッグ中のオーバーレイ表示 */}
       <DragOverlay dropAnimation={null}>
         {activeDragItem ? (
           <div className="w-72 shadow-2xl rounded-md overflow-hidden border border-primary bg-background pointer-events-none opacity-90 scale-105">

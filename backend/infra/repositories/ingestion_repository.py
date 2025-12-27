@@ -44,7 +44,12 @@ class IngestionRepository:
                         elif k == "year" and isinstance(v, int) and v > 0:
                             setattr(existing_track, k, v)
             else:
-                final_data = {k: (v if v is not None else "") for k, v in track_update_data.items()}
+                final_data = {}
+                for k, v in track_update_data.items():
+                    if k == "year":
+                        final_data[k] = v if v is not None else None
+                    else:
+                        final_data[k] = v if v is not None else ""
                 if not final_data.get("title"): final_data["title"] = "Unknown"
                 if not final_data.get("artist"): final_data["artist"] = "Unknown"
                 new_track = Track(filepath=filepath, **final_data)

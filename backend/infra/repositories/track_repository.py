@@ -26,8 +26,11 @@ class TrackRepository:
             self.session.refresh(track)
         return track
 
-    def get_similar_tracks(self, track_id: int, limit: int = 20) -> List[Track]:
-        """ベクトル検索: 指定された track_id に類似するトラックを取得する"""
+    def get_similar_tracks(self, track_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        ベクトル検索: 指定された track_id に類似するトラックを取得する。
+        Lyricsテーブルと外部結合し、has_lyrics フラグを付与して返します。
+        """
         target_embedding = self.session.exec(
             select(TrackEmbedding).where(TrackEmbedding.track_id == track_id)
         ).first()
@@ -37,13 +40,28 @@ class TrackRepository:
 
         try:
             vec_str = target_embedding.embedding_json
-            query = select(Track).join(TrackEmbedding)
-            query = query.where(Track.id != track_id)
-            # DuckDB 独自の array_cosine_similarity を使用
-            query = query.order_by(text(f"array_cosine_similarity(CAST(track_embeddings.embedding_json AS FLOAT[200]), CAST('{vec_str}' AS FLOAT[200])) DESC"))
-            query = query.limit(limit)
             
-            return self.session.exec(query).all()
+            # TrackEmbeddingをJOINして類似度計算、LyricsをOUTER JOINして歌詞の有無を確認
+            # DuckDB 独自の array_cosine_similarity を使用
+            query = (
+                select(Track, Lyrics.content)
+                .join(TrackEmbedding, Track.id == TrackEmbedding.track_id)
+                .outerjoin(Lyrics, Track.id == Lyrics.track_id)
+                .where(Track.id != track_id)
+                .order_by(text(f"array_cosine_similarity(CAST(track_embeddings.embedding_json AS FLOAT[200]), CAST('{vec_str}' AS FLOAT[200])) DESC"))
+                .limit(limit)
+            )
+            
+            results = self.session.exec(query).all()
+            
+            final_tracks = []
+            for track, lyrics_content in results:
+                track_data = track.model_dump()
+                # 歌詞が存在し、かつ空文字でない場合に has_lyrics を True に設定
+                track_data["has_lyrics"] = bool(lyrics_content and lyrics_content.strip())
+                final_tracks.append(track_data)
+            
+            return final_tracks
         except Exception as e:
             print(f"Vector search error: {e}")
             raise e
@@ -121,11 +139,8 @@ class TrackRepository:
         if min_year is not None: query = query.where(Track.year >= min_year)
         if max_year is not None: query = query.where(Track.year <= max_year)
 
-        # 5. 歌詞ステータスフィルタ (確実なサブクエリ方式)
-        # JOINの結果に依存せず、IN/NOT IN句で物理的にIDを絞り込みます
+        # 5. 歌詞ステータスフィルタ
         if lyrics_status != "all":
-            # 有効な歌詞（NULLでなく、トリム後も空でない）を持つIDを取得するサブクエリ
-            # DuckDBのNOT INの挙動(NULL対策)のため、必ず track_id IS NOT NULL を含める
             valid_lyrics_ids = select(Lyrics.track_id).where(
                 and_(
                     Lyrics.track_id != None,
@@ -139,7 +154,7 @@ class TrackRepository:
             elif lyrics_status == "unset":
                 query = query.where(Track.id.not_in(valid_lyrics_ids))
         
-        # 歌詞テキスト検索用の結合 (必要に応じて追加)
+        # 歌詞テキスト検索用の結合
         if lyrics:
             if not already_joined_lyrics:
                 query = query.outerjoin(Lyrics, Track.id == Lyrics.track_id)
@@ -209,9 +224,12 @@ class TrackRepository:
         limit: int = 100, 
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """楽曲検索を実行し、歌詞情報を注入した結果を返す"""
+        """
+        楽曲検索を実行し、歌詞情報を注入した結果を返却。
+        Library画面だけでなく、各検索コンポーネントで一貫した情報を表示させます。
+        """
         
-        # 表示用の歌詞カラム取得のために常に outerjoin する
+        # 歌詞カラム取得のために outerjoin する
         query = select(Track, Lyrics.content).outerjoin(Lyrics, Track.id == Lyrics.track_id)
         
         query = self._apply_search_conditions(

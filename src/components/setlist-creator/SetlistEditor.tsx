@@ -7,13 +7,16 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { TrackRow } from "./TrackRow";
+import { WordplayBridge } from "./WordplayBridge";
 import { useDroppable } from "@dnd-kit/core";
+import { Fragment } from "react/jsx-runtime";
 
 export interface SetlistEditorProps {
   tracks: Track[];
   onRemoveTrack: (index: number) => void;
   onTrackSelect: (track: Track) => void;
   selectedTrackId: number | null;
+  onDeleteWordplay?: (setlistTrackId: number) => void;
 }
 
 export function SetlistEditor({
@@ -21,6 +24,7 @@ export function SetlistEditor({
   onRemoveTrack,
   onTrackSelect,
   selectedTrackId,
+  onDeleteWordplay,
 }: SetlistEditorProps) {
   const { setNodeRef } = useDroppable({ id: "setlist-editor-droppable" });
   const totalDuration = tracks.reduce(
@@ -51,19 +55,34 @@ export function SetlistEditor({
             </div>
           ) : (
             <SortableContext
-              items={tracks.map((t: Track) => `setlist-${t.id}`)}
+              items={tracks.map((t: any) => `setlist-${t.id}`)}
               strategy={verticalListSortingStrategy}
             >
-              {tracks.map((track: Track, index: number) => (
-                <TrackRow
-                  key={`setlist-${track.id}`}
-                  id={`setlist-${track.id}`}
-                  track={track}
-                  type="SETLIST_ITEM"
-                  isSelected={selectedTrackId === track.id}
-                  onSelect={() => onTrackSelect(track)}
-                  onRemove={() => onRemoveTrack(index)}
-                />
+              {tracks.map((track: any, index: number) => (
+                <Fragment key={`group-${track.id}`}>
+                  {/* ワードプレイ・ブリッジの表示判定 */}
+                  {track.wordplay_json && index > 0 && (
+                    <WordplayBridge
+                      data={track.wordplay_json}
+                      fromTrackPath={tracks[index - 1]?.filepath}
+                      toTrackPath={track.filepath}
+                      onDelete={
+                        onDeleteWordplay && track.setlist_track_id
+                          ? () => onDeleteWordplay(track.setlist_track_id)
+                          : undefined
+                      }
+                    />
+                  )}
+
+                  <TrackRow
+                    id={`setlist-${track.id}`}
+                    track={track}
+                    type="SETLIST_ITEM"
+                    isSelected={selectedTrackId === track.id}
+                    onSelect={() => onTrackSelect(track)}
+                    onRemove={() => onRemoveTrack(index)}
+                  />
+                </Fragment>
               ))}
             </SortableContext>
           )}
