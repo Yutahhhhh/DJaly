@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional, Dict, Any
 from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackEmbedding
+from domain.models.lyrics import Lyrics
 import numpy as np
 import json
 
@@ -19,7 +20,6 @@ class RecommendationRepository:
 
     def get_candidate_vectors(self, mode: str = "genre") -> np.ndarray:
         query = select(TrackEmbedding.embedding_json).join(Track)
-        
         if mode == "subgenre":
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
         else:
@@ -32,7 +32,6 @@ class RecommendationRepository:
 
     def get_candidates_with_ids(self, mode: str = "genre") -> Tuple[List[int], np.ndarray]:
         query = select(Track.id, TrackEmbedding.embedding_json).join(TrackEmbedding)
-        
         if mode == "subgenre":
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
         else:
@@ -91,24 +90,22 @@ class RecommendationRepository:
         exclude_ids: List[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        指定されたVibe(特徴量)とジャンルに基づき、DuckDBから候補プールのトラックを取得する。
+        指定されたVibeとジャンルに基づき、歌詞情報とリリース年を含めて候補を取得
         """
-        
-        # 1. Base Query Construction
-        # Vector検索のためにTrackEmbeddingをJOIN
         query_str = """
             SELECT 
-                t.id, t.title, t.artist, t.bpm, t.key, t.genre,
-                t.duration, t.album, t.filepath,
-                t.energy, t.danceability, t.brightness, t.loudness,
-                te.embedding_json
+                t.id, t.title, t.artist, t.bpm, t.key, t.genre, t.subgenre,
+                t.duration, t.album, t.filepath, t.year,
+                t.energy, t.danceability, t.brightness, t.loudness, t.contrast, t.noisiness,
+                te.embedding_json,
+                (l.content IS NOT NULL AND length(trim(l.content)) > 0) as db_has_lyrics
             FROM tracks t
             LEFT JOIN track_embeddings te ON t.id = te.track_id
+            LEFT JOIN lyrics l ON t.id = l.track_id
             WHERE 1=1
         """
         params = {}
         
-        # 2. Filtering Logic
         if exclude_ids:
             query_str += " AND t.id NOT IN :exclude_ids"
             params["exclude_ids"] = tuple(exclude_ids)
@@ -117,30 +114,21 @@ class RecommendationRepository:
             query_str += " AND (t.genre IN :genres OR t.subgenre IN :genres)"
             params["genres"] = tuple(genres)
             
-        # BPM Filter
         if "bpm" in vibe_params and vibe_params["bpm"] > 0:
             target_bpm = vibe_params["bpm"]
             query_str += " AND (t.bpm BETWEEN :min_bpm AND :max_bpm OR t.bpm = 0 OR t.bpm IS NULL)"
             params["min_bpm"] = target_bpm * 0.6
             params["max_bpm"] = target_bpm * 1.4
 
-        # 3. Scoring Logic in SQL
         order_clauses = []
-        
         if "energy" in vibe_params:
             query_str += " AND t.energy BETWEEN :min_energy AND :max_energy"
-            params["min_energy"] = max(0, vibe_params["energy"] - 0.3)
-            params["max_energy"] = min(1, vibe_params["energy"] + 0.3)
+            params["min_energy"] = max(0.0, vibe_params["energy"] - 0.4)
+            params["max_energy"] = min(1.0, vibe_params["energy"] + 0.4)
             order_clauses.append(f"ABS(t.energy - {vibe_params['energy']})")
-
+            
         if "danceability" in vibe_params:
             order_clauses.append(f"ABS(t.danceability - {vibe_params['danceability']})")
-
-        if "brightness" in vibe_params:
-            order_clauses.append(f"ABS(t.brightness - {vibe_params['brightness']})")
-
-        if "noisiness" in vibe_params:
-            order_clauses.append(f"ABS(t.noisiness - {vibe_params['noisiness']})")
 
         if order_clauses:
             query_str += " ORDER BY (" + " + ".join(order_clauses) + ") ASC"
@@ -153,20 +141,23 @@ class RecommendationRepository:
         
         candidates = []
         for row in results:
-            vec = None
-            if row.embedding_json:
-                try:
-                    vec = np.array(json.loads(row.embedding_json))
-                except: pass
+            vec = self._parse_embedding(row.embedding_json)
+            has_ly = bool(row.db_has_lyrics)
+            
+            track_obj = Track(
+                id=row.id, title=row.title, artist=row.artist, bpm=row.bpm, key=row.key, 
+                genre=row.genre, subgenre=row.subgenre or "", duration=row.duration, 
+                album=row.album or "", filepath=row.filepath, year=row.year,
+                energy=row.energy, danceability=row.danceability, brightness=row.brightness, 
+                loudness=row.loudness, contrast=row.contrast, noisiness=row.noisiness,
+                has_lyrics=has_ly # オブジェクトに直接セット
+            )
             
             candidates.append({
                 "id": row.id,
-                "track": Track(
-                    id=row.id, title=row.title, artist=row.artist, bpm=row.bpm, key=row.key, genre=row.genre,
-                    duration=row.duration, album=row.album, filepath=row.filepath,
-                    energy=row.energy, danceability=row.danceability, brightness=row.brightness, loudness=row.loudness,
-                ),
-                "vector": vec
+                "track": track_obj,
+                "vector": vec,
+                "has_lyrics": has_ly # 辞書側にもセット（サービス層での利用を確実に）
             })
             
         return candidates

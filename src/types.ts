@@ -10,13 +10,12 @@ export interface Track {
   subgenre?: string;
   year?: number;
   duration: number;
-  // New Analysis Features
-  energy: number; // 0.0 - 1.0
-  danceability: number; // 0.0 - 1.0
-  brightness: number; // 0.0 - 1.0
-  contrast: number; // 0.0 - 1.0
-  noisiness: number; // 0.0 - 1.0
-  loudness: number; // dB (negative)
+  energy: number;
+  danceability: number;
+  brightness: number;
+  contrast: number;
+  noisiness: number;
+  loudness: number;
   is_genre_verified?: boolean;
   has_lyrics?: boolean;
 }

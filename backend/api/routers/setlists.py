@@ -45,11 +45,11 @@ def get_setlist_tracks(setlist_id: int, session: Session = Depends(get_session))
 @router.post("/api/setlists/{setlist_id}/tracks")
 def update_setlist_tracks(
     setlist_id: int, 
-    track_ids: List[int] = Body(...), 
+    track_data: List[Any] = Body(...),
     session: Session = Depends(get_session)
 ):
     service = SetlistAppService(session)
-    success = service.update_setlist_tracks(setlist_id, track_ids)
+    success = service.update_setlist_tracks(setlist_id, track_data)
     if not success:
         raise HTTPException(status_code=404, detail="Setlist not found")
     return {"status": "success"}

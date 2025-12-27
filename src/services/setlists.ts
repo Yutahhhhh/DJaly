@@ -15,6 +15,12 @@ export interface SetlistTrack extends Track {
   wordplay_json?: string;
 }
 
+// 保存用の型定義
+export interface SetlistTrackUpdateItem {
+  id: number;
+  wordplay_json?: string | null;
+}
+
 export const setlistsService = {
   getAll: async () => {
     return apiClient.get<Setlist[]>("/setlists");
@@ -31,11 +37,26 @@ export const setlistsService = {
   getTracks: async (id: number) => {
     return apiClient.get<SetlistTrack[]>(`/setlists/${id}/tracks`);
   },
-  updateTracks: async (id: number, trackIds: number[]) => {
-    return apiClient.post(`/setlists/${id}/tracks`, trackIds);
+  // trackData を IDとWordplayのオブジェクト配列を受け取れるように変更
+  updateTracks: async (
+    id: number,
+    trackData: (number | SetlistTrackUpdateItem)[]
+  ) => {
+    return apiClient.post(`/setlists/${id}/tracks`, trackData);
   },
   updateWordplay: async (setlistTrackId: number, wordplayData: any) => {
-    return apiClient.patch(`/setlist-tracks/${setlistTrackId}/wordplay`, { wordplay_json: JSON.stringify(wordplayData) });
+    return apiClient.patch(`/setlist-tracks/${setlistTrackId}/wordplay`, {
+      wordplay_json:
+        typeof wordplayData === "string"
+          ? wordplayData
+          : JSON.stringify(wordplayData),
+    });
+  },
+
+  deleteWordplay: async (setlistTrackId: number) => {
+    return apiClient.patch(`/setlist-tracks/${setlistTrackId}/wordplay`, {
+      wordplay_json: null,
+    });
   },
 
   getExportUrl: (id: number) => {

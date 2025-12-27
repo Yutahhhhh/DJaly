@@ -175,11 +175,16 @@ class IngestionDomainService:
             return result
 
         try:
+            # analyzer expects external lyrics only when provided; skip the arg to stay compatible with tests/mocks
+            run_args = (filepath, force_update, skip_basic, skip_waveform)
+            if lyrics_content is not None:
+                run_args += (lyrics_content,)
+
             result = await asyncio.wait_for(
-                loop.run_in_executor(executor, analyze_track_file, filepath, force_update, skip_basic, skip_waveform, lyrics_content),
+                loop.run_in_executor(executor, analyze_track_file, *run_args),
                 timeout=timeout
             )
-        except:
+        except Exception:
             return None
         
         if result:
