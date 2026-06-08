@@ -28,7 +28,11 @@ def test_filesystem_resolve_path(tmp_path):
     assert filesystem.resolve_path("/non/existent") is None
 
 def test_llm_generate_text_providers(session, mocker):
-    from utils.llm import generate_text, PROVIDER_OPENAI, PROVIDER_ANTHROPIC, PROVIDER_GOOGLE
+    from utils.llm import (
+        generate_text,
+        PROVIDER_CODEX,
+        PROVIDER_OPENAI,
+    )
     
     # Mock settings
     mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_OPENAI, "model", "key", "host"))
@@ -36,10 +40,16 @@ def test_llm_generate_text_providers(session, mocker):
     
     res = generate_text(session, "hello")
     assert res == "AI Result"
+
+    mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_CODEX, "codex-model", "", "host"))
+    mock_codex = mocker.patch("utils.llm._call_codex_cli", return_value="Codex Result")
+    res = generate_text(session, "hello")
+    assert res == "Codex Result"
+    mock_codex.assert_called_once()
     
     # Test error cases
     mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_OPENAI, "model", "", "host"))
-    assert "Error: API Key" in generate_text(session, "hello")
+    assert "CONFIG_ERROR: API Key" in generate_text(session, "hello")
 
 def test_metadata_smart_fallback(tmp_path, mocker):
     path = str(tmp_path / "song.mp3")

@@ -1,5 +1,5 @@
 from sqlmodel import Session
-from models import Track
+from models import Setting, Track
 
 def test_health_check(client):
     """APIが生存しているか確認"""
@@ -55,6 +55,31 @@ def test_dashboard_stats_with_data(client, session: Session):
     genres = {g["name"]: g["count"] for g in data["genre_distribution"]}
     assert genres["Techno"] == 1
 
+def test_dashboard_llm_configured_requires_api_key_for_cloud_provider(client, session: Session):
+    session.add(Setting(key="llm_provider", value="openai"))
+    session.add(Setting(key="llm_model", value="gpt-5.4-mini"))
+    session.commit()
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    assert response.json()["config"]["llm_configured"] is False
+
+    session.add(Setting(key="openai_api_key", value="sk-test"))
+    session.commit()
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    assert response.json()["config"]["llm_configured"] is True
+
+def test_dashboard_llm_configured_allows_codex_without_api_key(client, session: Session):
+    session.add(Setting(key="llm_provider", value="codex"))
+    session.add(Setting(key="llm_model", value="gpt-5.5"))
+    session.commit()
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    assert response.json()["config"]["llm_configured"] is True
+
 def test_save_file(client, tmp_path):
     file_path = tmp_path / "saved.txt"
     response = client.post("/api/system/save-file", json={
@@ -77,4 +102,3 @@ def test_reveal_file(client, mocker, tmp_path):
     assert response.json()["status"] == "success"
     
     mock_run.assert_called_once()
-

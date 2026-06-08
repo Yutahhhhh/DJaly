@@ -80,7 +80,7 @@ fi
 cd ..
 
 echo "🏗️  Building Tauri App (Release)..."
-pnpm tauri build
+pnpm exec tauri build
 
 echo "🚀 Launching App..."
 APP_PATH="src-tauri/target/release/bundle/macos/Djaly.app"

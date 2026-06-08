@@ -5,7 +5,7 @@ import duckdb
 from typing import Dict, Any, List
 from pydantic import BaseModel
 from infra.database.connection import get_session, get_setting_value
-from utils.llm import check_llm_status
+from utils.llm import PROVIDER_CODEX, PROVIDER_OLLAMA, check_llm_status, get_llm_config
 from models import Track, Setlist, Lyrics
 
 import subprocess
@@ -118,12 +118,14 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
 
     # 6. System Config Check
     root_path = get_setting_value(session, "root_path", "")
-    llm_model = get_setting_value(session, "llm_model", "llama3.2")
+    llm_provider, llm_model, llm_api_key, _ = get_llm_config(session)
     
     # LLM Status check (lightweight)
     # 実際のリクエストはタイムアウトする可能性があるので、ここでは設定値の有無のみ確認し、
     # 接続テストはフロントエンドで非同期に行うか、Health Check APIを利用する。
-    llm_configured = bool(llm_model)
+    llm_configured = bool(llm_model) and (
+        llm_provider in [PROVIDER_OLLAMA, PROVIDER_CODEX] or bool(llm_api_key)
+    )
 
     return {
         "total_tracks": total_tracks,

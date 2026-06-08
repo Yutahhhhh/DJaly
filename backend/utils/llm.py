@@ -2,6 +2,9 @@ import json
 import urllib.request
 import urllib.error
 import os
+import shutil
+import subprocess
+import tempfile
 from typing import Optional, Dict, Any, Tuple
 from sqlmodel import Session
 from config import settings
@@ -13,9 +16,16 @@ logger = get_logger(__name__)
 
 # プロバイダー定義
 PROVIDER_OPENAI = "openai"
+PROVIDER_CODEX = "codex"
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_GOOGLE = "google"
 PROVIDER_OLLAMA = "ollama"
+
+LLM_ERROR_PREFIXES = ("API_ERROR:", "CONNECTION_ERROR:", "BLOCKED:", "CONFIG_ERROR:")
+CODEX_DEFAULT_TIMEOUT_SECONDS = 180
+
+def is_llm_error(text: str) -> bool:
+    return text.startswith(LLM_ERROR_PREFIXES)
 
 def get_llm_config(session: Session) -> Tuple[str, str, str, str]:
     """
@@ -28,9 +38,11 @@ def get_llm_config(session: Session) -> Tuple[str, str, str, str]:
     # Default model fallback based on provider
     if not model_name:
         if provider == PROVIDER_OPENAI:
-            model_name = "gpt-3.5-turbo"
+            model_name = "gpt-5.4-mini"
+        elif provider == PROVIDER_CODEX:
+            model_name = "gpt-5.5"
         elif provider == PROVIDER_ANTHROPIC:
-            model_name = "claude-3-haiku-20240307"
+            model_name = "claude-sonnet-4-20250514"
         elif provider == PROVIDER_GOOGLE:
             model_name = "gemini-1.5-flash"
         else:
@@ -116,6 +128,84 @@ def _call_ollama(host: str, model: str, prompt: str) -> str:
         logger.error(f"Ollama Error ({host}): {e}")
         return f"Error calling Ollama: {str(e)}"
 
+def _resolve_codex_command(configured_path: str = "") -> Optional[str]:
+    candidates = [
+        configured_path,
+        shutil.which("codex"),
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+        if candidate and os.path.basename(candidate) == "codex":
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+    return None
+
+def _call_codex_cli(model: str, prompt: str, cli_path: str = "", timeout_seconds: int = CODEX_DEFAULT_TIMEOUT_SECONDS) -> str:
+    codex_command = _resolve_codex_command(cli_path)
+    if not codex_command:
+        return "CONFIG_ERROR: Codex CLI was not found. Set codex_cli_path or install the codex command."
+
+    task_prompt = f"""
+You are being used as a text-only LLM backend for Djaly.
+Do not inspect files, run shell commands, edit files, or explain your process.
+Answer only the user's requested content.
+
+{prompt}
+""".strip()
+
+    try:
+        with tempfile.NamedTemporaryFile("w+", encoding="utf-8", delete=True) as output_file:
+            cmd = [
+                codex_command,
+                "exec",
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--skip-git-repo-check",
+                "--color",
+                "never",
+                "-m",
+                model,
+                "-o",
+                output_file.name,
+                "-",
+            ]
+            completed = subprocess.run(
+                cmd,
+                input=task_prompt,
+                text=True,
+                capture_output=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            output_file.seek(0)
+            final_message = output_file.read().strip()
+    except subprocess.TimeoutExpired:
+        logger.error(f"Codex CLI timed out after {timeout_seconds} seconds")
+        return f"CONNECTION_ERROR: Codex CLI timed out after {timeout_seconds} seconds"
+    except Exception as e:
+        logger.error(f"Codex CLI Error: {e}")
+        return f"CONNECTION_ERROR: Codex CLI failed: {str(e)}"
+
+    stdout = completed.stdout.strip()
+    stderr = completed.stderr.strip()
+
+    if completed.returncode != 0:
+        logger.error(f"Codex CLI failed with status {completed.returncode}: {stderr}")
+        detail = stderr or stdout or "unknown error"
+        return f"CONNECTION_ERROR: Codex CLI failed with status {completed.returncode}: {detail}"
+
+    if not final_message:
+        logger.warning(f"Codex CLI returned empty stdout. stderr: {stderr}")
+
+    return final_message
+
 def _execute_request(url: str, headers: Dict[str, str], data: Dict[str, Any], parser_func) -> str:
     try:
         req = urllib.request.Request(
@@ -182,14 +272,22 @@ def generate_text(session: Session, prompt: str, model_name: Optional[str] = Non
     
     logger.info(f"Generating text with {provider} ({target_model})")
 
-    if provider != PROVIDER_OLLAMA and not api_key:
-        err_msg = f"Error: API Key for {provider} is not set."
+    if provider not in [PROVIDER_OLLAMA, PROVIDER_CODEX] and not api_key:
+        err_msg = f"CONFIG_ERROR: API Key for {provider} is not set."
         logger.error(err_msg)
         return err_msg
 
     result = ""
     if provider == PROVIDER_OPENAI:
         result = _call_openai(api_key, target_model, prompt)
+    elif provider == PROVIDER_CODEX:
+        cli_path = get_setting_value(session, "codex_cli_path", "")
+        timeout_value = get_setting_value(session, "codex_timeout_seconds", str(CODEX_DEFAULT_TIMEOUT_SECONDS))
+        try:
+            timeout_seconds = int(timeout_value)
+        except ValueError:
+            timeout_seconds = CODEX_DEFAULT_TIMEOUT_SECONDS
+        result = _call_codex_cli(target_model, prompt, cli_path=cli_path, timeout_seconds=timeout_seconds)
     elif provider == PROVIDER_ANTHROPIC:
         result = _call_anthropic(api_key, target_model, prompt)
     elif provider == PROVIDER_GOOGLE:
@@ -231,6 +329,12 @@ def check_llm_status(session: Session) -> str:
             return status_msg
         except Exception as e:
             return f"Ollama Connection Failed: {str(e)}"
+    elif provider == PROVIDER_CODEX:
+        cli_path = get_setting_value(session, "codex_cli_path", "")
+        codex_command = _resolve_codex_command(cli_path)
+        if not codex_command:
+            return "Codex CLI Missing"
+        return f"Codex CLI Configured (Model: {model_name}, Command: {codex_command})"
     else:
         if not api_key:
             return f"{provider.capitalize()} API Key Missing"

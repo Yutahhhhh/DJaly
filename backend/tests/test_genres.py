@@ -78,6 +78,51 @@ def test_llm_analyze(client: TestClient, session: Session, mocker):
     assert t1.genre == "Techno"
     assert t1.subgenre == "Minimal Techno"
 
+def test_batch_llm_analyze_rejects_unparseable_response(client: TestClient, session: Session, mocker):
+    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
+    mock_gen.return_value = "not a parseable response"
+
+    t1 = Track(filepath="/bad-batch.mp3", title="Bad Batch", artist="A", album="B", genre="Unknown", bpm=120, duration=100)
+    session.add(t1)
+    session.commit()
+
+    response = client.post("/api/genres/batch-llm-analyze", json={"track_ids": [t1.id]})
+    assert response.status_code == 500
+
+    session.refresh(t1)
+    assert t1.is_genre_verified is False
+
+def test_batch_llm_analyze_normalizes_labels_without_forcing_track_specific_genres(client: TestClient, session: Session, mocker):
+    t1 = Track(filepath="/calm-down.mp3", title="Calm Down", artist="Rema, Selena Gomez", album="B", genre="Unknown", bpm=107, duration=100)
+    t2 = Track(filepath="/water.mp3", title="Water", artist="Tyla", album="B", genre="Unknown", bpm=117, duration=100)
+    t3 = Track(filepath="/yeah.mp3", title="Yeah!", artist="Usher feat. Lil Jon, Ludacris", album="B", genre="Unknown", bpm=105, duration=100)
+    session.add(t1)
+    session.add(t2)
+    session.add(t3)
+    session.commit()
+
+    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
+    mock_gen.return_value = "\n".join([
+        f"{t1.id}|afrobeat|afro pop",
+        f"{t2.id}|amapiano|popiano",
+        f"{t3.id}|rnb|crunk b",
+    ])
+
+    response = client.post("/api/genres/batch-llm-analyze", json={"track_ids": [t1.id, t2.id, t3.id], "mode": "both"})
+    assert response.status_code == 200
+
+    session.refresh(t1)
+    session.refresh(t2)
+    session.refresh(t3)
+    assert (t1.genre, t1.subgenre) == ("Afrobeats", "Afropop")
+    assert (t2.genre, t2.subgenre) == ("Amapiano", "Popiano")
+    assert (t3.genre, t3.subgenre) == ("R&B", "Crunk&B")
+    assert t1.is_genre_verified is True
+
+    prompt = mock_gen.call_args.args[1]
+    assert "Do not restrict yourself to any fixed genre list" in prompt
+    assert "Main genre examples" not in prompt
+
 def test_batch_update_genres(client: TestClient, session: Session):
     # GenreBatchUpdateRequest: parent_track_idのジャンルをtarget_track_idsに適用する
     t1 = Track(filepath="/b1.mp3", title="Source", artist="A", album="B", genre="New Genre", subgenre="New Sub", bpm=120, duration=100)
@@ -177,4 +222,3 @@ def test_get_all_subgenres(client: TestClient, session: Session):
     assert "Deep House" in subgenres
     assert len(subgenres) == 2
     assert "" not in subgenres
-

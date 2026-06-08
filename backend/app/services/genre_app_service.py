@@ -16,12 +16,50 @@ from api.schemas.genres import (
     GenreUpdateResult,
     AnalysisMode
 )
-from utils.llm import generate_text
+from utils.llm import generate_text, is_llm_error
 from utils.metadata import update_file_genre, update_file_tags_extended
 from utils.logger import get_logger
 from domain.constants import GENRE_ABBREVIATIONS, GENRE_SEPARATORS_REGEX
 
 logger = get_logger(__name__)
+
+DJ_GENRE_GUIDE = """
+DJ library taxonomy:
+- Use the best-known public/catalog genre for the exact track when the title and artist are recognizable.
+- Use one concise main genre and one concise subgenre when available.
+- Do not choose a vague umbrella label when a more recognized specific genre is clearly known.
+- Do not restrict yourself to any fixed genre list.
+""".strip()
+
+GENRE_ALIASES = {
+    "hip hop": "Hip-Hop",
+    "hip-hop": "Hip-Hop",
+    "rap": "Hip-Hop",
+    "rnb": "R&B",
+    "r&b": "R&B",
+    "r and b": "R&B",
+    "afrobeat": "Afrobeats",
+    "afrobeats": "Afrobeats",
+    "afro beats": "Afrobeats",
+    "amapiano": "Amapiano",
+    "reggae": "Reggae",
+    "dancehall": "Dancehall",
+    "reggaeton": "Reggaeton",
+    "latin": "Latin",
+    "latin pop": "Latin",
+    "pop": "Pop",
+}
+
+SUBGENRE_ALIASES = {
+    "contemporary r&b": "Contemporary R&B",
+    "contemporary rnb": "Contemporary R&B",
+    "crunk&b": "Crunk&B",
+    "crunk b": "Crunk&B",
+    "trap soul": "Trap Soul",
+    "afro pop": "Afropop",
+    "afropop": "Afropop",
+    "popiano": "Popiano",
+}
 
 class GenreAppService:
     def __init__(self, session: Session):
@@ -51,10 +89,12 @@ class GenreAppService:
         bpm_str = f"{int(track.bpm)}" if track.bpm and track.bpm > 0 else "Unknown"
         
         prompt = f"""
-        Analyze metadata to determine music genre.
+        Analyze metadata to determine music genre for a DJ music library.
         Track: {track.title} / {track.artist} (BPM: {bpm_str})
         
         Mode: {mode.value.upper()}
+
+        {DJ_GENRE_GUIDE}
         """
 
         if mode == AnalysisMode.GENRE:
@@ -81,7 +121,7 @@ class GenreAppService:
         
         raw_response = generate_text(self.session, prompt)
         
-        if raw_response.startswith("API_ERROR:") or raw_response.startswith("CONNECTION_ERROR:") or raw_response.startswith("BLOCKED:"):
+        if is_llm_error(raw_response):
             logger.error(f"Single Analysis Failed: {raw_response}")
             raise RuntimeError(raw_response)
 
@@ -97,6 +137,7 @@ class GenreAppService:
             if "genre" not in data: data["genre"] = track.genre or "Unknown"
             if "subgenre" not in data: data["subgenre"] = track.subgenre or ""
             
+            data = self._normalize_analysis_data(track, data, mode)
             response = GenreAnalysisResponse(**data)
             
             current_genre = track.genre or "Unknown"
@@ -138,9 +179,11 @@ class GenreAppService:
         input_text = "\n".join(track_lines)
 
         prompt = f"""
-        Analyze tracks to determine {mode.value}.
+        Analyze tracks to determine {mode.value} for a DJ music library.
         Input: ID|Title|Artist|BPM
         {input_text}
+
+        {DJ_GENRE_GUIDE}
 
         Output Format:
         """
@@ -156,7 +199,7 @@ class GenreAppService:
         
         Rules:
         - One line per track.
-        - Standard genres only.
+        - Standard DJ library genres only.
         - Output only ONE single genre/subgenre per column. Do NOT use slashes (/) or commas (,).
         - If multiple genres apply, choose the most dominant one.
         - No markdown/header.
@@ -164,9 +207,12 @@ class GenreAppService:
 
         raw_response = generate_text(self.session, prompt)
         
-        if raw_response.startswith("API_ERROR:") or raw_response.startswith("CONNECTION_ERROR:") or raw_response.startswith("BLOCKED:"):
+        if is_llm_error(raw_response):
             logger.error(f"Batch Analysis Failed: {raw_response}")
             raise RuntimeError(raw_response)
+        if not raw_response.strip():
+            logger.error("Batch Analysis Failed: empty response from LLM")
+            raise RuntimeError("LLM returned empty response")
 
         new_genres_map = {}
         lines = raw_response.strip().split('\n')
@@ -190,6 +236,10 @@ class GenreAppService:
                     new_genres_map[track_id] = {"genre": parts[1].strip(), "subgenre": parts[2].strip()}
             except Exception as e:
                 continue
+
+        if not new_genres_map:
+            logger.error(f"Batch Analysis Failed: no parseable rows. Raw: {raw_response}")
+            raise RuntimeError("Failed to parse LLM response: no parseable rows")
         
         updated_results = []
         
@@ -200,6 +250,7 @@ class GenreAppService:
             
             old_genre = track.genre or "Unknown"
             has_changes = False
+            updates = self._normalize_analysis_data(track, updates, mode)
             
             if "genre" in updates:
                 new_g = re.sub(r'^[\"\']|[\"\']$', '', updates["genre"])
@@ -246,6 +297,44 @@ class GenreAppService:
             text = text[start:end+1]
             
         return text.strip()
+
+    def _normalize_analysis_data(self, track: Track, data: Dict[str, Any], mode: AnalysisMode) -> Dict[str, Any]:
+        normalized = dict(data)
+
+        if "genre" in normalized:
+            normalized["genre"] = self._normalize_genre_label(str(normalized["genre"]))
+        if "subgenre" in normalized:
+            normalized["subgenre"] = self._normalize_subgenre_label(str(normalized["subgenre"]))
+
+        if mode in [AnalysisMode.GENRE, AnalysisMode.BOTH]:
+            normalized["genre"] = normalized.get("genre", track.genre or "Unknown")
+        if mode in [AnalysisMode.SUBGENRE, AnalysisMode.BOTH]:
+            normalized["subgenre"] = normalized.get("subgenre", track.subgenre or "")
+
+        normalized.setdefault("reason", "Classified from title, artist, BPM, and DJ taxonomy.")
+        normalized.setdefault("confidence", "Medium")
+        return normalized
+
+    def _normalize_genre_label(self, value: str) -> str:
+        label = self._sanitize_label(value)
+        if not label:
+            return "Unknown"
+        return GENRE_ALIASES.get(label.lower(), label)
+
+    def _normalize_subgenre_label(self, value: str) -> str:
+        label = self._sanitize_label(value)
+        if not label:
+            return ""
+        return SUBGENRE_ALIASES.get(label.lower(), label)
+
+    def _sanitize_label(self, value: str) -> str:
+        label = re.sub(r'^[\"\']|[\"\']$', '', value or "").strip()
+        label = re.sub(r'\s+', ' ', label)
+        if "/" in label:
+            label = label.split("/")[0].strip()
+        if "," in label:
+            label = label.split(",")[0].strip()
+        return label
 
     def batch_update_genres(self, request: GenreBatchUpdateRequest) -> Dict[str, Any]:
         parent_track = self.track_repository.get_by_id(request.parent_track_id)

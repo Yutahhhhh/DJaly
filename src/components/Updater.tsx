@@ -44,6 +44,12 @@ export function Updater() {
           }
         }
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('missing field `signature`')) {
+          console.info('Skipping update check because the release metadata is missing a signature.');
+          return;
+        }
+
         console.error('Failed to check for updates', error);
       }
     };

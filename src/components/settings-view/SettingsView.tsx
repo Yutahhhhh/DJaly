@@ -38,6 +38,93 @@ import { PresetImportDialog } from "./PresetImportDialog";
 import { useTheme } from "@/components/theme-provider";
 import { downloadFile } from "@/lib/download";
 
+const MODEL_PRESETS: Record<
+  string,
+  { value: string; label: string; note: string }[]
+> = {
+  ollama: [
+    {
+      value: "llama3.2",
+      label: "llama3.2 - Local default",
+      note: "ローカルで完結させたい場合の標準候補です。",
+    },
+    {
+      value: "qwen2.5:7b",
+      label: "qwen2.5:7b - Structured output",
+      note: "インストール済みなら、短いJSON出力系のタスクで安定しやすい候補です。",
+    },
+  ],
+  openai: [
+    {
+      value: "gpt-5.4-mini",
+      label: "gpt-5.4-mini - Recommended for Djaly",
+      note: "ジャンル分析、歌詞キーワード抽出、vibeのJSON化に対して品質と速度のバランスが良い候補です。",
+    },
+    {
+      value: "gpt-5.5",
+      label: "gpt-5.5 - Highest quality",
+      note: "速度やコストより精度を優先したい場合の高品質候補です。",
+    },
+    {
+      value: "gpt-5.4-nano",
+      label: "gpt-5.4-nano - Low cost",
+      note: "大量のシンプルな分類を低コストで回したい場合に向いています。",
+    },
+  ],
+  codex: [
+    {
+      value: "gpt-5.5",
+      label: "gpt-5.5 - Codex CLI 推奨",
+      note: "ローカルのCodex CLIにログイン済みのChatGPTサブスク認証を使います。APIキーは不要です。",
+    },
+    {
+      value: "gpt-5.4-mini",
+      label: "gpt-5.4-mini - 軽量",
+      note: "Codex CLI経由で、速度を優先したい場合の候補です。",
+    },
+    {
+      value: "codex-mini-latest",
+      label: "codex-mini-latest - 実験用",
+      note: "Codex CLI向けの実験候補です。利用できない場合は別モデルを選んでください。",
+    },
+  ],
+  anthropic: [
+    {
+      value: "claude-sonnet-4-20250514",
+      label: "claude-sonnet-4 - Recommended Claude",
+      note: "微妙なジャンル/サブジャンル判断と、きれいな構造化レスポンスに向いたClaude候補です。",
+    },
+    {
+      value: "claude-3-5-haiku-20241022",
+      label: "claude-3.5-haiku - Fast/low cost",
+      note: "シンプルな一括分類を速く低コストで回したい場合に向いています。",
+    },
+    {
+      value: "claude-opus-4-20250514",
+      label: "claude-opus-4 - Highest quality",
+      note: "難しいメタデータ判断で、コストより品質を優先したい場合の候補です。",
+    },
+  ],
+  google: [
+    {
+      value: "gemini-1.5-flash",
+      label: "gemini-1.5-flash - Fast default",
+      note: "素早い分類や抽出に使いやすい標準候補です。",
+    },
+    {
+      value: "gemini-flash-latest",
+      label: "gemini-flash-latest - Latest Flash alias",
+      note: "Googleの高速モデルの最新エイリアスを使いたい場合の候補です。",
+    },
+  ],
+};
+
+const PROVIDER_KEY_LABELS: Record<string, string> = {
+  openai: "OpenAI API Key",
+  anthropic: "Anthropic API Key",
+  google: "Google API Key",
+};
+
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<{ [key: string]: string }>({});
@@ -214,8 +301,9 @@ export function SettingsView() {
   const getDefaultModel = (provider: string) => {
     switch (provider) {
       case "ollama": return "llama3.2";
-      case "openai": return "gpt-4o";
-      case "anthropic": return "claude-3-5-sonnet-latest";
+      case "openai": return "gpt-5.4-mini";
+      case "codex": return "gpt-5.5";
+      case "anthropic": return "claude-sonnet-4-20250514";
       case "google": return "gemini-flash-latest";
       default: return "";
     }
@@ -256,6 +344,16 @@ export function SettingsView() {
   };
 
   const currentProvider = settings["llm_provider"] || "ollama";
+  const currentModelPresets = MODEL_PRESETS[currentProvider] || [];
+  const currentModel = settings["llm_model"] || "";
+  const selectedPreset = currentModelPresets.find(
+    (preset) => preset.value === currentModel
+  );
+  const apiKeySettingKey =
+    `${currentProvider}_api_key`;
+  const requiresApiKey = ["openai", "anthropic", "google"].includes(
+    currentProvider
+  );
 
   const importSections = [
     {
@@ -387,6 +485,9 @@ export function SettingsView() {
                   <SelectContent>
                     <SelectItem value="ollama">Ollama (Local)</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="codex">
+                      Codex CLI (ChatGPT Subscription)
+                    </SelectItem>
                     <SelectItem value="anthropic">
                       Anthropic (Claude)
                     </SelectItem>
@@ -394,6 +495,36 @@ export function SettingsView() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {currentModelPresets.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="model_preset">Recommended Model</Label>
+                  <Select
+                    value={selectedPreset ? selectedPreset.value : "__custom__"}
+                    onValueChange={(value) => {
+                      if (value !== "__custom__") {
+                        handleModelNameChange(value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="bg-background">
+                      <SelectValue placeholder="Select recommended model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentModelPresets.map((preset) => (
+                        <SelectItem key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__custom__">Custom model</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedPreset?.note ||
+                      "下の入力欄で任意のモデルIDを指定できます。"}
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="llm_model">Model Name</Label>
@@ -405,8 +536,8 @@ export function SettingsView() {
                   className="bg-background"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Specify the model identifier (e.g. gpt-4o, claude-3-sonnet,
-                  llama3).
+                  Djaly mainly uses this for genre/subgenre analysis, lyric
+                  keyword extraction, and vibe-to-JSON parameter generation.
                 </p>
               </div>
 
@@ -430,24 +561,65 @@ export function SettingsView() {
                     <code>Default: http://localhost:11434</code>
                   </div>
                 </div>
-              ) : (
+              ) : currentProvider === "codex" ? (
+                <div className="space-y-3 animate-in fade-in">
+                  <div className="space-y-2">
+                    <Label htmlFor="codex_cli_path">Codex CLI Path</Label>
+                    <Input
+                      id="codex_cli_path"
+                      placeholder="codex または /opt/homebrew/bin/codex"
+                      value={settings["codex_cli_path"] || ""}
+                      onChange={(e) =>
+                        updateLocalSetting("codex_cli_path", e.target.value)
+                      }
+                      className="bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      空欄の場合はPATH、/opt/homebrew/bin/codex、/usr/local/bin/codex の順に探します。
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="codex_timeout_seconds">
+                      Codex Timeout Seconds
+                    </Label>
+                    <Input
+                      id="codex_timeout_seconds"
+                      inputMode="numeric"
+                      placeholder="180"
+                      value={settings["codex_timeout_seconds"] || ""}
+                      onChange={(e) =>
+                        updateLocalSetting(
+                          "codex_timeout_seconds",
+                          e.target.value
+                        )
+                      }
+                      className="bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Codex CLIにログイン済みのChatGPTサブスク認証を使います。APIキーは不要です。
+                    </p>
+                  </div>
+                </div>
+              ) : requiresApiKey ? (
                 <div className="space-y-2 animate-in fade-in">
-                  <Label htmlFor="api_key">API Key ({currentProvider})</Label>
+                  <Label htmlFor="api_key">
+                    {PROVIDER_KEY_LABELS[currentProvider] || "API Key"}
+                  </Label>
                   <Input
                     id="api_key"
                     type="password"
                     placeholder={`sk-...`}
-                    value={settings[`${currentProvider}_api_key`] || ""}
+                    value={settings[apiKeySettingKey] || ""}
                     onChange={(e) =>
                       updateLocalSetting(
-                        `${currentProvider}_api_key`,
+                        apiKeySettingKey,
                         e.target.value
                       )
                     }
                     className="bg-background"
                   />
                 </div>
-              )}
+              ) : null}
 
               <Button onClick={saveAllSettings} className="w-full mt-2">
                 <Check className="mr-2 h-4 w-4" /> Save AI Settings

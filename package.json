@@ -14,7 +14,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "concurrently -k -n backend,tauri \"pnpm backend:dev\" \"TAURI_SKIP_SIDECAR=1 pnpm exec tauri dev\"",
     "release": "./scripts/release.sh",
     "pre-release": "./scripts/verify-release.sh",
     "restore:db": "cp db_data/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",
