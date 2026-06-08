@@ -34,53 +34,8 @@ cd backend
 # 仮想環境の有効化
 source .venv/bin/activate
 
-# PyInstallerの実行 (Github Actionsで使用していたコマンドと同一)
-# specファイルがある場合は `pyinstaller djaly.spec` に置き換えてください
-pyinstaller --clean --noconfirm --onefile --name $BINARY_NAME \
-    --collect-all uvicorn \
-    --collect-all starlette \
-    --collect-all fastapi \
-    --collect-all h11 \
-    --hidden-import="uvicorn" \
-    --hidden-import="uvicorn.main" \
-    --hidden-import="uvicorn.config" \
-    --hidden-import="uvicorn.logging" \
-    --hidden-import="uvicorn.loops" \
-    --hidden-import="uvicorn.loops.auto" \
-    --hidden-import="uvicorn.loops.asyncio" \
-    --hidden-import="uvicorn.protocols" \
-    --hidden-import="uvicorn.protocols.http" \
-    --hidden-import="uvicorn.protocols.http.auto" \
-    --hidden-import="uvicorn.protocols.http.h11_impl" \
-    --hidden-import="uvicorn.protocols.http.httptools_impl" \
-    --hidden-import="uvicorn.protocols.websockets" \
-    --hidden-import="uvicorn.protocols.websockets.auto" \
-    --hidden-import="uvicorn.protocols.websockets.wsproto_impl" \
-    --hidden-import="uvicorn.protocols.websockets.websockets_impl" \
-    --hidden-import="uvicorn.lifespan" \
-    --hidden-import="uvicorn.lifespan.on" \
-    --hidden-import="uvicorn.lifespan.off" \
-    --hidden-import="uvicorn.server" \
-    --hidden-import="starlette" \
-    --hidden-import="starlette.routing" \
-    --hidden-import="starlette.middleware" \
-    --hidden-import="starlette.applications" \
-    --hidden-import="fastapi" \
-    --hidden-import="fastapi.applications" \
-    --hidden-import="sqlmodel" \
-    --hidden-import="platformdirs" \
-    --hidden-import="pydantic_settings" \
-    --hidden-import="sklearn.utils._typedefs" \
-    --hidden-import="sklearn.neighbors._partition_nodes" \
-    --hidden-import="scipy.special.cython_special" \
-    --hidden-import="h11" \
-    --hidden-import="h11._connection" \
-    --hidden-import="h11._state" \
-    --hidden-import="anyio" \
-    --hidden-import="anyio._backends" \
-    --hidden-import="anyio._backends._asyncio" \
-    --add-data "models/msd-musicnn-1.pb:models" \
-    server.py
+# PyInstallerの実行 (specファイルを使用)
+pyinstaller --clean --noconfirm djaly-server.spec
 
 cd ..
 
@@ -91,10 +46,34 @@ mkdir -p $OUTPUT_DIR
 mv backend/dist/$BINARY_NAME "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}"
 chmod +x "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}"
 
+if [ "$TARGET_TRIPLE" = "aarch64-apple-darwin" ]; then
+  EXPECTED_FILE_ARCH="arm64"
+else
+  EXPECTED_FILE_ARCH="x86_64"
+fi
+
+ACTUAL_FILE_INFO=$(file "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}")
+if ! echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+  echo "❌ Sidecarのアーキテクチャが一致しません。期待: $EXPECTED_FILE_ARCH / 実際: $ACTUAL_FILE_INFO"
+  echo "   Python仮想環境またはPyInstallerが別アーキテクチャで動作している可能性があります。"
+  exit 1
+fi
+
 # macOSの場合、Sidecarバイナリに署名を行う（Ad-hoc署名）
 if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "🔏 Sidecarバイナリに署名中..."
     codesign --force --sign - "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}"
+fi
+
+# 依存関係の検証
+echo "🔍 バイナリの依存関係を検証中..."
+DEPS=$(otool -L "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}" | grep -v "/usr/lib" | grep -v "/System/" | tail -n +2)
+if [ -n "$DEPS" ]; then
+    echo "⚠️ 警告: システムライブラリ以外の依存関係が検出されました:"
+    echo "$DEPS"
+    echo "これらのライブラリが配布先のマシンにない場合、アプリが動作しない可能性があります。"
+else
+    echo "✅ システムライブラリのみに依存しています（問題なし）"
 fi
 
 echo "✅ バックエンド配置完了: $OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}"
@@ -139,16 +118,64 @@ fi
 
 echo "アップロードファイル: $DMG_PATH"
 
+# 署名ファイルのパスを取得
+SIG_PATH="${DMG_PATH}.sig"
+
+# latest.jsonを生成
+LATEST_JSON="src-tauri/target/release/bundle/dmg/latest.json"
+DMG_FILENAME=$(basename "$DMG_PATH")
+DOWNLOAD_URL="https://github.com/Yutahhhhh/DJaly/releases/download/v${VERSION}/${DMG_FILENAME}"
+PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+echo "📝 latest.jsonを生成中..."
+if [ -f "$SIG_PATH" ]; then
+    SIGNATURE=$(cat "$SIG_PATH")
+    cat > "$LATEST_JSON" <<EOF
+{
+  "version": "${VERSION}",
+  "notes": "See release notes for details",
+  "pub_date": "${PUB_DATE}",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "${SIGNATURE}",
+      "url": "${DOWNLOAD_URL}"
+    }
+  }
+}
+EOF
+else
+    echo "⚠️ 警告: 署名ファイル (.sig) が見つかりません。署名なしでlatest.jsonを生成します。"
+    cat > "$LATEST_JSON" <<EOF
+{
+  "version": "${VERSION}",
+  "notes": "See release notes for details",
+  "pub_date": "${PUB_DATE}",
+  "platforms": {
+    "darwin-aarch64": {
+      "url": "${DOWNLOAD_URL}"
+    }
+  }
+}
+EOF
+fi
+
+echo "✅ latest.json生成完了: $LATEST_JSON"
+
 # 既存のリリースがある場合は削除して再作成
 if gh release view "v$VERSION" >/dev/null 2>&1; then
     echo "⚠️ 既存のリリース v$VERSION が見つかりました。削除して再作成します..."
     gh release delete "v$VERSION" -y
 fi
 
-# リリース作成とアップロード
+# リリース作成とアップロード（DMG、署名、latest.json）
 # --draft: 下書きとして作成（公開前に確認したい場合）
 # --generate-notes: コミットログからリリースノートを自動生成
-gh release create "v$VERSION" "$DMG_PATH" --title "Djaly v$VERSION" --generate-notes
+echo "☁️ GitHub Releaseを作成中..."
+if [ -f "$SIG_PATH" ]; then
+    gh release create "v$VERSION" "$DMG_PATH" "$SIG_PATH" "$LATEST_JSON" --title "Djaly v$VERSION" --generate-notes
+else
+    gh release create "v$VERSION" "$DMG_PATH" "$LATEST_JSON" --title "Djaly v$VERSION" --generate-notes
+fi
 
 echo "🎉 リリース完了！ GitHubを確認してください。"
 echo ""

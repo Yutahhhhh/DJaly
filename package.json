@@ -1,7 +1,7 @@
 {
   "name": "djaly",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "docker:start": "colima start djaly --cpu 5 --memory 8",
@@ -73,5 +73,6 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.3",
     "vite": "^6.0.0"
-  }
+  },
+  "packageManager": "pnpm@7.33.7+sha512.7afe2410642b39c698df46da4ce5c7231a5cce360698d69f8cf8f42257d40b3e43f231053b07b8de849fd4ffbf4a71ff57b835137777a352388f3d3da747200e"
 }

@@ -1,5 +1,17 @@
 #!/bin/bash
 
+ARCH_NAME=$(uname -m)
+if [ "$ARCH_NAME" = "x86_64" ]; then
+  TARGET_TRIPLE="x86_64-apple-darwin"
+  EXPECTED_FILE_ARCH="x86_64"
+elif [ "$ARCH_NAME" = "arm64" ]; then
+  TARGET_TRIPLE="aarch64-apple-darwin"
+  EXPECTED_FILE_ARCH="arm64"
+else
+  echo "Unsupported architecture: $ARCH_NAME"
+  exit 1
+fi
+
 # クリーンアップ
 rm -rf build dist
 
@@ -27,8 +39,13 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
     server.py
 
 # Tauriが期待するディレクトリにバイナリを移動し、アーキテクチャ名を付与
-# Apple Silicon (M1/M2/M3) 用のトリプル: aarch64-apple-darwin
 mkdir -p ../src-tauri/bin
-mv dist/djaly-server ../src-tauri/bin/djaly-server-aarch64-apple-darwin
+mv dist/djaly-server "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}"
 
-echo "Backend build complete: src-tauri/bin/djaly-server-aarch64-apple-darwin"
+ACTUAL_FILE_INFO=$(file "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}")
+if ! echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+  echo "Sidecar architecture mismatch. Expected: $EXPECTED_FILE_ARCH / Actual: $ACTUAL_FILE_INFO"
+  exit 1
+fi
+
+echo "Backend build complete: src-tauri/bin/djaly-server-${TARGET_TRIPLE}"

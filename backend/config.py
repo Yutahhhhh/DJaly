@@ -1,4 +1,5 @@
 import os
+import sys
 from pydantic_settings import BaseSettings
 from pydantic import Field
 import platformdirs
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
     MPLCONFIGDIR: str | None = None
 
     class Config:
-        env_file = ".env"
+        env_file = None if getattr(sys, "frozen", False) else ".env"
         extra = "ignore"
 
     def model_post_init(self, __context):
