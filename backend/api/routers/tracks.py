@@ -80,6 +80,7 @@ def get_similar_tracks(
 @router.get("/api/tracks", response_model=List[TrackRead])
 def get_tracks(
     status: str = "all",
+    q: Optional[str] = None,
     title: Optional[str] = None,
     artist: Optional[str] = None,
     album: Optional[str] = None,
@@ -111,6 +112,7 @@ def get_tracks(
     app_service = TrackAppService(session)
     return app_service.get_tracks(
         status=status,
+        q=q,
         title=title,
         artist=artist,
         album=album,
@@ -140,6 +142,7 @@ def get_tracks(
 @router.get("/api/tracks/ids", response_model=List[int])
 def get_track_ids(
     status: str = "all",
+    q: Optional[str] = None,
     title: Optional[str] = None,
     artist: Optional[str] = None,
     album: Optional[str] = None,
@@ -167,6 +170,7 @@ def get_track_ids(
     app_service = TrackAppService(session)
     return app_service.get_track_ids(
         status=status,
+        q=q,
         title=title,
         artist=artist,
         album=album,

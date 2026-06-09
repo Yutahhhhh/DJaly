@@ -35,6 +35,26 @@ def test_get_tracks_filtering(client, session: Session):
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "D-Track"
 
+def test_get_tracks_query_searches_title_or_artist(client, session: Session):
+    tracks = [
+        Track(filepath="/path/title.mp3", title="Midnight City", artist="M83", album="Album1", genre="Synth", bpm=105, duration=100),
+        Track(filepath="/path/artist.mp3", title="Intro", artist="Midnight Runners", album="Album2", genre="Disco", bpm=118, duration=100),
+        Track(filepath="/path/other.mp3", title="Sunrise", artist="Someone Else", album="Album3", genre="Synth", bpm=122, duration=100),
+    ]
+    for t in tracks:
+        session.add(t)
+    session.commit()
+
+    response = client.get("/api/tracks", params={"q": "Midnight"})
+    assert response.status_code == 200
+    titles = {track["title"] for track in response.json()}
+    assert titles == {"Midnight City", "Intro"}
+
+    response = client.get("/api/tracks", params={"q": "Midnight", "genres": ["Synth"]})
+    assert response.status_code == 200
+    titles = {track["title"] for track in response.json()}
+    assert titles == {"Midnight City"}
+
 def test_update_track_genre(client, session: Session):
     """ジャンル更新APIのテスト"""
     track = Track(filepath="/p/1.mp3", title="T", artist="A", album="AlbumT", genre="Old", bpm=120, duration=100)

@@ -53,7 +53,12 @@ else
 fi
 
 ACTUAL_FILE_INFO=$(file "$OUTPUT_DIR/${BINARY_NAME}-${TARGET_TRIPLE}")
-if ! echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+if echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+  echo "✅ Sidecarアーキテクチャ確認: $EXPECTED_FILE_ARCH"
+elif [ "$TARGET_TRIPLE" = "aarch64-apple-darwin" ] && echo "$ACTUAL_FILE_INFO" | grep -q "x86_64"; then
+  echo "⚠️ Sidecarはx86_64です。arm64アプリからRosetta経由で実行します。"
+  echo "   実際: $ACTUAL_FILE_INFO"
+else
   echo "❌ Sidecarのアーキテクチャが一致しません。期待: $EXPECTED_FILE_ARCH / 実際: $ACTUAL_FILE_INFO"
   echo "   Python仮想環境またはPyInstallerが別アーキテクチャで動作している可能性があります。"
   exit 1
@@ -93,7 +98,7 @@ fi
 pnpm exec tauri build
 
 # --- 4. GitHub Release (Optional) ---
-if [ "$2" == "--skip-upload" ]; then
+if [[ "$*" == *"--skip-upload"* ]]; then
     echo "🚫 アップロードをスキップします。"
     echo "✅ ビルド完了: src-tauri/target/release/bundle/"
     exit 0
@@ -120,6 +125,14 @@ echo "アップロードファイル: $DMG_PATH"
 
 # 署名ファイルのパスを取得
 SIG_PATH="${DMG_PATH}.sig"
+if [ -f "keys/djaly.key" ]; then
+    echo "🔏 Updater用のDMG署名を生成中..."
+    SIGN_OUTPUT=$(pnpm exec tauri signer sign \
+        -f keys/djaly.key \
+        -p "djaly-password" \
+        "$DMG_PATH")
+    echo "$SIGN_OUTPUT" | awk '/Public signature:/{getline; print}' > "$SIG_PATH"
+fi
 
 # latest.jsonを生成
 LATEST_JSON="src-tauri/target/release/bundle/dmg/latest.json"

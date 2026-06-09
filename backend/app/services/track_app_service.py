@@ -20,6 +20,7 @@ class TrackAppService:
     def get_tracks(
         self,
         status: str = "all",
+        q: Optional[str] = None,
         title: Optional[str] = None,
         artist: Optional[str] = None,
         album: Optional[str] = None,
@@ -53,6 +54,7 @@ class TrackAppService:
             
         return self.repository.search_tracks(
             status=status,
+            q=q,
             title=title,
             artist=artist,
             album=album,
@@ -82,6 +84,7 @@ class TrackAppService:
     def get_track_ids(
         self,
         status: str = "all",
+        q: Optional[str] = None,
         title: Optional[str] = None,
         artist: Optional[str] = None,
         album: Optional[str] = None,
@@ -113,6 +116,7 @@ class TrackAppService:
             
         return self.repository.search_track_ids(
             status=status,
+            q=q,
             title=title,
             artist=artist,
             album=album,

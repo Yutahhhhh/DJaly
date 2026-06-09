@@ -63,7 +63,7 @@ export function LibraryTab({
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-8 h-9 text-xs"
-              placeholder="Search tracks..."
+              placeholder="Search tracks or artists..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />

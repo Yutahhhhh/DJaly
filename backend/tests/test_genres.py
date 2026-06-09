@@ -50,6 +50,28 @@ def test_get_unknown_tracks_subgenre_mode(client: TestClient, session: Session):
     assert "S3" in titles
     assert "S2" not in titles
 
+def test_get_unknown_tracks_both_mode_includes_genre_and_subgenre_gaps(client: TestClient, session: Session):
+    session.exec(delete(Track))
+    session.commit()
+
+    unverified_with_genre = Track(filepath="/both1.mp3", title="Needs Verify", artist="A", album="B", genre="House", subgenre="Deep House", bpm=120, duration=100, is_genre_verified=False)
+    verified_unknown_genre = Track(filepath="/both2.mp3", title="Unknown Genre", artist="A", album="B", genre="Unknown", subgenre="Deep House", bpm=120, duration=100, is_genre_verified=True)
+    verified_empty_subgenre = Track(filepath="/both3.mp3", title="No Subgenre", artist="A", album="B", genre="House", subgenre="", bpm=120, duration=100, is_genre_verified=True)
+    complete_track = Track(filepath="/both4.mp3", title="Complete", artist="A", album="B", genre="House", subgenre="Deep House", bpm=120, duration=100, is_genre_verified=True)
+    session.add(unverified_with_genre)
+    session.add(verified_unknown_genre)
+    session.add(verified_empty_subgenre)
+    session.add(complete_track)
+    session.commit()
+
+    response = client.get("/api/genres/unknown-ids?mode=both")
+    assert response.status_code == 200
+    ids = set(response.json())
+    assert unverified_with_genre.id in ids
+    assert verified_unknown_genre.id in ids
+    assert verified_empty_subgenre.id in ids
+    assert complete_track.id not in ids
+
 def test_llm_analyze(client: TestClient, session: Session, mocker):
     # LLMのモックはconftest.pyで行われているが、
     # GenreService内でgenerate_textの結果をパースするロジックがあるため、
@@ -77,6 +99,22 @@ def test_llm_analyze(client: TestClient, session: Session, mocker):
     session.refresh(t1)
     assert t1.genre == "Techno"
     assert t1.subgenre == "Minimal Techno"
+
+def test_llm_analyze_subgenre_updates_known_genre_track(client: TestClient, session: Session, mocker):
+    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
+    mock_gen.return_value = '{"subgenre": "Deep House", "reason": "Known house style.", "confidence": "High"}'
+
+    t1 = Track(filepath="/known-genre.mp3", title="Known Genre", artist="A", album="B", genre="House", subgenre="", bpm=124, duration=100, is_genre_verified=True)
+    session.add(t1)
+    session.commit()
+
+    response = client.post("/api/genres/llm-analyze", json={"track_id": t1.id, "mode": "subgenre"})
+    assert response.status_code == 200
+
+    session.refresh(t1)
+    assert t1.genre == "House"
+    assert t1.subgenre == "Deep House"
+    assert t1.is_genre_verified is True
 
 def test_batch_llm_analyze_rejects_unparseable_response(client: TestClient, session: Session, mocker):
     mock_gen = mocker.patch("app.services.genre_app_service.generate_text")

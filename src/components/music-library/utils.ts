@@ -1,7 +1,7 @@
 import { FilterState } from "./types";
 
 export function buildTrackSearchParams(
-  title: string,
+  query: string,
   filters: FilterState,
   limit: number = 50,
   offset: number = 0
@@ -12,7 +12,7 @@ export function buildTrackSearchParams(
     offset: offset.toString(),
   };
 
-  if (title) params["title"] = title;
+  if (query) params["q"] = query;
 
   // Basic Filters
   if (filters.bpm && filters.bpm > 0) {

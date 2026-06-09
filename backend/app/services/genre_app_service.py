@@ -140,15 +140,26 @@ class GenreAppService:
             data = self._normalize_analysis_data(track, data, mode)
             response = GenreAnalysisResponse(**data)
             
-            current_genre = track.genre or "Unknown"
-            should_update = overwrite or current_genre.lower() == "unknown"
+            should_update_genre = (
+                overwrite
+                or not track.is_genre_verified
+                or not track.genre
+                or track.genre.lower() == "unknown"
+            )
+            should_update_subgenre = overwrite or not track.subgenre
+            should_update = False
             
-            if should_update:
-                if mode in [AnalysisMode.GENRE, AnalysisMode.BOTH]:
+            if mode in [AnalysisMode.GENRE, AnalysisMode.BOTH] and should_update_genre:
+                if track.genre != response.genre:
                     track.genre = response.genre
-                if mode in [AnalysisMode.SUBGENRE, AnalysisMode.BOTH]:
+                should_update = True
+
+            if mode in [AnalysisMode.SUBGENRE, AnalysisMode.BOTH] and should_update_subgenre:
+                if track.subgenre != response.subgenre:
                     track.subgenre = response.subgenre
-                
+                should_update = True
+
+            if should_update:
                 track.is_genre_verified = True
                 self.session.commit()
                 self.session.refresh(track)

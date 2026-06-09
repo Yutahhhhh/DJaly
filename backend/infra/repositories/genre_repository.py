@@ -11,9 +11,22 @@ class GenreRepository:
         if mode == "subgenre":
             # Subgenre is unknown if it's empty or null
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
+        elif mode == "both":
+            query = query.where(
+                (Track.is_genre_verified == False)
+                | (Track.genre == None)
+                | (Track.genre == "")
+                | (func.lower(Track.genre) == "unknown")
+                | (Track.subgenre == None)
+                | (Track.subgenre == "")
+            )
         else:
-            # Genre is unknown if not verified
-            query = query.where(Track.is_genre_verified == False)
+            query = query.where(
+                (Track.is_genre_verified == False)
+                | (Track.genre == None)
+                | (Track.genre == "")
+                | (func.lower(Track.genre) == "unknown")
+            )
             
         statement = query.offset(offset).limit(limit)
         return self.session.exec(statement).all()
@@ -22,8 +35,22 @@ class GenreRepository:
         query = select(Track.id)
         if mode == "subgenre":
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
+        elif mode == "both":
+            query = query.where(
+                (Track.is_genre_verified == False)
+                | (Track.genre == None)
+                | (Track.genre == "")
+                | (func.lower(Track.genre) == "unknown")
+                | (Track.subgenre == None)
+                | (Track.subgenre == "")
+            )
         else:
-            query = query.where(Track.is_genre_verified == False)
+            query = query.where(
+                (Track.is_genre_verified == False)
+                | (Track.genre == None)
+                | (Track.genre == "")
+                | (func.lower(Track.genre) == "unknown")
+            )
             
         return self.session.exec(query).all()
 

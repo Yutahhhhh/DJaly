@@ -72,7 +72,12 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
 mkdir -p ../src-tauri/bin
 mv dist/djaly-server "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}"
 ACTUAL_FILE_INFO=$(file "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}")
-if ! echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+if echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
+  echo "✅ Sidecar architecture: $EXPECTED_FILE_ARCH"
+elif [ "$TARGET_TRIPLE" = "aarch64-apple-darwin" ] && echo "$ACTUAL_FILE_INFO" | grep -q "x86_64"; then
+  echo "⚠️ Sidecar is x86_64. It will run from the arm64 app through Rosetta."
+  echo "   Actual: $ACTUAL_FILE_INFO"
+else
   echo "❌ Sidecar architecture mismatch. Expected: $EXPECTED_FILE_ARCH / Actual: $ACTUAL_FILE_INFO"
   echo "   Check whether the Python virtualenv or PyInstaller is running under a different architecture."
   exit 1

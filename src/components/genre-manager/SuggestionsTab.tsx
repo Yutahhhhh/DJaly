@@ -126,7 +126,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ mode = "both" })
   };
 
   const handleBatchAnalyze = async (targetMode: AnalysisMode) => {
-    if (tracks.length === 0) return;
+    if (tracks.length === 0 && targetMode !== "both") return;
     if (isPreparing) return;
     
     setIsPreparing(true);
@@ -134,9 +134,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ mode = "both" })
     // First, get ALL unknown IDs to know the scope
     let allIds: number[] = [];
     try {
-      // If targetMode is "both", we want all unverified tracks regardless of current view mode
-      // If targetMode is specific, we use the current view mode logic (which filters by subgenre emptiness if mode=subgenre)
-      allIds = await genreService.getAllUnknownTrackIds(targetMode === "both" ? "genre" : mode);
+      allIds = await genreService.getAllUnknownTrackIds(targetMode);
     } catch (e) {
       console.error("Failed to get all IDs", e);
       alert("Failed to start: Could not fetch track list.");
@@ -264,7 +262,7 @@ export const SuggestionsTab: React.FC<SuggestionsTabProps> = ({ mode = "both" })
 
                 <Button
                   onClick={() => handleBatchAnalyze("both")}
-                  disabled={loading || tracks.length === 0 || isPreparing}
+                  disabled={loading || isPreparing}
                 >
                   {isPreparing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

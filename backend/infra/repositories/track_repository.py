@@ -70,6 +70,7 @@ class TrackRepository:
         self,
         query,
         status: str = "all",
+        q: Optional[str] = None,
         title: Optional[str] = None,
         artist: Optional[str] = None,
         album: Optional[str] = None,
@@ -126,6 +127,13 @@ class TrackRepository:
             query = query.where(or_(Track.bpm == None, Track.bpm == 0))
         
         # 3. 基本メタデータフィルタ
+        if q:
+            query = query.where(
+                or_(
+                    col(Track.title).ilike(f"%{q}%"),
+                    col(Track.artist).ilike(f"%{q}%")
+                )
+            )
         if title: query = query.where(col(Track.title).ilike(f"%{title}%"))
         if artist: query = query.where(col(Track.artist).ilike(f"%{artist}%"))
         if album: query = query.where(col(Track.album).ilike(f"%{album}%"))
@@ -199,6 +207,7 @@ class TrackRepository:
     def search_tracks(
         self,
         status: str = "all",
+        q: Optional[str] = None,
         title: Optional[str] = None,
         artist: Optional[str] = None,
         album: Optional[str] = None,
@@ -235,6 +244,7 @@ class TrackRepository:
         query = self._apply_search_conditions(
             query=query,
             status=status,
+            q=q,
             title=title,
             artist=artist,
             album=album,
@@ -275,6 +285,7 @@ class TrackRepository:
     def search_track_ids(
         self,
         status: str = "all",
+        q: Optional[str] = None,
         title: Optional[str] = None,
         artist: Optional[str] = None,
         album: Optional[str] = None,
@@ -305,6 +316,7 @@ class TrackRepository:
         query = self._apply_search_conditions(
             query=query,
             status=status,
+            q=q,
             title=title,
             artist=artist,
             album=album,
