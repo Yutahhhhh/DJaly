@@ -55,6 +55,33 @@ def test_get_tracks_query_searches_title_or_artist(client, session: Session):
     titles = {track["title"] for track in response.json()}
     assert titles == {"Midnight City"}
 
+def test_get_tracks_query_searches_filepath_and_metadata_tokens(client, session: Session):
+    track = Track(
+        filepath="/music/DJ City/Eve - Who's That Girl_ - Max Wallin Remix (Clean).mp3",
+        title="Who's That Girl? - Max Wallin Remix (Clean)",
+        artist="Eve",
+        album="Unknown",
+        genre="Hip Hop",
+        subgenre="Remix",
+        bpm=104,
+        duration=153,
+    )
+    session.add(track)
+    session.commit()
+
+    response = client.get(
+        "/api/tracks",
+        params={"q": "Eve - Who's That Girl_ - Max Wallin Remix (Clean).mp3"},
+    )
+    assert response.status_code == 200
+    titles = {track["title"] for track in response.json()}
+    assert "Who's That Girl? - Max Wallin Remix (Clean)" in titles
+
+    response = client.get("/api/tracks", params={"q": "Hip Hop Remix"})
+    assert response.status_code == 200
+    titles = {track["title"] for track in response.json()}
+    assert "Who's That Girl? - Max Wallin Remix (Clean)" in titles
+
 def test_update_track_genre(client, session: Session):
     """ジャンル更新APIのテスト"""
     track = Track(filepath="/p/1.mp3", title="T", artist="A", album="AlbumT", genre="Old", bpm=120, duration=100)

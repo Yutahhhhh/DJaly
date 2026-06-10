@@ -102,7 +102,7 @@ export function MusicLibrary({
   const isFeatureActive = (min: number, max: number) => min > 0 || max < 1;
 
   return (
-    <div className="h-full flex flex-col p-4 gap-4">
+    <div className="h-full min-h-0 flex flex-col p-4 gap-4">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -217,11 +217,14 @@ export function MusicLibrary({
       <TrackList
         tracks={tracks}
         isLoading={loading && tracks.length === 0}
+        isLoadingMore={loading && tracks.length > 0}
         lastTrackElementRef={lastTrackElementRef}
         analyzingId={analyzingId}
         onAnalyze={handleAnalyze}
         disabled={isPlayerLoading}
         onTrackUpdate={handleTrackUpdate}
+        hasMore={hasMore}
+        onLoadMore={loadMore}
       />
     </div>
   );

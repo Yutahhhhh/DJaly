@@ -10,24 +10,30 @@ import {
 interface TrackListProps {
   tracks: Track[];
   isLoading?: boolean;
+  isLoadingMore?: boolean;
   lastTrackElementRef: (node: HTMLTableRowElement | null) => void;
   analyzingId: number | null;
   onAnalyze: (track: Track) => void;
   disabled?: boolean;
   onTrackUpdate?: (trackId: number, updates: Partial<Track>) => void;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 export function TrackList({
   tracks,
   isLoading = false,
+  isLoadingMore = false,
   lastTrackElementRef,
   analyzingId,
   onAnalyze,
   disabled = false,
   onTrackUpdate,
+  hasMore = false,
+  onLoadMore,
 }: TrackListProps) {
   return (
-    <div className="flex-1 border rounded-md overflow-hidden bg-card relative">
+    <div className="flex-1 min-h-0 border rounded-md overflow-hidden bg-card relative">
       {isLoading && (
         <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="flex flex-col items-center gap-2">
@@ -92,6 +98,24 @@ export function TrackList({
                     />
                   );
                 })}
+                {hasMore && onLoadMore && (
+                  <tr>
+                    <td colSpan={10} className="p-3 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onLoadMore}
+                        disabled={isLoadingMore}
+                        className="gap-2"
+                      >
+                        {isLoadingMore && (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
+                        Load more
+                      </Button>
+                    </td>
+                  </tr>
+                )}
               </TooltipProvider>
             </tbody>
           </table>

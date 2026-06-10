@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any, Union
 from sqlmodel import Session, select, or_, and_, col, text
 from sqlalchemy import func
 import json
+import re
 
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
@@ -9,6 +10,41 @@ from domain.models.lyrics import Lyrics
 class TrackRepository:
     def __init__(self, session: Session):
         self.session = session
+
+    def _build_global_search_condition(self, q: str):
+        """
+        Library-wide search.
+
+        File Explorer users often search by filename, while Library rows show
+        parsed title/artist metadata. Match both the raw phrase and forgiving
+        tokens across visible metadata plus filepath.
+        """
+        search_fields = [
+            Track.title,
+            Track.artist,
+            Track.album,
+            Track.genre,
+            Track.subgenre,
+            Track.filepath,
+        ]
+        raw = q.strip()
+        raw_condition = or_(*[
+            col(field).ilike(f"%{raw}%") for field in search_fields
+        ])
+
+        tokens = [
+            token
+            for token in re.findall(r"[^\W_]+(?:'[^\W_]+)?", raw, flags=re.UNICODE)
+            if token.lower() not in {"mp3", "wav", "aiff", "aif", "flac", "m4a", "aac", "ogg"}
+        ]
+        if len(tokens) <= 1:
+            return raw_condition
+
+        token_conditions = [
+            or_(*[col(field).ilike(f"%{token}%") for field in search_fields])
+            for token in tokens
+        ]
+        return or_(raw_condition, and_(*token_conditions))
 
     def get_by_id(self, track_id: int) -> Optional[Track]:
         return self.session.get(Track, track_id)
@@ -128,12 +164,7 @@ class TrackRepository:
         
         # 3. 基本メタデータフィルタ
         if q:
-            query = query.where(
-                or_(
-                    col(Track.title).ilike(f"%{q}%"),
-                    col(Track.artist).ilike(f"%{q}%")
-                )
-            )
+            query = query.where(self._build_global_search_condition(q))
         if title: query = query.where(col(Track.title).ilike(f"%{title}%"))
         if artist: query = query.where(col(Track.artist).ilike(f"%{artist}%"))
         if album: query = query.where(col(Track.album).ilike(f"%{album}%"))
