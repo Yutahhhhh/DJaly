@@ -8,6 +8,15 @@ export const tracksService = {
   getTrackIds: async (params: Record<string, string | number | boolean | null | undefined | string[]>) => {
     return apiClient.get<number[]>("/tracks/ids", params);
   },
+  getCount: async (params: Record<string, string | number | boolean | null | undefined | string[]>) => {
+    return apiClient.get<{ count: number }>("/tracks/count", params);
+  },
+  resolveVibe: async (prompt: string) => {
+    return apiClient.post<{ prompt: string; params: Record<string, number>; resolved: boolean }>(
+      "/vibe/resolve",
+      { prompt }
+    );
+  },
   getSimilarTracks: async (trackId: number, limit: number = 20) => {
     return apiClient.get<Track[]>(`/tracks/${trackId}/similar`, { limit });
   },

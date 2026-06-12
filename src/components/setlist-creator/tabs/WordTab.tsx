@@ -38,6 +38,8 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
   const [keywords, setKeywords] = useState<KeywordMatch[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [keywordsLoading, setKeywordsLoading] = useState(false);
+  const [lyricsNotFound, setLyricsNotFound] = useState(false);
   const [searching, setSearching] = useState(false);
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(true);
@@ -51,7 +53,7 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
     const lines = lyricsText.split("\n");
     for (const line of lines) {
       const timestampMatch = line.match(/\[(\d+):(\d+(?:\.\d+)?)\]/);
-      const cleanLine = line.replace(/\[.*\]/, "").trim();
+      const cleanLine = line.replace(/\[\d{1,2}:\d{2}(?:\.\d+)?\]/g, "").trim();
 
       if (
         cleanLine.toLowerCase().includes(activeKeyword.toLowerCase()) &&
@@ -65,25 +67,50 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
 
   useEffect(() => {
     if (!sourceTrack) return;
+    let cancelled = false;
 
-    const loadData = async () => {
-      setLoading(true);
-      setSearchResults([]);
-      setActiveKeyword(null);
-      try {
-        const [lyData, kwData] = await Promise.all([
-          lyricsService.getLyrics(sourceTrack.id),
-          lyricsService.analyzeLyrics(sourceTrack.id),
-        ]);
+    // 歌詞とキーワード解析を分離してロードする。
+    // 歌詞は取得でき次第すぐ表示し、LLM キーワード解析 (時間がかかる) は後から差し込む。
+    setLoading(true);
+    setKeywordsLoading(true);
+    setLyricsNotFound(false);
+    setSearchResults([]);
+    setActiveKeyword(null);
+    setLyricsText("");
+    setKeywords([]);
+
+    lyricsService
+      .getLyrics(sourceTrack.id)
+      .then((lyData) => {
+        if (cancelled) return;
         setLyricsText(normalizeLyricsTimeTags(lyData.content || ""));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load lyrics", error);
+        setLyricsNotFound(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    lyricsService
+      .analyzeLyrics(sourceTrack.id)
+      .then((kwData) => {
+        if (cancelled) return;
         setKeywords(Array.isArray(kwData) ? kwData : []);
-      } catch (error) {
-        console.error("Failed to load wordplay data", error);
-      } finally {
-        setLoading(false);
-      }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to analyze keywords", error);
+      })
+      .finally(() => {
+        if (!cancelled) setKeywordsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
     };
-    loadData();
   }, [sourceTrack?.id]);
 
   const handleKeywordSearch = async (kw: string) => {
@@ -123,7 +150,8 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
       const timestamp = timestampMatch
         ? parseInt(timestampMatch[1]) * 60 + parseFloat(timestampMatch[2])
         : null;
-      const cleanLine = line.replace(/\[.*\]/, "").trim();
+      // LRC タイムタグのみ除去 (歌詞中の [bracket] 表現を巻き込まない)
+      const cleanLine = line.replace(/\[\d{1,2}:\d{2}(?:\.\d+)?\]/g, "").trim();
 
       if (!cleanLine) return <div key={lineIdx} className="h-4" />;
 
@@ -241,6 +269,12 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {keywordsLoading && !loading && (
+            <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wide">
+              <Loader2 className="h-3 w-3 animate-spin text-primary/50" />
+              Analyzing keywords…
+            </span>
+          )}
           {loading && (
             <Loader2 className="h-4 w-4 animate-spin text-primary/50" />
           )}
@@ -275,8 +309,16 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
               <div className="flex flex-col items-center justify-center py-24 gap-4 opacity-40">
                 <Loader2 className="h-8 w-8 animate-spin" />
                 <span className="text-[10px] uppercase tracking-widest">
-                  Analyzing Lyrics
+                  Loading Lyrics
                 </span>
+              </div>
+            ) : lyricsNotFound ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+                <MessageSquare className="h-10 w-10 opacity-20" />
+                <p className="text-sm">この曲には歌詞がありません</p>
+                <p className="text-xs opacity-60">
+                  Tag Manager の「Auto-Fill Lyrics」で歌詞を自動取得できます
+                </p>
               </div>
             ) : (
               renderedLyrics

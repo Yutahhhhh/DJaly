@@ -90,8 +90,8 @@ class MetadataAppService(BackgroundTaskService):
                 if track_ids is not None:
                     query = query.where(Track.id.in_(track_ids))
                 
-                # Filter out tracks in skip cache (unless overwriting with all IDs)
-                if track_ids is None or not overwrite:
+                # Filter out tracks in skip cache (overwrite 時はキャッシュを無視して再取得する)
+                if not overwrite:
                     skip_ids = self._skip_cache.get(update_type, set())
                     if skip_ids:
                         query = query.where(Track.id.not_in(skip_ids))
@@ -192,12 +192,15 @@ class MetadataAppService(BackgroundTaskService):
             # release_date is "YYYY-MM-DDTHH:MM:SSZ"
             try:
                 year = int(release_date[:4])
-                if track.year != year:
-                    track.year = year
-                    session.commit()
-                    return True, None
-            except:
-                pass
+            except (ValueError, TypeError):
+                return False, "not_found"
+            if track.year == year:
+                # 見つかったが既に同じ年: not_found 扱いにすると skip cache に
+                # 誤登録されて以後再取得されなくなるため区別する
+                return False, "already_exists"
+            track.year = year
+            session.commit()
+            return True, None
         return False, "not_found"
 
     async def _update_lyrics(self, session: Session, track: Track, overwrite: bool) -> tuple[bool, Optional[str]]:

@@ -81,20 +81,44 @@ class GenreAppService:
         """Get all unique subgenres"""
         return self.repository.get_all_subgenres()
 
+    def _build_vocabulary_hint(self) -> str:
+        """
+        ライブラリの既存ジャンル語彙をプロンプトに注入するためのヒント文字列を生成。
+        既存ラベルの再利用を促し、表記揺れの発生源を断つ。
+        """
+        existing_genres = self.repository.get_all_genres()[:60]
+        existing_subgenres = self.repository.get_all_subgenres()[:80]
+        hint = ""
+        if existing_genres:
+            hint += (
+                "\nExisting genres in this library (REUSE these labels when applicable, "
+                "including exact spelling/casing):\n" + ", ".join(existing_genres) + "\n"
+            )
+        if existing_subgenres:
+            hint += "\nExisting subgenres:\n" + ", ".join(existing_subgenres) + "\n"
+        if hint:
+            hint += "\nOnly introduce a new label when none of the existing ones fits.\n"
+        return hint
+
     def analyze_track_with_llm(self, track_id: int, overwrite: bool = False, mode: AnalysisMode = AnalysisMode.BOTH) -> GenreAnalysisResponse:
         track = self.track_repository.get_by_id(track_id)
         if not track:
             raise ValueError("Track not found")
-        
+
         bpm_str = f"{int(track.bpm)}" if track.bpm and track.bpm > 0 else "Unknown"
-        
+
         prompt = f"""
         Analyze metadata to determine music genre for a DJ music library.
         Track: {track.title} / {track.artist} (BPM: {bpm_str})
-        
+        Album: {track.album or "Unknown"} (hint only, may be a compilation)
+        Year: {track.year or "Unknown"}
+        Audio features: energy={track.energy or 0:.2f}, danceability={track.danceability or 0:.2f}, brightness={track.brightness or 0:.2f}
+        Current genre (may be wrong): {track.genre or "None"}
+
         Mode: {mode.value.upper()}
 
         {DJ_GENRE_GUIDE}
+        {self._build_vocabulary_hint()}
         """
 
         if mode == AnalysisMode.GENRE:
@@ -112,14 +136,14 @@ class GenreAppService:
 
         prompt += """
         Rules:
-        - Use standard genres.
+        - Use standard genres. Genre labels must be in English.
         - No "Intro", "Clean" etc.
         - Output only ONE single genre/subgenre. Do NOT use slashes (/) or commas (,).
         - If multiple genres apply, choose the most dominant one.
         - JSON ONLY.
         """
-        
-        raw_response = generate_text(self.session, prompt)
+
+        raw_response = generate_text(self.session, prompt, json_mode=True, temperature=0.0)
         
         if is_llm_error(raw_response):
             logger.error(f"Single Analysis Failed: {raw_response}")
@@ -160,16 +184,20 @@ class GenreAppService:
                 should_update = True
 
             if should_update:
-                track.is_genre_verified = True
+                # "Unknown" や低確信度の結果は検証済みにしない
+                # (未解析リストから消えて再解析の導線が失われるのを防ぐ)
+                applied_genre = (track.genre or "").strip().lower()
+                if applied_genre and applied_genre != "unknown" and (response.confidence or "").lower() != "low":
+                    track.is_genre_verified = True
                 self.session.commit()
                 self.session.refresh(track)
-                
+
             return response
         except Exception as e:
             logger.error(f"LLM JSON Parse Error: {e}, Raw: {raw_response}")
             raise RuntimeError(f"Failed to parse LLM response: {str(e)}")
 
-    def analyze_tracks_batch_with_llm(self, track_ids: List[int], mode: AnalysisMode = AnalysisMode.BOTH) -> List[GenreUpdateResult]:
+    def analyze_tracks_batch_with_llm(self, track_ids: List[int], mode: AnalysisMode = AnalysisMode.BOTH, overwrite: bool = False) -> List[GenreUpdateResult]:
         if not track_ids:
             return []
 
@@ -181,24 +209,27 @@ class GenreAppService:
         for t in tracks:
             safe_title = (t.title or "").replace("|", " ")
             safe_artist = (t.artist or "").replace("|", " ")
+            safe_album = (t.album or "").replace("|", " ")
             bpm_str = f"{int(t.bpm)}" if t.bpm and t.bpm > 0 else ""
-            
-            # Minimal Input: ID|Title|Artist|BPM
-            features = [str(t.id), safe_title, safe_artist, bpm_str]
+            year_str = str(t.year) if t.year else ""
+
+            # Input: ID|Title|Artist|BPM|Year|Album
+            features = [str(t.id), safe_title, safe_artist, bpm_str, year_str, safe_album]
             track_lines.append("|".join(features))
-        
+
         input_text = "\n".join(track_lines)
 
         prompt = f"""
         Analyze tracks to determine {mode.value} for a DJ music library.
-        Input: ID|Title|Artist|BPM
+        Input: ID|Title|Artist|BPM|Year|Album (Album is a hint only, may be a compilation)
         {input_text}
 
         {DJ_GENRE_GUIDE}
+        {self._build_vocabulary_hint()}
 
         Output Format:
         """
-        
+
         if mode == AnalysisMode.GENRE:
             prompt += "ID|Genre"
         elif mode == AnalysisMode.SUBGENRE:
@@ -207,16 +238,16 @@ class GenreAppService:
             prompt += "ID|Genre|Subgenre"
 
         prompt += """
-        
+
         Rules:
         - One line per track.
-        - Standard DJ library genres only.
+        - Standard DJ library genres only. Genre labels must be in English.
         - Output only ONE single genre/subgenre per column. Do NOT use slashes (/) or commas (,).
         - If multiple genres apply, choose the most dominant one.
         - No markdown/header.
         """
 
-        raw_response = generate_text(self.session, prompt)
+        raw_response = generate_text(self.session, prompt, temperature=0.0)
         
         if is_llm_error(raw_response):
             logger.error(f"Batch Analysis Failed: {raw_response}")
@@ -258,18 +289,27 @@ class GenreAppService:
             updates = new_genres_map.get(track.id)
             if not updates:
                 continue
-            
+
             old_genre = track.genre or "Unknown"
             has_changes = False
             updates = self._normalize_analysis_data(track, updates, mode)
-            
-            if "genre" in updates:
+
+            # overwrite=False のとき、検証済みジャンルは上書きしない
+            can_update_genre = (
+                overwrite
+                or not track.is_genre_verified
+                or not track.genre
+                or track.genre.lower() == "unknown"
+            )
+            can_update_subgenre = overwrite or not track.subgenre
+
+            if "genre" in updates and can_update_genre:
                 new_g = re.sub(r'^[\"\']|[\"\']$', '', updates["genre"])
                 if new_g and new_g.lower() != "unknown" and track.genre != new_g:
                     track.genre = new_g
                     has_changes = True
-            
-            if "subgenre" in updates:
+
+            if "subgenre" in updates and can_update_subgenre:
                 new_s = re.sub(r'^[\"\']|[\"\']$', '', updates["subgenre"])
                 if track.subgenre != new_s:
                     track.subgenre = new_s
@@ -283,8 +323,11 @@ class GenreAppService:
                     old_genre=old_genre,
                     new_genre=track.genre # Return the new main genre for display
                 ))
-            
-            track.is_genre_verified = True
+
+            # "Unknown" のままの曲は検証済みにしない (再解析の導線を残す)
+            applied_genre = (track.genre or "").strip().lower()
+            if applied_genre and applied_genre != "unknown":
+                track.is_genre_verified = True
             # SQLModelは変更を自動追跡するため、session.add()は不要
         
         self.session.commit()
@@ -326,16 +369,35 @@ class GenreAppService:
         normalized.setdefault("confidence", "Medium")
         return normalized
 
+    @property
+    def _existing_genre_map(self) -> Dict[str, str]:
+        if not hasattr(self, "_genre_map_cache"):
+            self._genre_map_cache = {g.lower(): g for g in self.repository.get_all_genres()}
+        return self._genre_map_cache
+
+    @property
+    def _existing_subgenre_map(self) -> Dict[str, str]:
+        if not hasattr(self, "_subgenre_map_cache"):
+            self._subgenre_map_cache = {s.lower(): s for s in self.repository.get_all_subgenres()}
+        return self._subgenre_map_cache
+
     def _normalize_genre_label(self, value: str) -> str:
         label = self._sanitize_label(value)
         if not label:
             return "Unknown"
+        # 既存ライブラリのジャンルと case-insensitive で一致したら既存表記を再利用 (表記揺れ防止)
+        existing = self._existing_genre_map.get(label.lower())
+        if existing:
+            return existing
         return GENRE_ALIASES.get(label.lower(), label)
 
     def _normalize_subgenre_label(self, value: str) -> str:
         label = self._sanitize_label(value)
         if not label:
             return ""
+        existing = self._existing_subgenre_map.get(label.lower())
+        if existing:
+            return existing
         return SUBGENRE_ALIASES.get(label.lower(), label)
 
     def _sanitize_label(self, value: str) -> str:

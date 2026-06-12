@@ -41,20 +41,31 @@ if __name__ == "__main__":
             import subprocess
             # 指定ポートを使用しているプロセスのPIDを取得
             result = subprocess.run(
-                ["lsof", "-t", f"-i:{port}"], 
-                capture_output=True, 
+                ["lsof", "-t", f"-i:{port}"],
+                capture_output=True,
                 text=True
             )
             pids = result.stdout.strip().split('\n')
-            
+
             my_pid = str(os.getpid())
-            
+
             for pid in pids:
-                if pid and pid != my_pid:
-                    print(f"Killing existing process on port {port} (PID: {pid})...")
-                    subprocess.run(["kill", "-9", pid])
+                if not pid or pid == my_pid:
+                    continue
+                # プロセス名を確認し、自分のサイドカー/Python プロセスのみ終了させる
+                # (無関係なアプリを巻き添えにしない)
+                name_result = subprocess.run(
+                    ["ps", "-p", pid, "-o", "comm="],
+                    capture_output=True,
+                    text=True
+                )
+                proc_name = name_result.stdout.strip().lower()
+                if any(k in proc_name for k in ("djaly", "python", "server")):
+                    print(f"Killing existing Djaly process on port {port} (PID: {pid}, name: {proc_name})...")
+                    subprocess.run(["kill", pid])  # まず SIGTERM
+                else:
+                    print(f"Warning: Port {port} is used by unrelated process '{proc_name}' (PID: {pid}). Not killing it.")
         except Exception as e:
             print(f"Warning: Failed to kill existing process: {e}")
 
-    print(f"Starting Djaly Backend Server on port {port}...")
     uvicorn.run(app, host="127.0.0.1", port=port, reload=False, workers=1)

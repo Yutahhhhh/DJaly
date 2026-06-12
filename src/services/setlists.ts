@@ -63,6 +63,13 @@ export const setlistsService = {
     return `${API_BASE_URL}/setlists/${id}/export/m3u8`;
   },
 
+  validateExport: async (id: number) => {
+    return apiClient.get<{
+      total: number;
+      missing: { id: number; title?: string; artist?: string; filepath?: string }[];
+    }>(`/setlists/${id}/export/validate`);
+  },
+
   // --- AI / Recommendation ---
 
   recommendNext: async (

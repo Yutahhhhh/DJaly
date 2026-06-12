@@ -1,7 +1,11 @@
 from typing import List, Dict, Any
+import random
 import numpy as np
 from domain.models.track import Track
 from utils.audio_math import calculate_mixability_score
+
+# 同一アーティスト連続のペナルティ (単調なセットを防ぐ)
+SAME_ARTIST_PENALTY = 0.2
 
 class SetlistBuilder:
     """
@@ -32,9 +36,8 @@ class SetlistBuilder:
                 score = 0
                 if "energy" in vibe_params: score -= abs(t.energy - vibe_params["energy"])
                 return score
-            
+
             pool.sort(key=start_score, reverse=True)
-            import random
             start_node = random.choice(pool[:min(10, len(pool))])
             chain.append(start_node)
             used_ids.add(start_node["id"])
@@ -43,19 +46,29 @@ class SetlistBuilder:
             current_node = chain[-1]
             best_next = None
             best_score = -999.0
-            
+
             for candidate in pool:
                 if candidate["id"] in used_ids:
                     continue
-                
+
                 mix_score = self._calculate_transition_score(current_node, candidate)
-                
+
+                # Vibe 近接スコア: energy だけでなく danceability / brightness も評価
                 vibe_score = 0.0
-                if "energy" in vibe_params:
-                    vibe_score -= abs(candidate["track"].energy - vibe_params["energy"]) * 0.1
-                
-                total_score = mix_score + vibe_score
-                
+                for feat in ("energy", "danceability", "brightness"):
+                    if feat in vibe_params:
+                        cand_val = getattr(candidate["track"], feat, None) or 0.0
+                        vibe_score -= abs(cand_val - vibe_params[feat]) * 0.1
+
+                # 同一アーティスト連続のペナルティ
+                artist_penalty = 0.0
+                cur_artist = (current_node["track"].artist or "").strip().lower()
+                cand_artist = (candidate["track"].artist or "").strip().lower()
+                if cur_artist and cur_artist == cand_artist:
+                    artist_penalty = SAME_ARTIST_PENALTY
+
+                total_score = mix_score + vibe_score - artist_penalty
+
                 if total_score > best_score:
                     best_score = total_score
                     best_next = candidate

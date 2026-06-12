@@ -82,10 +82,20 @@ class RecommendationRepository:
         tracks = self.session.exec(stmt).all()
         return {t.id: t for t in tracks}
 
+    @staticmethod
+    def _to_float(value) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def fetch_candidates_pool(
         self,
         vibe_params: Dict[str, Any],
         genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
         limit: int = 200,
         exclude_ids: List[int] = None
     ) -> List[Dict[str, Any]]:
@@ -93,7 +103,7 @@ class RecommendationRepository:
         指定されたVibeとジャンルに基づき、歌詞情報とリリース年を含めて候補を取得
         """
         query_str = """
-            SELECT 
+            SELECT
                 t.id, t.title, t.artist, t.bpm, t.key, t.genre, t.subgenre,
                 t.duration, t.album, t.filepath, t.year,
                 t.energy, t.danceability, t.brightness, t.loudness, t.contrast, t.noisiness,
@@ -105,37 +115,48 @@ class RecommendationRepository:
             WHERE 1=1
         """
         params = {}
-        
+
         if exclude_ids:
             query_str += " AND t.id NOT IN :exclude_ids"
             params["exclude_ids"] = tuple(exclude_ids)
 
+        genre_conditions = []
         if genres:
-            query_str += " AND (t.genre IN :genres OR t.subgenre IN :genres)"
+            genre_conditions.append("t.genre IN :genres")
             params["genres"] = tuple(genres)
-            
-        if "bpm" in vibe_params and vibe_params["bpm"] > 0:
-            target_bpm = vibe_params["bpm"]
+        if subgenres:
+            genre_conditions.append("t.subgenre IN :subgenres")
+            params["subgenres"] = tuple(subgenres)
+        if genre_conditions:
+            query_str += " AND (" + " OR ".join(genre_conditions) + ")"
+
+        target_bpm = self._to_float(vibe_params.get("bpm"))
+        if target_bpm is not None and target_bpm > 0:
             query_str += " AND (t.bpm BETWEEN :min_bpm AND :max_bpm OR t.bpm = 0 OR t.bpm IS NULL)"
             params["min_bpm"] = target_bpm * 0.6
             params["max_bpm"] = target_bpm * 1.4
 
         order_clauses = []
-        if "energy" in vibe_params:
+        target_energy = self._to_float(vibe_params.get("energy"))
+        if target_energy is not None:
             query_str += " AND t.energy BETWEEN :min_energy AND :max_energy"
-            params["min_energy"] = max(0.0, vibe_params["energy"] - 0.4)
-            params["max_energy"] = min(1.0, vibe_params["energy"] + 0.4)
-            order_clauses.append(f"ABS(t.energy - {vibe_params['energy']})")
-            
-        if "danceability" in vibe_params:
-            order_clauses.append(f"ABS(t.danceability - {vibe_params['danceability']})")
+            params["min_energy"] = max(0.0, target_energy - 0.4)
+            params["max_energy"] = min(1.0, target_energy + 0.4)
+            order_clauses.append("ABS(t.energy - :order_energy)")
+            params["order_energy"] = target_energy
+
+        target_danceability = self._to_float(vibe_params.get("danceability"))
+        if target_danceability is not None:
+            order_clauses.append("ABS(t.danceability - :order_danceability)")
+            params["order_danceability"] = target_danceability
 
         if order_clauses:
             query_str += " ORDER BY (" + " + ".join(order_clauses) + ") ASC"
         else:
             query_str += " ORDER BY t.created_at DESC"
-            
-        query_str += f" LIMIT {limit}"
+
+        query_str += " LIMIT :pool_limit"
+        params["pool_limit"] = int(limit)
 
         results = self.session.connection().execute(text(query_str), params).fetchall()
         

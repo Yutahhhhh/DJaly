@@ -100,28 +100,23 @@ class BackgroundTaskService:
 
     def update_state(self, **kwargs):
         """
-        Updates the state dictionary and broadcasts it.
+        state を更新する。ブロードキャストは呼び出し側が emit_state() で行う。
         """
         for key, value in kwargs.items():
             if key in self.state:
                 self.state[key] = value
             else:
                 self.state["details"][key] = value
-        
+
         # Auto-calculate ETA if processed/skipped/errors changed
         if "processed" in kwargs or "skipped" in kwargs or "errors" in kwargs:
-            elapsed = time.time() - self.state["start_time"]
             done = self.state["processed"] + self.state["skipped"] + self.state["errors"]
-            if done > 0 and self.state["total"] > 0:
+            # start_time 未設定 (0) の場合は ETA を計算しない (巨大な値になるのを防ぐ)
+            if self.state["start_time"] > 0 and done > 0 and self.state["total"] > 0:
+                elapsed = time.time() - self.state["start_time"]
                 avg_time = elapsed / done
                 remaining = self.state["total"] - done
                 self.state["estimated_remaining"] = avg_time * remaining
-
-        # We don't await broadcast here to keep this method synchronous-friendly if needed,
-        # but since broadcast is async, we might need to schedule it or just assume the caller will broadcast.
-        # Actually, for simplicity in async context, let's make this async or fire-and-forget?
-        # Making it async is safer.
-        pass
 
     async def emit_state(self):
         await self.broadcast()

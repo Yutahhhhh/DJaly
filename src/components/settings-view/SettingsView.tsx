@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
   Cpu,
   Globe,
+  Loader2,
 } from "lucide-react";
 import {
   Select,
@@ -182,6 +183,39 @@ export function SettingsView() {
   };
 
   // 一括保存
+  const [llmTesting, setLlmTesting] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState<{
+    ok: boolean;
+    provider: string;
+    model: string;
+    latency_ms: number;
+    error?: string;
+  } | null>(null);
+
+  const handleTestLlm = async () => {
+    setLlmTesting(true);
+    setLlmTestResult(null);
+    try {
+      // 入力中の設定でテストできるよう、先に保存してから実打鍵する
+      for (const [key, value] of Object.entries(settings)) {
+        await settingsService.save(key, value);
+      }
+      const result = await settingsService.testLlm();
+      setLlmTestResult(result);
+    } catch (e: any) {
+      console.error("LLM test failed", e);
+      setLlmTestResult({
+        ok: false,
+        provider: settings["llm_provider"] || "ollama",
+        model: settings["llm_model"] || "",
+        latency_ms: 0,
+        error: e?.detail || e?.message || String(e),
+      });
+    } finally {
+      setLlmTesting(false);
+    }
+  };
+
   const saveAllSettings = async () => {
     setStatus("Saving all settings...");
     setIsError(false);
@@ -621,9 +655,50 @@ export function SettingsView() {
                 </div>
               ) : null}
 
-              <Button onClick={saveAllSettings} className="w-full mt-2">
-                <Check className="mr-2 h-4 w-4" /> Save AI Settings
-              </Button>
+              <div className="flex gap-2 mt-2">
+                <Button onClick={saveAllSettings} className="flex-1">
+                  <Check className="mr-2 h-4 w-4" /> Save AI Settings
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleTestLlm}
+                  disabled={llmTesting}
+                  className="flex-1"
+                >
+                  {llmTesting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Cpu className="mr-2 h-4 w-4" />
+                  )}
+                  Test Connection
+                </Button>
+              </div>
+
+              {llmTestResult && (
+                <div
+                  className={`text-xs rounded-md border p-3 ${
+                    llmTestResult.ok
+                      ? "border-green-500/40 text-green-600 bg-green-500/5"
+                      : "border-destructive/40 text-destructive bg-destructive/5"
+                  }`}
+                >
+                  {llmTestResult.ok ? (
+                    <span>
+                      接続成功: {llmTestResult.provider} / {llmTestResult.model}（
+                      {llmTestResult.latency_ms}ms）
+                    </span>
+                  ) : (
+                    <div className="space-y-1">
+                      <div>
+                        接続失敗: {llmTestResult.provider} / {llmTestResult.model}
+                      </div>
+                      <div className="break-all opacity-80">
+                        {llmTestResult.error}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

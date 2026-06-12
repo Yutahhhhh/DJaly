@@ -149,6 +149,22 @@ export const genreService = {
     );
   },
 
+  cancelAnalyzeAll: async (): Promise<{ status: string }> => {
+    return apiClient.post<{ status: string }>("/genres/batch-analyze/cancel", {});
+  },
+
+  startBatchAnalysis: async (
+    trackIds: number[],
+    overwrite: boolean,
+    mode: AnalysisMode = "both"
+  ): Promise<{ status: string }> => {
+    return apiClient.post<{ status: string }>("/genres/batch-analyze/start", {
+      track_ids: trackIds,
+      overwrite,
+      mode,
+    });
+  },
+
   getCleanupSuggestions: async (mode: AnalysisMode = "genre"): Promise<GenreCleanupGroup[]> => {
     return apiClient.get<GenreCleanupGroup[]>("/genres/cleanup-suggestions", { mode });
   },

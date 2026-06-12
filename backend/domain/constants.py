@@ -12,3 +12,6 @@ GENRE_ABBREVIATIONS = [
 ]
 
 GENRE_SEPARATORS_REGEX = r'[\s\-\.\/\_,]+'
+
+# 楽曲埋め込みベクトルの次元数 (解析パイプラインと SQL の CAST で共有)
+EMBEDDING_DIM = 200

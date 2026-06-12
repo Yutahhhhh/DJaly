@@ -43,15 +43,12 @@ class SetlistRepository:
         )
         return self.session.exec(query).all()
 
-    def clear_tracks(self, setlist_id: int):
+    def clear_tracks(self, setlist_id: int, commit: bool = True):
         existing = self.session.exec(select(SetlistTrack).where(SetlistTrack.setlist_id == setlist_id)).all()
         for e in existing:
             self.session.delete(e)
-        # Commit is expected to be handled by the caller or subsequent operations if part of a transaction, 
-        # but here we commit to ensure state.
-        # In a stricter unit of work pattern, we might defer commit.
-        # For now, matching existing behavior.
-        self.session.commit()
+        if commit:
+            self.session.commit()
 
     def add_track(self, setlist_track: SetlistTrack):
         self.session.add(setlist_track)

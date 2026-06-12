@@ -26,6 +26,10 @@ import { genreService } from "@/services/genres";
 import { TrackRow } from "../TrackRow";
 import { Badge } from "@/components/ui/badge";
 import { DropZone } from "./DropZone";
+import { toast } from "@/components/ui/toast";
+import { getErrorDetail } from "@/services/api-client";
+import { getTransitionInfo } from "../utils";
+import { cn } from "@/lib/utils";
 
 interface AutoTabProps {
   currentSetlistTracks: Track[];
@@ -99,9 +103,15 @@ export function AutoTab({
         autoSubgenres.length > 0 ? autoSubgenres : undefined
       );
       setAutoTracks(data);
+      if (data.length === 0) {
+        toast.info(
+          "条件に合う曲が見つかりませんでした",
+          "ジャンルフィルタを外すか、別のプリセットを試してください。"
+        );
+      }
     } catch (e) {
       console.error(e);
-      alert("Generation failed.");
+      toast.error("セットリスト生成に失敗しました", getErrorDetail(e));
     } finally {
       setIsAutoLoading(false);
     }
@@ -126,8 +136,9 @@ export function AutoTab({
       setAutoTracks(resultToShow);
     } catch (e) {
       console.error(e);
-      alert(
-        "Pathfinding failed. Try increasing the length or changing genres."
+      toast.error(
+        "ブリッジ生成に失敗しました",
+        `${getErrorDetail(e)} — 曲数を増やすかジャンルを変えて試してください。`
       );
     } finally {
       setIsAutoLoading(false);
@@ -140,13 +151,16 @@ export function AutoTab({
     );
 
     if (mode === "bridge" && startTrack) {
-      // Bridgeモードの場合、StartとEndの間を埋めるのが目的なので、
-      // 生成されたリストからEndトラックも除外して挿入する。
-      // (Startトラックは generateBridge 時点で既に除外されている前提)
-      // filteredAutoTracks で既にセットリスト内の曲は除外されているはずだが、念のため
+      // Bridgeモードの場合、StartとEndの間を埋めるのが目的。
+      // END がまだセットリストに存在しない場合 (ライブラリからドラッグした場合) は
+      // END 自体も挿入対象に含める。既にある場合のみ除外する。
+      const endAlreadyInList = endTrack
+        ? currentSetlistTracks.some((st) => st.id === endTrack.id)
+        : false;
       const tracksToInject = filteredAutoTracks.filter(
         (t) =>
-          t.id !== startTrack.id && (endTrack ? t.id !== endTrack.id : true)
+          t.id !== startTrack.id &&
+          (endAlreadyInList && endTrack ? t.id !== endTrack.id : true)
       );
 
       onInjectTracks(tracksToInject, startTrack.id, endTrack?.id);
@@ -205,6 +219,23 @@ export function AutoTab({
                   ))}
                 </SelectContent>
               </Select>
+              {presets.length === 0 && (
+                <p className="text-[10px] text-muted-foreground">
+                  Vibe プリセットがありません。Prompt Manager で generation 用プリセットを作成してください。
+                </p>
+              )}
+              {currentSetlistTracks.length > 0 && (
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <Sparkles className="h-3 w-3 shrink-0 text-purple-400" />
+                  <span className="truncate">
+                    Seeding from: {
+                      currentSetlistTracks[currentSetlistTracks.length - 1].title
+                    }
+                    {currentSetlistTracks.length > 1 &&
+                      ` ほか${Math.min(currentSetlistTracks.length - 1, 2)}曲 (末尾${Math.min(currentSetlistTracks.length, 3)}曲を起点に生成)`}
+                  </span>
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -324,25 +355,62 @@ export function AutoTab({
 
           <ScrollArea className="flex-1">
             <div className="pb-10">
-              {autoTracks
-                .filter(
+              {(() => {
+                const visibleTracks = autoTracks.filter(
                   (t) => !currentSetlistTracks.some((st) => st.id === t.id)
-                )
-                .map((t, idx) => (
-                  <div
-                    key={`auto-${t.id}-${idx}`}
-                    className="relative group animate-in fade-in slide-in-from-bottom-2"
-                    style={{ animationDelay: `${idx * 50}ms` }}
-                  >
-                    <TrackRow
-                      id={`auto-${t.id}-${idx}`}
-                      track={t}
-                      type="LIBRARY_ITEM"
-                      onAdd={() => onInjectTracks([t], startTrack?.id)}
-                    />
-                  </div>
-                ))
-              }
+                );
+                return visibleTracks.map((t, idx) => {
+                  const prev = idx > 0 ? visibleTracks[idx - 1] : null;
+                  const { bpmDiff, keyCompat } = getTransitionInfo(prev, t);
+                  return (
+                    <div
+                      key={`auto-${t.id}-${idx}`}
+                      className="relative group animate-in fade-in slide-in-from-bottom-2"
+                      style={{ animationDelay: `${idx * 50}ms` }}
+                    >
+                      {/* 前曲との遷移品質バッジ */}
+                      {prev && (
+                        <div className="flex items-center gap-1.5 px-3 pt-1 text-[9px] font-mono text-muted-foreground">
+                          {bpmDiff !== null && (
+                            <span
+                              className={cn(
+                                "px-1 rounded bg-muted/60",
+                                Math.abs(bpmDiff) > 8 && "text-amber-500"
+                              )}
+                            >
+                              {bpmDiff > 0 ? "+" : ""}
+                              {bpmDiff} BPM
+                            </span>
+                          )}
+                          {keyCompat !== "unknown" && (
+                            <span
+                              className={cn(
+                                "px-1 rounded bg-muted/60",
+                                keyCompat === "perfect" && "text-green-500",
+                                keyCompat === "compatible" && "text-emerald-400",
+                                keyCompat === "clash" && "text-amber-500"
+                              )}
+                            >
+                              Key{" "}
+                              {keyCompat === "perfect"
+                                ? "◎"
+                                : keyCompat === "compatible"
+                                ? "○"
+                                : "△"}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <TrackRow
+                        id={`auto-${t.id}-${idx}`}
+                        track={t}
+                        type="LIBRARY_ITEM"
+                        onAdd={() => onInjectTracks([t], startTrack?.id)}
+                      />
+                    </div>
+                  );
+                });
+              })()}
 
               {autoTracks.length === 0 && !isAutoLoading && (
                 <div className="h-full flex flex-col items-center justify-center p-8 text-muted-foreground gap-3 opacity-50 min-h-[200px]">

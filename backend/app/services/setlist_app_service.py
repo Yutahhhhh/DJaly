@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlmodel import Session, select
 from datetime import datetime
 import json
+import os
 import numpy as np
 
 from domain.models.setlist import Setlist, SetlistTrack
@@ -73,9 +74,11 @@ class SetlistAppService:
         setlist = self.repository.get_by_id(setlist_id)
         if not setlist:
             return False
-        
-        self.repository.clear_tracks(setlist_id)
-        
+
+        # 削除・挿入・updated_at 更新を単一トランザクションで行う
+        # (途中で失敗した場合に旧データが消えるのを防ぐ)
+        self.repository.clear_tracks(setlist_id, commit=False)
+
         for i, data in enumerate(track_data):
             if isinstance(data, dict):
                 tid = data.get("id")
@@ -83,21 +86,24 @@ class SetlistAppService:
             else:
                 tid = data
                 wp_json = None
-            
+
             if tid is None: continue
 
             st = SetlistTrack(
-                setlist_id=setlist_id, 
-                track_id=tid, 
+                setlist_id=setlist_id,
+                track_id=tid,
                 position=i,
                 wordplay_json=wp_json
             )
             self.session.add(st)
-        
-        self.session.commit()
+
         setlist.updated_at = datetime.now()
         self.session.add(setlist)
-        self.session.commit()
+        try:
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
         return True
 
     def export_as_m3u8(self, setlist_id: int) -> str:
@@ -111,17 +117,39 @@ class SetlistAppService:
             duration = int(track.duration) if track.duration else -1
             artist = track.artist or "Unknown Artist"
             title_text = track.title or "Unknown Title"
+            if track.filepath and not os.path.exists(track.filepath):
+                lines.append(f"# MISSING: {artist} - {title_text} ({track.filepath})")
+                continue
             lines.append(f"#EXTINF:{duration},{artist} - {title_text}")
             if track.filepath:
                 lines.append(track.filepath)
         return "\n".join(lines)
 
+    def validate_export(self, setlist_id: int) -> Dict[str, Any]:
+        """エクスポート前にファイルの存在を検証し、欠落している曲を返す"""
+        setlist = self.repository.get_by_id(setlist_id)
+        if not setlist:
+            raise ValueError("Setlist not found")
+
+        results = self.repository.get_tracks(setlist_id)
+        missing = []
+        for st, track, _lyrics_content in results:
+            if not track.filepath or not os.path.exists(track.filepath):
+                missing.append({
+                    "id": track.id,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "filepath": track.filepath,
+                })
+        return {"total": len(results), "missing": missing}
+
     def recommend_next_track(
-        self, 
-        track_id: int, 
-        limit: int = 20, 
+        self,
+        track_id: int,
+        limit: int = 20,
         preset_id: Optional[int] = None,
-        genres: Optional[List[str]] = None
+        genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         target_track = self.track_repository.get_by_id(track_id)
         if not target_track:
@@ -133,16 +161,23 @@ class SetlistAppService:
             if preset and preset.prompt_id:
                 prompt = self.prompt_repository.get_by_id(preset.prompt_id)
                 if prompt:
-                    ctx = f"Reference: {target_track.title}. Goal: {prompt.content}"
+                    bpm_str = f"{target_track.bpm:.0f}" if target_track.bpm else "unknown"
+                    ctx = (
+                        f"Current track: {target_track.title} by {target_track.artist} "
+                        f"(BPM {bpm_str}, key {target_track.key or 'unknown'}, energy {target_track.energy:.2f}). "
+                        f"Set goal: {prompt.content}. "
+                        f"Estimate features for the NEXT track to play."
+                    )
                     vibe_params = generate_vibe_parameters(ctx, session=self.session)
 
         if "bpm" not in vibe_params:
             vibe_params["bpm"] = target_track.bpm
 
         pool = self.recommendation_repository.fetch_candidates_pool(
-            vibe_params, 
-            genres=genres, 
-            limit=200, 
+            vibe_params,
+            genres=genres,
+            subgenres=subgenres,
+            limit=200,
             exclude_ids=[track_id]
         )
 
@@ -178,11 +213,12 @@ class SetlistAppService:
         return [c[0] for c in scored_candidates[:limit]]
 
     def generate_auto_setlist(
-        self, 
-        preset_id: int, 
-        limit: int = 10, 
-        seed_track_ids: Optional[List[int]] = None, 
-        genres: Optional[List[str]] = None
+        self,
+        preset_id: int,
+        limit: int = 10,
+        seed_track_ids: Optional[List[int]] = None,
+        genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         preset = self.preset_repository.get_by_id(preset_id)
         if not preset:
@@ -212,9 +248,10 @@ class SetlistAppService:
 
         exclude_ids = seed_track_ids or []
         pool = self.recommendation_repository.fetch_candidates_pool(
-            vibe_params, 
-            genres=genres, 
-            limit=300, 
+            vibe_params,
+            genres=genres,
+            subgenres=subgenres,
+            limit=300,
             exclude_ids=exclude_ids
         )
 
@@ -239,7 +276,8 @@ class SetlistAppService:
         start_track_id: int,
         end_track_id: int,
         length: int,
-        genres: Optional[List[str]] = None
+        genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         start_track = self.track_repository.get_by_id(start_track_id)
         end_track = self.track_repository.get_by_id(end_track_id)
@@ -261,8 +299,9 @@ class SetlistAppService:
         end_node = make_node(end_track)
         
         pool = self.recommendation_repository.fetch_candidates_pool(
-            {"bpm": (start_track.bpm + end_track.bpm) / 2},
+            {"bpm": ((start_track.bpm or 0) + (end_track.bpm or 0)) / 2},
             genres=genres,
+            subgenres=subgenres,
             limit=400,
             exclude_ids=[start_track_id, end_track_id]
         )

@@ -57,6 +57,7 @@ class TrackSuggestion(BaseModel):
     bpm: float
     filepath: str
     current_genre: Optional[str] = None
+    similarity: Optional[float] = None
 
 class GroupedSuggestion(BaseModel):
     parent_track: TrackRead

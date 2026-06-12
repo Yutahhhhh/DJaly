@@ -1,15 +1,18 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Search, X } from "lucide-react";
+import { Sparkles, Search, X, Loader2 } from "lucide-react";
 import { Track } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { FilterDialog } from "./FilterDialog";
 import { TrackList } from "./TrackList";
 import { FilterState } from "./types";
-import { ingestService } from "@/services/ingest";
 import { useTrackSearch } from "./useTrackSearch";
-import { LIMIT } from "./constants";
+import { LIMIT, INITIAL_FILTERS } from "./constants";
+import { useIngestion } from "@/contexts/IngestionContext";
+import { tracksService } from "@/services/tracks";
+import { toast } from "@/components/ui/toast";
+import { getErrorDetail } from "@/services/api-client";
 
 interface MusicLibraryProps {
   isPlayerLoading?: boolean;
@@ -19,6 +22,12 @@ export function MusicLibrary({
   isPlayerLoading,
 }: MusicLibraryProps) {
   const [analyzingId, setAnalyzingId] = useState<number | null>(null);
+  const [vibeParams, setVibeParams] = useState<Record<string, number> | null>(
+    null
+  );
+  const [vibeResolving, setVibeResolving] = useState(false);
+
+  const { startIngestion, waitForIngestionComplete } = useIngestion();
 
   const {
     query,
@@ -36,7 +45,32 @@ export function MusicLibrary({
     activeFilterCount,
     setTracks,
     search,
+    totalCount,
   } = useTrackSearch({ limit: LIMIT });
+
+  // Vibe プロンプトの AI 解釈結果を取得して表示 (検索自体はキャッシュを共有)
+  useEffect(() => {
+    let cancelled = false;
+    if (!filters.vibePrompt) {
+      setVibeParams(null);
+      return;
+    }
+    setVibeResolving(true);
+    tracksService
+      .resolveVibe(filters.vibePrompt)
+      .then((res) => {
+        if (!cancelled) setVibeParams(res.resolved ? res.params : null);
+      })
+      .catch(() => {
+        if (!cancelled) setVibeParams(null);
+      })
+      .finally(() => {
+        if (!cancelled) setVibeResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.vibePrompt]);
 
   const observer = useRef<IntersectionObserver | null>(null);
   const lastTrackElementRef = useCallback(
@@ -60,8 +94,14 @@ export function MusicLibrary({
     else if (key === "key") newFilters.key = "";
     else if (key === "artist") newFilters.artist = "";
     else if (key === "album") newFilters.album = "";
+    else if (key === "lyrics") newFilters.lyrics = "";
     else if (key === "genres") newFilters.genres = [];
     else if (key === "subgenres") newFilters.subgenres = [];
+    else if (key === "vibePrompt") newFilters.vibePrompt = "";
+    else if (key === "minYear" || key === "maxYear") {
+      newFilters.minYear = INITIAL_FILTERS.minYear;
+      newFilters.maxYear = INITIAL_FILTERS.maxYear;
+    }
     // Reset ranges to full
     else if (key.toString().includes("Energy")) {
       newFilters.minEnergy = 0.0;
@@ -82,11 +122,14 @@ export function MusicLibrary({
     setAnalyzingId(track.id);
 
     try {
-      await ingestService.ingest([track.filepath], true);
-      // Refresh tracks to get updated analysis
+      // バックグラウンド解析を開始し、WebSocket の完了通知を待ってからリストを更新する
+      await startIngestion([track.filepath], true);
+      await waitForIngestionComplete();
       search(true);
+      toast.success("解析が完了しました", `${track.title || track.filepath}`);
     } catch (error) {
       console.error("Error calling analyze API", error);
+      toast.error("解析の開始に失敗しました", getErrorDetail(error));
     } finally {
       setAnalyzingId(null);
     }
@@ -101,6 +144,19 @@ export function MusicLibrary({
   // Helper to count active filters for display logic (hook provides total count, but we need specific checks for badges)
   const isFeatureActive = (min: number, max: number) => min > 0 || max < 1;
 
+  const formatVibeParams = (params: Record<string, number>) => {
+    const parts: string[] = [];
+    if (params.bpm) parts.push(`BPM~${Math.round(params.bpm)}`);
+    if (params.energy !== undefined) parts.push(`Energy ${params.energy}`);
+    if (params.danceability !== undefined)
+      parts.push(`Dance ${params.danceability}`);
+    if (params.brightness !== undefined)
+      parts.push(`Bright ${params.brightness}`);
+    if (params.year_min || params.year_max)
+      parts.push(`${params.year_min ?? "~"}-${params.year_max ?? "~"}`);
+    return parts.join(" / ");
+  };
+
   return (
     <div className="h-full min-h-0 flex flex-col p-4 gap-4">
       <div className="flex flex-col gap-4">
@@ -110,7 +166,9 @@ export function MusicLibrary({
             Music Library
           </h2>
           <div className="text-sm text-muted-foreground">
-            {tracks.length} tracks loaded
+            {totalCount !== null
+              ? `${tracks.length} / ${totalCount} tracks`
+              : `${tracks.length} tracks loaded`}
           </div>
         </div>
 
@@ -158,6 +216,28 @@ export function MusicLibrary({
               </Badge>
             )}
 
+            {/* Vibe プロンプトの AI 解釈結果 */}
+            {filters.vibePrompt && (
+              <Badge
+                variant="outline"
+                className="gap-1 border-purple-400 text-purple-500 max-w-md"
+              >
+                {vibeResolving ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                <span className="truncate">
+                  "{filters.vibePrompt}"
+                  {vibeParams ? ` → ${formatVibeParams(vibeParams)}` : ""}
+                </span>
+                <X
+                  className="h-3 w-3 cursor-pointer shrink-0"
+                  onClick={() => clearFilter("vibePrompt")}
+                />
+              </Badge>
+            )}
+
             {filters.bpm && (
               <Badge variant="secondary" className="gap-1">
                 BPM: {filters.bpm}
@@ -181,6 +261,55 @@ export function MusicLibrary({
               </Badge>
             )}
 
+            {filters.artist && (
+              <Badge variant="secondary" className="gap-1">
+                Artist: {filters.artist}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("artist")}
+                />
+              </Badge>
+            )}
+            {filters.album && (
+              <Badge variant="secondary" className="gap-1">
+                Album: {filters.album}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("album")}
+                />
+              </Badge>
+            )}
+            {filters.lyrics && (
+              <Badge variant="secondary" className="gap-1">
+                Lyrics: {filters.lyrics}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("lyrics")}
+                />
+              </Badge>
+            )}
+            {filters.genres && filters.genres.length > 0 && (
+              <Badge variant="secondary" className="gap-1">
+                Genres: {filters.genres.slice(0, 3).join(", ")}
+                {filters.genres.length > 3 && ` +${filters.genres.length - 3}`}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("genres")}
+                />
+              </Badge>
+            )}
+            {filters.subgenres && filters.subgenres.length > 0 && (
+              <Badge variant="secondary" className="gap-1">
+                Subgenres: {filters.subgenres.slice(0, 3).join(", ")}
+                {filters.subgenres.length > 3 &&
+                  ` +${filters.subgenres.length - 3}`}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("subgenres")}
+                />
+              </Badge>
+            )}
+
             {/* Feature Badges */}
             {isFeatureActive(filters.minEnergy, filters.maxEnergy) && (
               <Badge variant="secondary" className="gap-1">
@@ -188,6 +317,18 @@ export function MusicLibrary({
                 <X
                   className="h-3 w-3 cursor-pointer"
                   onClick={() => clearFilter("minEnergy")}
+                />
+              </Badge>
+            )}
+            {isFeatureActive(
+              filters.minDanceability,
+              filters.maxDanceability
+            ) && (
+              <Badge variant="secondary" className="gap-1">
+                Dance: {filters.minDanceability} - {filters.maxDanceability}
+                <X
+                  className="h-3 w-3 cursor-pointer"
+                  onClick={() => clearFilter("minDanceability")}
                 />
               </Badge>
             )}

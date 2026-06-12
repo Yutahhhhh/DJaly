@@ -143,20 +143,29 @@ class RecommendationAppService:
         matched_sims = similarities[matched_indices]
         sorted_indices = matched_indices[np.argsort(matched_sims)[::-1]]
         top_indices = sorted_indices[:50]
-        
+
         top_ids = [candidate_ids[i] for i in top_indices]
-        
+
         if not top_ids: return []
-        
+
         track_map = self.repository.get_tracks_by_ids(top_ids)
-        
+
         suggestions = []
-        for i, idx in enumerate(top_indices):
+        for idx in top_indices:
             cid = candidate_ids[idx]
             if cid in track_map:
+                t = track_map[cid]
+                # フロントが期待する flat 形式で返す
+                # (従来の TrackSuggestion(track=..., similarity=...) はスキーマ不一致で
+                #  候補ヒット時に常に ValidationError になっていた)
                 suggestions.append(TrackSuggestion(
-                    track=track_map[cid],
-                    similarity=float(matched_sims[i])
+                    id=t.id,
+                    title=t.title or "",
+                    artist=t.artist or "",
+                    bpm=t.bpm or 0.0,
+                    filepath=t.filepath,
+                    current_genre=t.genre,
+                    similarity=float(similarities[idx])
                 ))
-                
+
         return suggestions

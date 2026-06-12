@@ -14,6 +14,7 @@ import { DashboardView } from "@/components/dashboard/DashboardView";
 import { API_BASE_URL } from "@/services/api-client";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Updater } from "@/components/Updater";
+import { Toaster } from "@/components/ui/toast";
 import { usePlayerStore } from "@/stores/playerStore";
 
 function App() {
@@ -100,7 +101,7 @@ function App() {
         <MusicPlayer
           onLoadingChange={setIsPlayerLoading}
         />
-        <GlobalProgressIndicator />
+        <Toaster />
       </div>
       </MetadataProvider>
     </IngestionProvider>

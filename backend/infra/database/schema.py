@@ -5,7 +5,16 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # 現在のスキーマバージョン
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+
+# バージョンごとのマイグレーション SQL (version: [statements])
+MIGRATIONS = {
+    2: [
+        # ワードプレイ用キーワード抽出結果の永続キャッシュ
+        "ALTER TABLE lyrics ADD COLUMN IF NOT EXISTS keywords_json VARCHAR",
+        "ALTER TABLE lyrics ADD COLUMN IF NOT EXISTS keywords_content_hash VARCHAR",
+    ],
+}
 
 def get_db_schema_sql() -> str:
     """
@@ -65,6 +74,8 @@ def get_db_schema_sql() -> str:
         content VARCHAR DEFAULT '',
         source VARCHAR DEFAULT 'user',
         language VARCHAR,
+        keywords_json VARCHAR,
+        keywords_content_hash VARCHAR,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -146,6 +157,10 @@ def init_raw_db(conn_engine: Engine):
             
             current_version = get_current_schema_version(conn)
             if current_version < CURRENT_SCHEMA_VERSION:
+                for version in range(current_version + 1, CURRENT_SCHEMA_VERSION + 1):
+                    for stmt in MIGRATIONS.get(version, []):
+                        logger.info(f"Applying migration v{version}: {stmt}")
+                        conn.execute(text(stmt))
                 set_schema_version(conn, CURRENT_SCHEMA_VERSION)
     except Exception as e:
         logger.error(f"Failed to initialize database schema: {e}")

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlmodel import Session
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from infra.database.connection import get_session
 from models import Track
 from api.schemas.track import TrackRead
 from app.services.track_app_service import TrackAppService
 from app.services.recommendation_app_service import RecommendationAppService
+from utils.llm import generate_vibe_parameters
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -18,6 +19,18 @@ class TrackInfoUpdate(BaseModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     year: Optional[int] = None
+
+@router.post("/api/vibe/resolve")
+def resolve_vibe_prompt(
+    prompt: str = Body(..., embed=True),
+    session: Session = Depends(get_session)
+) -> Dict[str, Any]:
+    """
+    自然言語の Vibe プロンプトを LLM でオーディオ特徴量に変換する。
+    結果は TTL キャッシュされ、以降の /api/tracks 検索ではキャッシュが再利用される。
+    """
+    params = generate_vibe_parameters(prompt, session=session)
+    return {"prompt": prompt, "params": params, "resolved": bool(params)}
 
 @router.patch("/api/tracks/{track_id}/info")
 def update_track_info(
@@ -138,6 +151,64 @@ def get_tracks(
         limit=limit,
         offset=offset
     )
+
+@router.get("/api/tracks/count")
+def get_tracks_count(
+    status: str = "all",
+    q: Optional[str] = None,
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    genres: Optional[List[str]] = Query(None),
+    subgenres: Optional[List[str]] = Query(None),
+    key: Optional[str] = None,
+    bpm: Optional[float] = None,
+    bpm_range: float = 5.0,
+    min_duration: Optional[float] = None,
+    max_duration: Optional[float] = None,
+    min_energy: Optional[float] = None,
+    max_energy: Optional[float] = None,
+    min_danceability: Optional[float] = None,
+    max_danceability: Optional[float] = None,
+    min_brightness: Optional[float] = None,
+    max_brightness: Optional[float] = None,
+    min_year: Optional[int] = None,
+    max_year: Optional[int] = None,
+    year_status: str = "all",
+    lyrics_status: str = "all",
+    lyrics: Optional[str] = None,
+    vibe_prompt: Optional[str] = None,
+    session: Session = Depends(get_session)
+):
+    """検索条件に一致する楽曲の総数を返す (一覧表示のカウント用)"""
+    app_service = TrackAppService(session)
+    ids = app_service.get_track_ids(
+        status=status,
+        q=q,
+        title=title,
+        artist=artist,
+        album=album,
+        genres=genres,
+        subgenres=subgenres,
+        key=key,
+        bpm=bpm,
+        bpm_range=bpm_range,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        min_energy=min_energy,
+        max_energy=max_energy,
+        min_danceability=min_danceability,
+        max_danceability=max_danceability,
+        min_brightness=min_brightness,
+        max_brightness=max_brightness,
+        min_year=min_year,
+        max_year=max_year,
+        year_status=year_status,
+        lyrics_status=lyrics_status,
+        lyrics=lyrics,
+        vibe_prompt=vibe_prompt
+    )
+    return {"count": len(ids)}
 
 @router.get("/api/tracks/ids", response_model=List[int])
 def get_track_ids(

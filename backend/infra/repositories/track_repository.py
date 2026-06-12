@@ -1,11 +1,12 @@
 from typing import List, Optional, Dict, Any, Union
 from sqlmodel import Session, select, or_, and_, col, text
-from sqlalchemy import func
+from sqlalchemy import func, bindparam
 import json
 import re
 
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
+from domain.constants import EMBEDDING_DIM
 
 class TrackRepository:
     def __init__(self, session: Session):
@@ -76,15 +77,21 @@ class TrackRepository:
 
         try:
             vec_str = target_embedding.embedding_json
-            
+
             # TrackEmbeddingをJOINして類似度計算、LyricsをOUTER JOINして歌詞の有無を確認
             # DuckDB 独自の array_cosine_similarity を使用
+            # (ベクトル文字列はバインドパラメータで渡し、次元数は定数で共有)
+            similarity_order = text(
+                f"array_cosine_similarity("
+                f"CAST(track_embeddings.embedding_json AS FLOAT[{EMBEDDING_DIM}]), "
+                f"CAST(:target_vec AS FLOAT[{EMBEDDING_DIM}])) DESC"
+            ).bindparams(bindparam("target_vec", value=vec_str))
             query = (
                 select(Track, Lyrics.content)
                 .join(TrackEmbedding, Track.id == TrackEmbedding.track_id)
                 .outerjoin(Lyrics, Track.id == Lyrics.track_id)
                 .where(Track.id != track_id)
-                .order_by(text(f"array_cosine_similarity(CAST(track_embeddings.embedding_json AS FLOAT[200]), CAST('{vec_str}' AS FLOAT[200])) DESC"))
+                .order_by(similarity_order)
                 .limit(limit)
             )
             
@@ -134,25 +141,39 @@ class TrackRepository:
         """検索条件や Vibe パラメータをクエリに適用する内部ヘルパー"""
         
         # 1. Vibe 検索 (LLM 推論値との距離でソート)
+        # target_params は utils.llm.sanitize_vibe_params 済みの想定だが、
+        # 外部から直接渡されるケースに備えて数値以外は無視する
+        def _safe_num(value) -> Optional[float]:
+            if isinstance(value, bool):
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
         if target_params:
-            if min_year is None and "year_min" in target_params:
-                min_year = int(target_params["year_min"])
-            if max_year is None and "year_max" in target_params:
-                max_year = int(target_params["year_max"])
+            year_min_val = _safe_num(target_params.get("year_min"))
+            if min_year is None and year_min_val is not None:
+                min_year = int(year_min_val)
+            year_max_val = _safe_num(target_params.get("year_max"))
+            if max_year is None and year_max_val is not None:
+                max_year = int(year_max_val)
 
             dist_expr = 0
-            if "bpm" in target_params and target_params["bpm"] > 0:
-                dist_expr += (Track.bpm - target_params["bpm"]) * (Track.bpm - target_params["bpm"]) * 0.0001
-            if "energy" in target_params:
-                dist_expr += (Track.energy - target_params["energy"]) * (Track.energy - target_params["energy"])
-            if "danceability" in target_params:
-                dist_expr += (Track.danceability - target_params["danceability"]) * (Track.danceability - target_params["danceability"])
-            if "brightness" in target_params:
-                dist_expr += (Track.brightness - target_params["brightness"]) * (Track.brightness - target_params["brightness"])
-            if "noisiness" in target_params:
-                dist_expr += (Track.noisiness - target_params["noisiness"]) * (Track.noisiness - target_params["noisiness"])
+            bpm_val = _safe_num(target_params.get("bpm"))
+            if bpm_val is not None and bpm_val > 0:
+                dist_expr += (Track.bpm - bpm_val) * (Track.bpm - bpm_val) * 0.0001
+            for feat in ("energy", "danceability", "brightness", "noisiness"):
+                feat_val = _safe_num(target_params.get(feat))
+                if feat_val is not None:
+                    feat_col = getattr(Track, feat)
+                    dist_expr += (feat_col - feat_val) * (feat_col - feat_val)
 
-            query = query.order_by(dist_expr)
+            if isinstance(dist_expr, int):
+                # 有効な数値パラメータが1つもない場合は通常ソート
+                query = query.order_by(Track.created_at.desc())
+            else:
+                query = query.order_by(dist_expr)
         else:
             query = query.order_by(Track.created_at.desc())
         

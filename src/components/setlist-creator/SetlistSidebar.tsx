@@ -5,6 +5,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus, ListMusic, MoreVertical, Trash2, Edit2, Download, Loader2 } from "lucide-react";
 import { Setlist, setlistsService } from "@/services/setlists";
 import { downloadFile } from "@/lib/download";
+import { toast } from "@/components/ui/toast";
+import { getErrorDetail } from "@/services/api-client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,9 +51,26 @@ export function SetlistSidebar({
   const handleExport = async (setlist: Setlist) => {
     setExportingId(setlist.id);
     try {
+      // エクスポート前にファイルの存在を検証し、欠落があれば確認する
+      const validation = await setlistsService.validateExport(setlist.id);
+      if (validation.missing.length > 0) {
+        const names = validation.missing
+          .slice(0, 5)
+          .map((m) => `${m.artist ?? ""} - ${m.title ?? m.filepath}`)
+          .join("\n");
+        const proceed = window.confirm(
+          `${validation.missing.length} 曲のファイルが見つかりません:\n${names}\n\n欠落曲を除外してエクスポートしますか？`
+        );
+        if (!proceed) return;
+      }
+
       const url = setlistsService.getExportUrl(setlist.id);
       const filename = `${setlist.name.replace(/[\\/*?:"<>|]/g, "")}.m3u8`;
       await downloadFile(url, filename);
+      toast.success("M3U8 をエクスポートしました", filename);
+    } catch (e) {
+      console.error(e);
+      toast.error("エクスポートに失敗しました", getErrorDetail(e));
     } finally {
       setExportingId(null);
     }

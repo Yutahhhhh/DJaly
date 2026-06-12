@@ -53,6 +53,35 @@ async def cancel_batch_analysis():
     await genre_background_service.cancel_analysis()
     return {"status": "cancelled"}
 
+@router.post("/api/genres/analyze-all")
+async def start_analyze_all(
+    body: Dict[str, str],
+    session: Session = Depends(get_session)
+):
+    """
+    ライブラリ全体のジャンル解析をバックグラウンドで開始する。
+    mode="keep": 未検証/Unknown の曲のみ / mode="overwrite": 全曲を再解析。
+    進捗は /ws/genres/analysis で配信される。
+    """
+    mode = body.get("mode", "keep")
+    overwrite = mode == "overwrite"
+
+    service = GenreAppService(session)
+    if overwrite:
+        track_ids = service.track_repository.search_track_ids()
+    else:
+        track_ids = service.get_all_unknown_track_ids(AnalysisMode.BOTH)
+
+    if not track_ids:
+        return {"status": "noop", "message": "No tracks to analyze"}
+
+    success = await genre_background_service.start_batch_analysis(
+        list(track_ids), overwrite, AnalysisMode.BOTH
+    )
+    if not success:
+        raise HTTPException(status_code=409, detail="Analysis already in progress")
+    return {"status": "started", "message": f"Analyzing {len(track_ids)} tracks"}
+
 @router.get("/api/genres/list", response_model=List[str])
 def get_all_genres(session: Session = Depends(get_session)):
     """

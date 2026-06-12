@@ -25,6 +25,36 @@ def update_setting(setting: SettingUpdate, session: Session = Depends(get_sessio
     service = SettingAppService(session)
     return service.update_setting(setting)
 
+@router.post("/api/settings/llm-test")
+def test_llm_connection(session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """
+    設定中の LLM プロバイダーに対して実際に短い生成を行い、接続を検証する。
+    (API キーの存在チェックだけでは誤ったキーを検出できないため)
+    """
+    import time as _time
+    from utils.llm import generate_text, is_llm_error, get_llm_config
+
+    provider, model_name, _api_key, _ollama_host = get_llm_config(session)
+    start = _time.time()
+    result = generate_text(session, "Reply with exactly: OK", temperature=0.0)
+    latency_ms = int((_time.time() - start) * 1000)
+
+    if is_llm_error(result):
+        return {
+            "ok": False,
+            "provider": provider,
+            "model": model_name,
+            "latency_ms": latency_ms,
+            "error": result,
+        }
+    return {
+        "ok": True,
+        "provider": provider,
+        "model": model_name,
+        "latency_ms": latency_ms,
+        "response": result[:100],
+    }
+
 # --- CSV Export ---
 @router.get("/api/settings/export/csv")
 def export_csv(session: Session = Depends(get_session)):

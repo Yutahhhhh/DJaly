@@ -77,12 +77,24 @@ def export_setlist_m3u8(setlist_id: int, session: Session = Depends(get_session)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+@router.get("/api/setlists/{setlist_id}/export/validate")
+def validate_setlist_export(setlist_id: int, session: Session = Depends(get_session)):
+    """
+    エクスポート前にセットリスト内の楽曲ファイルの存在を検証する。
+    """
+    service = SetlistAppService(session)
+    try:
+        return service.validate_export(setlist_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 @router.get("/api/recommendations/next")
 def recommend_next_track(
-    track_id: int, 
-    limit: int = 20, 
+    track_id: int,
+    limit: int = 20,
     preset_id: Optional[int] = Query(None),
     genres: Optional[List[str]] = Query(None),
+    subgenres: Optional[List[str]] = Query(None),
     session: Session = Depends(get_session)
 ):
     """
@@ -91,7 +103,7 @@ def recommend_next_track(
     """
     service = SetlistAppService(session)
     try:
-        return service.recommend_next_track(track_id, limit, preset_id, genres)
+        return service.recommend_next_track(track_id, limit, preset_id, genres, subgenres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -101,6 +113,7 @@ def generate_auto_setlist(
     limit: int = Body(10),
     seed_track_ids: Optional[List[int]] = Body(None),
     genres: Optional[List[str]] = Body(None),
+    subgenres: Optional[List[str]] = Body(None),
     session: Session = Depends(get_session)
 ):
     """
@@ -108,7 +121,7 @@ def generate_auto_setlist(
     """
     service = SetlistAppService(session)
     try:
-        return service.generate_auto_setlist(preset_id, limit, seed_track_ids, genres)
+        return service.generate_auto_setlist(preset_id, limit, seed_track_ids, genres, subgenres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -118,6 +131,7 @@ def generate_path_setlist(
     end_track_id: int = Body(...),
     length: int = Body(10),
     genres: Optional[List[str]] = Body(None),
+    subgenres: Optional[List[str]] = Body(None),
     session: Session = Depends(get_session)
 ):
     """
@@ -125,13 +139,14 @@ def generate_path_setlist(
     """
     service = SetlistAppService(session)
     try:
-        return service.generate_path_setlist(start_track_id, end_track_id, length, genres)
+        return service.generate_path_setlist(start_track_id, end_track_id, length, genres, subgenres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
 @router.patch("/api/setlist-tracks/{setlist_track_id}/wordplay")
 def update_setlist_track_wordplay(
     setlist_track_id: int,
-    wordplay_json: str = Body(..., embed=True),
+    wordplay_json: Optional[str] = Body(None, embed=True),
     session: Session = Depends(get_session)
 ):
     from domain.models.setlist import SetlistTrack

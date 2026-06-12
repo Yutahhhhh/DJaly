@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -18,6 +18,9 @@ import { TrackSelector } from "./TrackSelector";
 import { TrackRow } from "./TrackRow";
 import { setlistsService, Setlist, SetlistTrack } from "@/services/setlists";
 import { Track } from "@/types";
+import { toast } from "@/components/ui/toast";
+import { getErrorDetail } from "@/services/api-client";
+import { Loader2, Check } from "lucide-react";
 
 export function SetlistCreator() {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
@@ -31,6 +34,15 @@ export function SetlistCreator() {
   } | null>(null);
   const [bridgeStart, setBridgeStart] = useState<Track | null>(null);
   const [bridgeEnd, setBridgeEnd] = useState<Track | null>(null);
+
+  // 保存の直列化キューと保存状態 (連続ドラッグ時の競合によるトラック消失を防ぐ)
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const [pendingSaves, setPendingSaves] = useState(0);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const isSaving = pendingSaves > 0;
+
+  // Undo スタック (直近20操作分のスナップショット)
+  const undoStack = useRef<SetlistTrack[][]>([]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -58,15 +70,51 @@ export function SetlistCreator() {
       const t = await setlistsService.getTracks(id);
       setTracks(t);
       setSelectedTrack(null);
+      undoStack.current = []; // セットリスト切替時に Undo 履歴をリセット
     }
   };
 
+  // Cmd/Ctrl+Z で直前の編集を取り消す
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key !== "z" || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      // テキスト入力中はブラウザ標準の Undo を優先
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const prev = undoStack.current.pop();
+      if (prev && activeSetlist) {
+        e.preventDefault();
+        commitTracksToDB(prev, false);
+        toast.info("直前の編集を取り消しました");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSetlist, tracks]);
+
   /**
    * DBへの永続化処理
-   * 各楽曲の wordplay_json をチェックし、前の楽曲との整合性が取れない場合は削除する
+   * 各楽曲の wordplay_json をチェックし、前の楽曲との整合性が取れない場合は削除する。
+   * 保存はキューで直列化され、連続操作時のリクエスト交差による消失を防ぐ。
    */
-  const commitTracksToDB = async (newTracks: (Track | SetlistTrack)[]) => {
+  const commitTracksToDB = async (
+    newTracks: (Track | SetlistTrack)[],
+    recordUndo: boolean = true
+  ) => {
     if (activeSetlist) {
+      // Undo 用に変更前のスナップショットを保存
+      if (recordUndo) {
+        undoStack.current = [...undoStack.current.slice(-19), tracks];
+      }
+
       // 1. 整合性チェック: 前の楽曲が変わっていたら wordplay_json を無効化する
       const validatedTracks = newTracks.map((track, index) => {
         const st = track as SetlistTrack;
@@ -93,22 +141,33 @@ export function SetlistCreator() {
       // UIに即座に反映 (楽観的アップデート)
       setTracks(validatedTracks as SetlistTrack[]);
 
-      try {
-        const updatePayload = validatedTracks.map((t) => ({
-          id: t.id,
-          wordplay_json: t.wordplay_json || null,
-        }));
+      const setlistId = activeSetlist.id;
+      const doSave = async () => {
+        setPendingSaves((n) => n + 1);
+        try {
+          const updatePayload = validatedTracks.map((t) => ({
+            id: t.id,
+            wordplay_json: t.wordplay_json || null,
+          }));
 
-        // 保存実行
-        await setlistsService.updateTracks(activeSetlist.id, updatePayload);
+          // 保存実行
+          await setlistsService.updateTracks(setlistId, updatePayload);
 
-        // 最終的な状態をDBから取得
-        const updatedTracks = await setlistsService.getTracks(activeSetlist.id);
-        setTracks(updatedTracks);
-      } catch (e) {
-        console.error("Failed to commit tracks:", e);
-        // エラー時はバリデーション済みのローカルステートを維持 (サーバーとの同期は次回の操作に期待)
-      }
+          // 最終的な状態をDBから取得
+          const updatedTracks = await setlistsService.getTracks(setlistId);
+          setTracks(updatedTracks);
+          setLastSavedAt(Date.now());
+        } catch (e) {
+          console.error("Failed to commit tracks:", e);
+          toast.error("セットリストの保存に失敗しました", getErrorDetail(e));
+        } finally {
+          setPendingSaves((n) => n - 1);
+        }
+      };
+
+      // 直列化: 前の保存が完了してから次を実行
+      saveQueue.current = saveQueue.current.then(doSave);
+      await saveQueue.current;
     } else {
       setTracks(newTracks as SetlistTrack[]);
     }
@@ -122,6 +181,7 @@ export function SetlistCreator() {
       setTracks(updatedTracks);
     } catch (e) {
       console.error("ワードプレイの削除に失敗しました:", e);
+      toast.error("ワードプレイの削除に失敗しました", getErrorDetail(e));
     }
   };
 
@@ -254,7 +314,19 @@ export function SetlistCreator() {
         />
 
         {activeSetlist ? (
-          <div className="flex-1 flex min-w-0 divide-x divide-border">
+          <div className="flex-1 flex min-w-0 divide-x divide-border relative">
+            {/* 保存状態インジケーター */}
+            <div className="absolute top-2 right-2 z-30 pointer-events-none">
+              {isSaving ? (
+                <span className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground bg-background/90 border rounded-full px-2.5 py-1 shadow-sm">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+                </span>
+              ) : lastSavedAt ? (
+                <span className="flex items-center gap-1.5 text-[10px] font-semibold text-green-600 bg-background/90 border border-green-500/30 rounded-full px-2.5 py-1 shadow-sm">
+                  <Check className="h-3 w-3" /> Saved
+                </span>
+              ) : null}
+            </div>
             <SetlistEditor
               tracks={tracks}
               onRemoveTrack={(idx: number) => {
