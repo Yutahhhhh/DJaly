@@ -6,15 +6,16 @@ from api.routers import (
     filesystem,
     genres,
     ingest,
-    presets,
-    prompts,
     setlists,
     settings as settings_router,
     system,
     tracks,
     lyrics,
-    metadata
+    metadata,
+    mcp_info
 )
+from mcp_server.server import mcp_app_holder
+from mcp_server.instance import mcp as mcp_server
 
 from config import settings
 import os
@@ -23,7 +24,12 @@ import os
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()  # DuckDBの初期化 (Raw SQLによるSequence/Table作成)
-    yield
+    # マウントされたサブアプリは lifespan イベントを直接受け取らないため、
+    # MCP の session_manager は親アプリの lifespan 内で明示的に起動する。
+    # session_manager は run() 完了後に再利用できないため、lifespan のたびに作り直す。
+    mcp_app_holder.refresh()
+    async with mcp_server.session_manager.run():
+        yield
     close_db() # 終了時にDB接続を閉じる
 
 app = FastAPI(title="Djaly Backend API", lifespan=lifespan)
@@ -55,11 +61,13 @@ async def root():
 app.include_router(filesystem.router)
 app.include_router(genres.router)
 app.include_router(ingest.router)
-app.include_router(presets.router)
-app.include_router(prompts.router)
 app.include_router(setlists.router)
 app.include_router(settings_router.router)
 app.include_router(system.router)
 app.include_router(tracks.router)
 app.include_router(lyrics.router)
 app.include_router(metadata.router)
+app.include_router(mcp_info.router)
+
+# MCP サーバーを /mcp にマウント (外部の MCP クライアントが Streamable HTTP で接続する)
+app.mount("/", mcp_app_holder)

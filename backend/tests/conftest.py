@@ -48,7 +48,7 @@ def session_fixture(mocker) -> Generator[Session, None, None]:
     # 2. アプリ起動時の init_db がテスト中に走って競合しないようモック化
     mocker.patch("infra.database.connection.init_db")
 
-    # 3. 初期データの投入 (Prompt, Preset等)
+    # 3. 初期データの投入 (現在は初期データなし、互換性のため呼び出しのみ維持)
     with Session(engine) as s:
         seed_initial_data(s)
 

@@ -75,28 +75,18 @@ def test_export_m3u8(client: TestClient, session: Session):
     assert "#EXTM3U" in response.text
     assert "/music/song.mp3" in response.text
 
-def test_recommend_next_track(client: TestClient, session: Session):
+def test_recommend_next_track(client: TestClient, session: Session, mocker):
     # データ準備
-    t1 = Track(filepath="/r1.mp3", title="R1", artist="A", album="B", genre="Techno", bpm=120, duration=100, key="1A")
-    t2 = Track(filepath="/r2.mp3", title="R2", artist="A", album="B", genre="Techno", bpm=122, duration=100, key="1A")
+    t1 = Track(filepath="/r1.mp3", title="R1", artist="A", album="B", genre="Techno", bpm=120, duration=100, key="1A", energy=0.8)
+    t2 = Track(filepath="/r2.mp3", title="R2", artist="A", album="B", genre="Techno", bpm=122, duration=100, key="1A", energy=0.8)
     session.add(t1)
     session.add(t2)
     session.commit()
-    
-    # EmbeddingがないとVector Searchでエラーになる可能性があるが、
-    # SetlistServiceの実装次第。Embeddingがない場合はBPM/Keyだけでレコメンドするか、エラーになるか。
-    # TrackService.get_similar_tracks はEmbedding必須だが、
-    # SetlistService.recommend_next_track は Hybrid Scoring なので、
-    # Embeddingがなくても動くように実装されているか確認が必要。
-    # 実装を見ると、Embeddingがないとエラーになる可能性が高い (TrackServiceを使う場合)。
-    # ここではモックを使って回避するか、Embeddingデータを入れる。
-    
-    # Embeddingデータを入れるのは大変なので、SetlistService.recommend_next_track をモックする手もあるが、
-    # 統合テストとしては動かしたい。
-    # TrackEmbeddingテーブルにダミーデータを入れる。
+
+    # Embeddingデータを入れる
     from models import TrackEmbedding
     import json
-    
+
     # ダミーの200次元ベクトル
     vec = [0.1] * 200
     te1 = TrackEmbedding(track_id=t1.id, embedding_json=json.dumps(vec))
@@ -104,8 +94,14 @@ def test_recommend_next_track(client: TestClient, session: Session):
     session.add(te1)
     session.add(te2)
     session.commit()
-    
-    response = client.get("/api/recommendations/next", params={"track_id": t1.id})
+
+    # vibe 指定時は LLM の vibe パラメータ解決をモック
+    mocker.patch(
+        "app.services.setlist_app_service.generate_vibe_parameters",
+        return_value={"bpm": 120, "energy": 0.8},
+    )
+
+    response = client.get("/api/recommendations/next", params={"track_id": t1.id, "vibe": "peak time techno"})
     assert response.status_code == 200
     data = response.json()
     # 自分自身は除外されるはずなので、t2が返る
@@ -113,27 +109,21 @@ def test_recommend_next_track(client: TestClient, session: Session):
     assert data[0]["title"] == "R2"
 
 def test_generate_auto_setlist(client: TestClient, session: Session, mocker):
-    # LLMを使うのでモックが必要
-    # conftest.pyでgenerate_textはモック済みだが、
-    # generate_auto_setlistがどういうレスポンスを期待しているかによる。
-    # SetlistService.generate_auto_setlist -> LLM -> JSON list of track IDs or criteria?
-    # 実装を確認していないが、とりあえず呼び出してエラーにならないか確認。
-    
-    # プリセットが必要
-    from models import Preset, Prompt
-    prompt = Prompt(name="P", content="C", is_default=False, display_order=1)
-    session.add(prompt)
+    t1 = Track(filepath="/a1.mp3", title="A1", artist="A", album="B", genre="House", bpm=120, duration=100, key="5A", energy=0.8)
+    t2 = Track(filepath="/a2.mp3", title="A2", artist="A", album="B", genre="House", bpm=122, duration=100, key="5A", energy=0.8)
+    t3 = Track(filepath="/a3.mp3", title="A3", artist="A", album="B", genre="House", bpm=124, duration=100, key="5A", energy=0.8)
+    session.add(t1)
+    session.add(t2)
+    session.add(t3)
     session.commit()
-    preset = Preset(name="Pre", description="D", preset_type="generation", filters_json="{}", prompt_id=prompt.id)
-    session.add(preset)
-    session.commit()
-    
-    # モックの戻り値を調整する必要があるかもしれない
-    # SetlistServiceの実装詳細が不明だが、とりあえず実行
-    
-    # エラーになる可能性が高いので、SetlistAppService.generate_auto_setlist自体をモックする
-    mock_gen = mocker.patch("app.services.setlist_app_service.SetlistAppService.generate_auto_setlist")
-    mock_gen.return_value = []
-    
-    response = client.post("/api/recommendations/auto", json={"preset_id": preset.id})
+
+    # LLM の vibe パラメータ解決をモック
+    mocker.patch(
+        "app.services.setlist_app_service.generate_vibe_parameters",
+        return_value={"bpm": 120, "energy": 0.8},
+    )
+
+    response = client.post("/api/recommendations/auto", json={"vibe": "deep house warm up", "limit": 3})
     assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3

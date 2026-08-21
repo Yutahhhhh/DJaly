@@ -3,15 +3,12 @@ import io
 import json
 import logging
 import unicodedata
-from typing import List, Dict, Any, Optional, Tuple
-from sqlmodel import Session, select, text
+from typing import List, Dict, Any, Tuple
+from sqlmodel import Session, select
 from domain.models.track import Track, TrackAnalysis
-from domain.models.preset import Preset
-from domain.models.prompt import Prompt
 from api.schemas.settings import (
     CsvImportRow, ImportAnalysisResult, ImportExecuteRequest,
-    MetadataImportRow, MetadataImportAnalysisResult, MetadataImportExecuteRequest,
-    PresetImportRow, PresetImportAnalysisResult, PresetImportExecuteRequest
+    MetadataImportRow, MetadataImportAnalysisResult, MetadataImportExecuteRequest
 )
 
 logger = logging.getLogger(__name__)
@@ -197,52 +194,3 @@ class CsvAppService:
                         matched_original_ids.add(original.id); found_move = True; break
             if not found_move: new_tracks.append(import_row)
         return ImportAnalysisResult(total_rows=0, new_tracks=new_tracks, duplicates=duplicates, path_updates=path_updates)
-
-    def _create_or_update_prompt(self, name: str, content: str, prompt_id: Optional[int] = None) -> int:
-        if prompt_id:
-            p = self.session.get(Prompt, prompt_id)
-            if p: p.content = content; self.session.add(p); return p.id
-        new_p = Prompt(name=f"Imported: {name}", content=content, is_default=False)
-        self.session.add(new_p); self.session.commit(); self.session.refresh(new_p); return new_p.id
-
-    def export_presets_csv(self) -> str:
-        presets = self.session.exec(select(Preset)).all()
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["name", "description", "preset_type", "prompt_content"])
-        for p in presets:
-            prompt = self.session.get(Prompt, p.prompt_id) if p.prompt_id else None
-            writer.writerow([p.name, p.description or "", p.preset_type, prompt.content if prompt else ""])
-        return output.getvalue()
-
-    def analyze_presets_import(self, csv_content: str) -> PresetImportAnalysisResult:
-        reader = self._parse_csv_content(csv_content)
-        existing = self.session.exec(select(Preset)).all()
-        p_map = {p.name: p for p in existing}
-        new_p, updates, dups = [], [], []
-        for row in reader:
-            name = row.get('name', '').strip()
-            if not name: continue
-            import_row = PresetImportRow(name=name, description=row.get('description', ''), preset_type=row.get('preset_type', 'all'), filters_json="{}", prompt_content=row.get('prompt_content', ''))
-            if name in p_map:
-                curr = p_map[name]; prompt = self.session.get(Prompt, curr.prompt_id) if curr.prompt_id else None
-                curr_c = prompt.content if prompt else ""
-                if (import_row.description != (curr.description or "") or import_row.preset_type != curr.preset_type or import_row.prompt_content != curr_c):
-                    updates.append({"current": {"name": curr.name, "description": curr.description, "preset_type": curr.preset_type, "prompt_content": curr_c}, "new": import_row})
-                else: dups.append(import_row)
-            else: new_p.append(import_row)
-        return PresetImportAnalysisResult(total_rows=len(new_p)+len(updates)+len(dups), new_presets=new_p, updates=updates, duplicates=dups)
-
-    def execute_presets_import(self, req: PresetImportExecuteRequest) -> int:
-        count = 0
-        all_items = [(p, True) for p in req.new_presets] + [(PresetImportRow(**u["new"]), False) for u in req.updates]
-        for p_data, is_new in all_items:
-            if is_new:
-                pid = self._create_or_update_prompt(p_data.name, p_data.prompt_content or "")
-                self.session.add(Preset(name=p_data.name, description=p_data.description, preset_type=p_data.preset_type, filters_json=p_data.filters_json, prompt_id=pid))
-            else:
-                ex = self.session.exec(select(Preset).where(Preset.name == p_data.name)).first()
-                if ex: ex.description, ex.preset_type = p_data.description, p_data.preset_type; ex.prompt_id = self._create_or_update_prompt(p_data.name, p_data.prompt_content or "", ex.prompt_id); self.session.add(ex)
-            count += 1
-        self.session.commit()
-        return count

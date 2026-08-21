@@ -26,16 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
-  settingsService, 
-  LibraryAnalysisResult, 
-  MetadataAnalysisResult, 
-  PresetAnalysisResult 
+import {
+  settingsService,
+  LibraryAnalysisResult,
+  MetadataAnalysisResult,
 } from "@/services/settings";
 import { ImportSection } from "./ImportSection";
 import { LibraryImportDialog } from "./LibraryImportDialog";
 import { MetadataImportDialog } from "./MetadataImportDialog";
-import { PresetImportDialog } from "./PresetImportDialog";
 import { useTheme } from "@/components/theme-provider";
 import { downloadFile } from "@/lib/download";
 
@@ -144,10 +142,6 @@ export function SettingsView() {
   const [metadataModalOpen, setMetadataModalOpen] = useState(false);
   const [metadataAnalysis, setMetadataAnalysis] =
     useState<MetadataAnalysisResult | null>(null);
-  
-  // Preset Import State
-  const [presetModalOpen, setPresetModalOpen] = useState(false);
-  const [presetAnalysis, setPresetAnalysis] = useState<PresetAnalysisResult | null>(null);
 
   // Export State
   const [exportingSectionId, setExportingSectionId] = useState<string | null>(null);
@@ -232,23 +226,20 @@ export function SettingsView() {
     }
   };
 
-  const handleAnalyze = async (file: File, type: 'library' | 'metadata' | 'presets') => {
+  const handleAnalyze = async (file: File, type: 'library' | 'metadata') => {
     setIsAnalyzing(true);
     if (type === 'library') { setImportModalOpen(true); setAnalysisResult(null); }
     if (type === 'metadata') { setMetadataModalOpen(true); setMetadataAnalysis(null); }
-    if (type === 'presets') { setPresetModalOpen(true); setPresetAnalysis(null); }
 
     try {
       const result = await settingsService.analyzeImport(file, type);
       if (type === 'library') setAnalysisResult(result as LibraryAnalysisResult);
       if (type === 'metadata') setMetadataAnalysis(result as MetadataAnalysisResult);
-      if (type === 'presets') setPresetAnalysis(result as PresetAnalysisResult);
     } catch (error: any) {
       console.error(error);
       if (type === 'library') setImportModalOpen(false);
       if (type === 'metadata') setMetadataModalOpen(false);
-      if (type === 'presets') setPresetModalOpen(false);
-      
+
       setStatus(`${type} Analysis Failed: ${error.message}`);
       setIsError(true);
     } finally {
@@ -297,30 +288,6 @@ export function SettingsView() {
     } catch (error: any) {
       console.error(error);
       setStatus(`Metadata Import Failed: ${error.message}`);
-      setIsError(true);
-    } finally {
-      setIsImporting(false);
-    }
-  };
-
-  const handleExecutePresetImport = async () => {
-    if (!presetAnalysis) return;
-    setIsImporting(true);
-
-    try {
-      const payload = {
-        new_presets: presetAnalysis.new_presets,
-        updates: presetAnalysis.updates,
-      };
-
-      const data = await settingsService.executeImport(payload, 'presets');
-
-      setStatus(data.message);
-      setIsError(false);
-      setPresetModalOpen(false);
-    } catch (error: any) {
-      console.error(error);
-      setStatus(`Preset Import Failed: ${error.message}`);
       setIsError(true);
     } finally {
       setIsImporting(false);
@@ -413,18 +380,6 @@ export function SettingsView() {
       exportLabel: 'Export Metadata CSV',
       importLabel: 'Update Metadata from CSV',
       isExporting: exportingSectionId === 'metadata'
-    },
-    {
-      id: 'presets',
-      title: 'Preset Management (CSV)',
-      icon: <FileSpreadsheet className="h-4 w-4" />,
-      description: 'Backup and restore your generation presets and prompts.',
-      onExport: () => handleExport('presets', settingsService.getExportUrl('presets'), 'djaly_presets.csv'),
-      onFileSelect: (file: File) => handleAnalyze(file, 'presets'),
-      variant: 'outline' as const,
-      exportLabel: 'Export Presets CSV',
-      importLabel: 'Import Presets from CSV',
-      isExporting: exportingSectionId === 'presets'
     }
   ];
 
@@ -494,6 +449,42 @@ export function SettingsView() {
                   Save
                 </Button>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="setlist_default_length">
+                セットリスト自動生成のデフォルト曲数
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="setlist_default_length"
+                  type="number"
+                  min={1}
+                  placeholder="10"
+                  value={settings["setlist_default_length"] ?? ""}
+                  onChange={(e) =>
+                    updateLocalSetting(
+                      "setlist_default_length",
+                      e.target.value
+                    )
+                  }
+                  className="w-32"
+                />
+                <Button
+                  onClick={() =>
+                    saveSetting(
+                      "setlist_default_length",
+                      settings["setlist_default_length"] || "10"
+                    )
+                  }
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                MCP の generate_auto_setlist
+                で曲数未指定時に使われるデフォルト曲数。
+              </p>
             </div>
           </div>
 
@@ -727,15 +718,6 @@ export function SettingsView() {
         isAnalyzing={isAnalyzing}
         isImporting={isImporting}
         onExecute={handleExecuteMetadataImport}
-      />
-
-      <PresetImportDialog
-        open={presetModalOpen}
-        onOpenChange={setPresetModalOpen}
-        analysis={presetAnalysis}
-        isAnalyzing={isAnalyzing}
-        isImporting={isImporting}
-        onExecute={handleExecutePresetImport}
       />
     </div>
   );

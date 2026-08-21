@@ -1,6 +1,5 @@
 import { apiClient, API_BASE_URL } from "./api-client";
 import { Track } from "@/types";
-import { Preset } from "@/services/presets";
 
 export interface BaseAnalysisResult {
   total_rows: number;
@@ -38,13 +37,6 @@ export interface MetadataImportRow {
   is_genre_verified?: boolean;
 }
 
-export interface PresetImportRow {
-  name: string;
-  description?: string;
-  preset_type: string;
-  prompt_content?: string;
-}
-
 export interface LibraryAnalysisResult extends BaseAnalysisResult {
   new_tracks: CsvImportRow[];
   duplicates: CsvImportRow[];
@@ -62,15 +54,6 @@ export interface MetadataAnalysisResult extends BaseAnalysisResult {
     new: MetadataImportRow;
   }[];
   not_found: MetadataImportRow[];
-}
-
-export interface PresetAnalysisResult extends BaseAnalysisResult {
-  new_presets: PresetImportRow[];
-  updates: {
-    current: Preset;
-    new: PresetImportRow;
-  }[];
-  duplicates: PresetImportRow[];
 }
 
 export const settingsService = {
@@ -93,20 +76,18 @@ export const settingsService = {
     }>("/settings/llm-test", {});
   },
 
-  getExportUrl: (type: 'library' | 'metadata' | 'presets') => {
+  getExportUrl: (type: 'library' | 'metadata') => {
     const endpoints = {
       library: "/settings/export/csv",
       metadata: "/settings/metadata/export",
-      presets: "/settings/presets/export"
     };
     return `${API_BASE_URL}${endpoints[type]}`;
   },
 
-  analyzeImport: async <T>(file: File, type: 'library' | 'metadata' | 'presets'): Promise<T> => {
+  analyzeImport: async <T>(file: File, type: 'library' | 'metadata'): Promise<T> => {
     const endpoints = {
       library: "/settings/import/analyze",
       metadata: "/settings/metadata/import/analyze",
-      presets: "/settings/presets/import/analyze"
     };
     
     const formData = new FormData();
@@ -125,11 +106,10 @@ export const settingsService = {
     return res.json();
   },
 
-  executeImport: async (payload: any, type: 'library' | 'metadata' | 'presets') => {
+  executeImport: async (payload: any, type: 'library' | 'metadata') => {
     const endpoints = {
       library: "/settings/import/execute",
       metadata: "/settings/metadata/import/execute",
-      presets: "/settings/presets/import/execute"
     };
     
     return apiClient.post<{ message: string }>(endpoints[type], payload);

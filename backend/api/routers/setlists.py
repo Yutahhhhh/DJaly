@@ -92,7 +92,7 @@ def validate_setlist_export(setlist_id: int, session: Session = Depends(get_sess
 def recommend_next_track(
     track_id: int,
     limit: int = 20,
-    preset_id: Optional[int] = Query(None),
+    vibe: Optional[str] = Query(None),
     genres: Optional[List[str]] = Query(None),
     subgenres: Optional[List[str]] = Query(None),
     session: Session = Depends(get_session)
@@ -100,28 +100,32 @@ def recommend_next_track(
     """
     指定された曲に続く、相性の良い曲を提案する。
     Hybrid Scoring (Vector + BPM + Key) を使用。
+    vibe（自然言語の雰囲気）を指定すると LLM 解析の方向性も加味される。
     """
     service = SetlistAppService(session)
     try:
-        return service.recommend_next_track(track_id, limit, preset_id, genres, subgenres)
+        return service.recommend_next_track(track_id, limit, vibe, genres, subgenres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.post("/api/recommendations/auto")
 def generate_auto_setlist(
-    preset_id: int = Body(...),
-    limit: int = Body(10),
+    vibe: str = Body(...),
+    limit: Optional[int] = Body(None),
+    min_length: Optional[int] = Body(None),
+    max_length: Optional[int] = Body(None),
     seed_track_ids: Optional[List[int]] = Body(None),
     genres: Optional[List[str]] = Body(None),
     subgenres: Optional[List[str]] = Body(None),
     session: Session = Depends(get_session)
 ):
     """
-    プリセット(LLM解析)とChain Builderアルゴリズムに基づいてセットリストを自動生成する。
+    vibe（自然言語説明文）とChain Builderアルゴリズムに基づいてセットリストを自動生成する。
+    曲数は limit / min_length〜max_length で指定可能（未指定時は設定のデフォルト曲数）。
     """
     service = SetlistAppService(session)
     try:
-        return service.generate_auto_setlist(preset_id, limit, seed_track_ids, genres, subgenres)
+        return service.generate_auto_setlist(vibe, limit, min_length, max_length, seed_track_ids, genres, subgenres)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

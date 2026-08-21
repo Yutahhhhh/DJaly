@@ -59,18 +59,3 @@ def test_system_save_and_reveal(client: TestClient, tmp_path, mocker):
     mock_run = mocker.patch("subprocess.run")
     client.post("/api/system/reveal-file", json={"path": path})
     assert mock_run.called
-
-def test_settings_import_presets(client: TestClient, session: Session):
-    csv_content = "name,description,preset_type,prompt_content\nNewPre,Desc,all,Be a DJ"
-    files = {"file": ("presets.csv", csv_content, "text/csv")}
-    
-    # 解析フェーズ
-    res = client.post("/api/settings/presets/import/analyze", files=files)
-    assert res.status_code == 200
-    data = res.json()
-    
-    # 実行フェーズ
-    exec_req = {"new_presets": data["new_presets"], "updates": []}
-    res = client.post("/api/settings/presets/import/execute", json=exec_req)
-    assert res.status_code == 200
-    assert res.json()["imported"] == 1

@@ -70,23 +70,3 @@ class MetadataImportAnalysisResult(BaseModel):
 class MetadataImportExecuteRequest(BaseModel):
     """メタデータインポート実行リクエスト"""
     updates: List[Dict[str, Any]] # { "filepath": str, "data": MetadataImportRow }
-
-class PresetImportRow(BaseModel):
-    """プリセットインポート用CSVの行モデル"""
-    name: str
-    description: Optional[str] = ""
-    preset_type: str = "all"
-    filters_json: Optional[str] = "{}"
-    prompt_content: Optional[str] = ""
-
-class PresetImportAnalysisResult(BaseModel):
-    """プリセットインポート解析結果"""
-    total_rows: int
-    new_presets: List[PresetImportRow]
-    updates: List[Dict[str, Any]]
-    duplicates: List[PresetImportRow]
-
-class PresetImportExecuteRequest(BaseModel):
-    """プリセットインポート実行リクエスト"""
-    new_presets: List[PresetImportRow]
-    updates: List[Dict[str, Any]]

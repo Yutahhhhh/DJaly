@@ -28,7 +28,6 @@ export function TagList({ category, onSelectItem, selectedItem, trackSearch, sta
     tracks,
     loading,
     filters,
-    currentPreset,
     isFilterOpen,
     setIsFilterOpen,
     applyFilters,
@@ -152,7 +151,6 @@ export function TagList({ category, onSelectItem, selectedItem, trackSearch, sta
         isOpen={isFilterOpen}
         onOpenChange={setIsFilterOpen}
         currentFilters={filters}
-        currentPreset={currentPreset}
         onApply={applyFilters}
         enabledSections={["metadata"]}
         triggerLabel="Filter"

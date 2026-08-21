@@ -74,28 +74,28 @@ export const setlistsService = {
 
   recommendNext: async (
     trackId: number,
-    presetId?: number,
+    vibe?: string,
     genres?: string[],
     subgenres?: string[]
   ) => {
     return apiClient.get<Track[]>("/recommendations/next", {
       track_id: trackId,
-      preset_id: presetId,
+      vibe: vibe,
       genres: genres,
       subgenres: subgenres,
     });
   },
 
   generateAuto: async (
-    presetId: number,
-    limit: number,
+    vibe: string,
+    length?: number,
     seedTrackIds?: number[],
     genres?: string[],
     subgenres?: string[]
   ) => {
     return apiClient.post<Track[]>("/recommendations/auto", {
-      preset_id: presetId,
-      limit,
+      vibe,
+      limit: length,
       seed_track_ids: seedTrackIds,
       genres: genres,
       subgenres: subgenres,

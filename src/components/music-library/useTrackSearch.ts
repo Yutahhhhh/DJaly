@@ -18,7 +18,6 @@ export function useTrackSearch({ initialFilters = INITIAL_FILTERS, limit = 50, e
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<FilterState>(initialFilters);
-  const [currentPreset, setCurrentPreset] = useState("custom");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -115,16 +114,14 @@ export function useTrackSearch({ initialFilters = INITIAL_FILTERS, limit = 50, e
     }
   };
 
-  const applyFilters = (newFilters: FilterState, presetName: string = "custom") => {
+  const applyFilters = (newFilters: FilterState) => {
     setFilters(newFilters);
-    setCurrentPreset(presetName);
     setIsFilterOpen(false);
   };
 
   const clearAllFilters = () => {
     setQuery("");
     setFilters(INITIAL_FILTERS);
-    setCurrentPreset("custom");
   };
 
   const activeFilterCount = Object.keys(filters).filter((k) => {
@@ -149,7 +146,6 @@ export function useTrackSearch({ initialFilters = INITIAL_FILTERS, limit = 50, e
     loading,
     filters,
     setFilters,
-    currentPreset,
     isFilterOpen,
     setIsFilterOpen,
     applyFilters,

@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { MusicLibrary } from "@/components/music-library";
-import { PromptManager } from "@/components/prompt-manager";
 import { SettingsView } from "@/components/settings-view";
+import { McpView } from "@/components/mcp-view/McpView";
 import { FileExplorer } from "@/components/file-explorer";
 import { SetlistCreator } from "@/components/setlist-creator";
 import { TagManager } from "@/components/tag-manager/TagManager";
@@ -66,10 +66,10 @@ function App() {
         );
       case "explorer":
         return <FileExplorer />;
-      case "prompts":
-        return <PromptManager />;
       case "tags":
         return <TagManager />;
+      case "mcp":
+        return <McpView />;
       case "settings":
         return <SettingsView />;
       default:

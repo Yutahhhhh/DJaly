@@ -35,7 +35,6 @@ export function MusicLibrary({
     tracks,
     loading,
     filters,
-    currentPreset,
     isFilterOpen,
     setIsFilterOpen,
     applyFilters,
@@ -114,7 +113,7 @@ export function MusicLibrary({
       newFilters.maxBrightness = 1.0;
     }
 
-    applyFilters(newFilters, "custom");
+    applyFilters(newFilters);
   };
 
   const handleAnalyze = async (track: Track) => {
@@ -196,7 +195,6 @@ export function MusicLibrary({
             isOpen={isFilterOpen}
             onOpenChange={setIsFilterOpen}
             currentFilters={filters}
-            currentPreset={currentPreset}
             onApply={applyFilters}
           />
         </div>
@@ -205,16 +203,6 @@ export function MusicLibrary({
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-muted-foreground mr-1">Active:</span>
-
-            {currentPreset !== "custom" && (
-              <Badge
-                variant="outline"
-                className="gap-1 border-purple-400 text-purple-500"
-              >
-                <Sparkles className="h-3 w-3" />
-                Mood: {currentPreset.replace("_", " ").toUpperCase()}
-              </Badge>
-            )}
 
             {/* Vibe プロンプトの AI 解釈結果 */}
             {filters.vibePrompt && (

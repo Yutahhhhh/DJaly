@@ -5,7 +5,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # 現在のスキーマバージョン
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 # バージョンごとのマイグレーション SQL (version: [statements])
 MIGRATIONS = {
@@ -13,6 +13,11 @@ MIGRATIONS = {
         # ワードプレイ用キーワード抽出結果の永続キャッシュ
         "ALTER TABLE lyrics ADD COLUMN IF NOT EXISTS keywords_json VARCHAR",
         "ALTER TABLE lyrics ADD COLUMN IF NOT EXISTS keywords_content_hash VARCHAR",
+    ],
+    3: [
+        # Prompt/Preset 機能の廃止に伴うテーブル削除
+        "DROP TABLE IF EXISTS presets",
+        "DROP TABLE IF EXISTS prompts",
     ],
 }
 
@@ -25,8 +30,6 @@ def get_db_schema_sql() -> str:
     return """
     CREATE SEQUENCE IF NOT EXISTS seq_tracks_id START 1;
     CREATE SEQUENCE IF NOT EXISTS seq_setlists_id START 1;
-    CREATE SEQUENCE IF NOT EXISTS seq_prompts_id START 1;
-    CREATE SEQUENCE IF NOT EXISTS seq_presets_id START 1;
     CREATE SEQUENCE IF NOT EXISTS seq_setlist_tracks_id START 1;
 
     CREATE TABLE IF NOT EXISTS tracks (
@@ -76,27 +79,6 @@ def get_db_schema_sql() -> str:
         language VARCHAR,
         keywords_json VARCHAR,
         keywords_content_hash VARCHAR,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS prompts (
-        id INTEGER PRIMARY KEY DEFAULT nextval('seq_prompts_id'),
-        name VARCHAR NOT NULL,
-        content VARCHAR NOT NULL,
-        is_default BOOLEAN DEFAULT FALSE,
-        display_order INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS presets (
-        id INTEGER PRIMARY KEY DEFAULT nextval('seq_presets_id'),
-        name VARCHAR NOT NULL,
-        description VARCHAR,
-        preset_type VARCHAR DEFAULT 'all',
-        filters_json VARCHAR DEFAULT '{}',
-        prompt_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );

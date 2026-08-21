@@ -11,17 +11,10 @@ import {
   ArrowRight,
   Check,
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { Textarea } from "@/components/ui/textarea";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
-import { presetsService, Preset } from "@/services/presets";
 import { genreService } from "@/services/genres";
 import { TrackRow } from "../TrackRow";
 import { Badge } from "@/components/ui/badge";
@@ -61,8 +54,7 @@ export function AutoTab({
   const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
   // Infinite Mode State
-  const [presets, setPresets] = useState<Preset[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [vibeText, setVibeText] = useState("");
 
   // Bridge Mode State (Fallback if bridgeState not provided)
   const [localStart, setLocalStart] = useState<Track | null>(null);
@@ -74,9 +66,6 @@ export function AutoTab({
   const setEndTrack = bridgeState?.setEnd ?? setLocalEnd;
 
   useEffect(() => {
-    presetsService.getAll("generation", true).then((data) => {
-      setPresets(data);
-    });
     // Load available genres and subgenres
     genreService.getAllGenres().then(setAvailableGenres);
     genreService.getAllSubgenres().then(setAvailableSubgenres);
@@ -91,12 +80,13 @@ export function AutoTab({
   }, [mode, currentSetlistTracks]);
 
   const generateInfinite = async () => {
-    if (!selectedPreset) return;
+    const vibe = vibeText.trim();
+    if (!vibe) return;
     setIsAutoLoading(true);
     try {
       const seedIds = currentSetlistTracks.slice(-3).map((t) => t.id);
       const data = await setlistsService.generateAuto(
-        selectedPreset,
+        vibe,
         length,
         seedIds.length > 0 ? seedIds : undefined,
         autoGenres.length > 0 ? autoGenres : undefined,
@@ -106,7 +96,7 @@ export function AutoTab({
       if (data.length === 0) {
         toast.info(
           "条件に合う曲が見つかりませんでした",
-          "ジャンルフィルタを外すか、別のプリセットを試してください。"
+          "ジャンルフィルタを外すか、別の Vibe を試してください。"
         );
       }
     } catch (e) {
@@ -201,29 +191,14 @@ export function AutoTab({
           {mode === "infinite" ? (
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-muted-foreground mb-2 block">
-                Target Vibe (Pattern)
+                Target Vibe (自然言語で説明)
               </Label>
-              <Select
-                value={selectedPreset ? selectedPreset.toString() : ""}
-                onValueChange={(val) => setSelectedPreset(Number(val))}
-                disabled={presets.length === 0}
-              >
-                <SelectTrigger className="h-9 text-xs bg-background">
-                  <SelectValue placeholder="Select a vibe..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {presets.map((p) => (
-                    <SelectItem key={p.id} value={p.id.toString()}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {presets.length === 0 && (
-                <p className="text-[10px] text-muted-foreground">
-                  Vibe プリセットがありません。Prompt Manager で generation 用プリセットを作成してください。
-                </p>
-              )}
+              <Textarea
+                placeholder="例: サンセットのメロディックハウス、ピークタイムのハイエナジー"
+                value={vibeText}
+                onChange={(e) => setVibeText(e.target.value)}
+                className="h-20 text-xs resize-none bg-background"
+              />
               {currentSetlistTracks.length > 0 && (
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Sparkles className="h-3 w-3 shrink-0 text-purple-400" />
@@ -315,7 +290,7 @@ export function AutoTab({
             className="w-full gap-2 mt-2"
             disabled={
               isAutoLoading ||
-              (mode === "infinite" && !selectedPreset) ||
+              (mode === "infinite" && !vibeText.trim()) ||
               (mode === "bridge" && (!startTrack || !endTrack))
             }
             onClick={mode === "infinite" ? generateInfinite : generateBridge}
@@ -418,7 +393,7 @@ export function AutoTab({
                     <>
                       <Sparkles className="h-8 w-8" />
                       <div className="text-center text-xs">
-                        Select a Vibe Preset to
+                        Vibe を入力して
                         <br />
                         generate an infinite mix.
                       </div>

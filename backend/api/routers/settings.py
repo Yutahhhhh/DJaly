@@ -7,8 +7,7 @@ from infra.database.connection import get_session
 from api.schemas.common import SettingUpdate
 from api.schemas.settings import (
     ImportAnalysisResult, ImportExecuteRequest,
-    MetadataImportAnalysisResult, MetadataImportExecuteRequest,
-    PresetImportAnalysisResult, PresetImportExecuteRequest
+    MetadataImportAnalysisResult, MetadataImportExecuteRequest
 )
 from app.services.setting_app_service import SettingAppService
 from app.services.csv_app_service import CsvAppService
@@ -134,38 +133,3 @@ def execute_metadata(req: MetadataImportExecuteRequest, session: Session = Depen
         "message": f"Successfully updated {count} tracks."
     }
 
-# --- Preset CSV Operations ---
-
-@router.get("/api/settings/presets/export")
-def export_presets(session: Session = Depends(get_session)):
-    """プリセットをCSVとしてエクスポート"""
-    service = CsvAppService(session)
-    csv_content = service.export_presets_csv()
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=djaly_presets.csv"}
-    )
-
-@router.post("/api/settings/presets/import/analyze", response_model=PresetImportAnalysisResult)
-async def analyze_presets(file: UploadFile = File(...), session: Session = Depends(get_session)):
-    """プリセットCSVを解析"""
-    content = await file.read()
-    try:
-        csv_str = content.decode("utf-8")
-    except UnicodeDecodeError:
-        csv_str = content.decode("shift-jis", errors="ignore")
-        
-    service = CsvAppService(session)
-    return service.analyze_presets_import(csv_str)
-
-@router.post("/api/settings/presets/import/execute")
-def execute_presets(req: PresetImportExecuteRequest, session: Session = Depends(get_session)):
-    """プリセットインポートを実行"""
-    service = CsvAppService(session)
-    count = service.execute_presets_import(req)
-    return {
-        "status": "success",
-        "imported": count,
-        "message": f"Successfully processed {count} presets."
-    }

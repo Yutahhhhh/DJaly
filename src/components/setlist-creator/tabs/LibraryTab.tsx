@@ -26,7 +26,6 @@ export function LibraryTab({
     tracks,
     loading,
     filters,
-    currentPreset,
     isFilterOpen,
     setIsFilterOpen,
     applyFilters,
@@ -134,7 +133,6 @@ export function LibraryTab({
         isOpen={isFilterOpen}
         onOpenChange={setIsFilterOpen}
         currentFilters={filters}
-        currentPreset={currentPreset}
         onApply={applyFilters}
       />
     </div>

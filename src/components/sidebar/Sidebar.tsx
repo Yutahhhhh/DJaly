@@ -1,12 +1,12 @@
 import {
   Music,
   Settings,
-  FileText,
   Menu,
   Folder,
   List,
   Tags,
   LayoutDashboard,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -76,10 +76,10 @@ export function Sidebar({
           isOpen={isOpen}
         />
         <NavButton
-          icon={<FileText className="h-5 w-5" />}
-          label="Prompts"
-          isActive={activeView === "prompts"}
-          onClick={() => onNavigate("prompts")}
+          icon={<Bot className="h-5 w-5" />}
+          label="MCP"
+          isActive={activeView === "mcp"}
+          onClick={() => onNavigate("mcp")}
           isOpen={isOpen}
         />
         <NavButton

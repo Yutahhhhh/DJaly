@@ -5,17 +5,10 @@ import {
   Sparkles,
   Music2,
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
-import { presetsService, Preset } from "@/services/presets";
 import { genreService } from "@/services/genres";
 import { TrackRow } from "../TrackRow";
 
@@ -32,16 +25,13 @@ export function RecommendTab({
 }: RecommendTabProps) {
   const [recTracks, setRecTracks] = useState<Track[]>([]);
   const [isRecLoading, setIsRecLoading] = useState(false);
-  const [recPresetId, setRecPresetId] = useState<number | null>(null);
-  const [recPresets, setRecPresets] = useState<Preset[]>([]);
+  const [recVibe, setRecVibe] = useState("");
   const [recGenres, setRecGenres] = useState<string[]>([]);
   const [recSubgenres, setRecSubgenres] = useState<string[]>([]);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
   const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
   useEffect(() => {
-    // Load presets for recommendation (using 'search' type or 'all' for now)
-    presetsService.getAll("search").then(setRecPresets);
     // Load available genres and subgenres
     genreService.getAllGenres().then(setAvailableGenres);
     genreService.getAllSubgenres().then(setAvailableSubgenres);
@@ -51,7 +41,7 @@ export function RecommendTab({
     if (referenceTrack) {
       fetchRecommendations();
     }
-  }, [referenceTrack, recPresetId, recGenres, recSubgenres]);
+  }, [referenceTrack, recVibe, recGenres, recSubgenres]);
 
   const fetchRecommendations = async () => {
     if (!referenceTrack) return;
@@ -59,7 +49,7 @@ export function RecommendTab({
     try {
       const data = await setlistsService.recommendNext(
         referenceTrack.id,
-        recPresetId || undefined,
+        recVibe.trim() || undefined,
         recGenres.length > 0 ? recGenres : undefined,
         recSubgenres.length > 0 ? recSubgenres : undefined
       );
@@ -86,28 +76,14 @@ export function RecommendTab({
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground">
-                Suggestion Mode (Prompt)
+                Vibe (任意)
               </label>
-              <Select
-                value={recPresetId?.toString() || "default"}
-                onValueChange={(val) =>
-                  setRecPresetId(val === "default" ? null : Number(val))
-                }
-              >
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">
-                    🧬 Pure Vector (Default)
-                  </SelectItem>
-                  {recPresets.map((p) => (
-                    <SelectItem key={p.id} value={p.id.toString()}>
-                      ✨ {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                placeholder="例: ピークタイムのハイエナジー（空ならベクトル推薦）"
+                className="h-8 text-xs bg-background"
+                value={recVibe}
+                onChange={(e) => setRecVibe(e.target.value)}
+              />
             </div>
 
             <div className="space-y-1">
