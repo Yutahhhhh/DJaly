@@ -240,7 +240,9 @@ class RekordboxRepository:
         rows = content_table.get_all()
         tracks = []
         for row in rows:
-            track = self._row_to_track(row)
+            # Listing the library must not parse every cue and ANLZ file.
+            # Those expensive details are loaded by get_track() instead.
+            track = self._row_to_track(row, load_details=False)
             if track and self._matches_filter(track, filter):
                 tracks.append(track)
         return tracks
@@ -271,7 +273,7 @@ class RekordboxRepository:
             return self._row_to_track(row)
         return None
 
-    def _row_to_track(self, row: dict) -> Track | None:
+    def _row_to_track(self, row: dict, load_details: bool = True) -> Track | None:
         """Convert database row to Track model."""
         try:
             track_id = row.get("ID")
@@ -303,15 +305,14 @@ class RekordboxRepository:
                 beat_grid=beat_grid,
             )
 
-            # Load cues
-            track.cues = self.get_cues(track.id)
-
-            # Load ANLZ analysis data
-            anlz_data = self.read_anlz_files(track)
-            if anlz_data:
-                track.phrases = anlz_data.get("phrases", [])
-                track.waveform = anlz_data.get("waveform")
-                track.vocal_track = anlz_data.get("vocal_track")
+            if load_details:
+                # Load cues and ANLZ analysis only for a single-track request.
+                track.cues = self.get_cues(track.id)
+                anlz_data = self.read_anlz_files(track)
+                if anlz_data:
+                    track.phrases = anlz_data.get("phrases", [])
+                    track.waveform = anlz_data.get("waveform")
+                    track.vocal_track = anlz_data.get("vocal_track")
 
             return track
         except Exception:

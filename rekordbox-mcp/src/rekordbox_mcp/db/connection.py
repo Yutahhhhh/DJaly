@@ -14,19 +14,20 @@ from typing import Any
 from rekordbox_mcp.config import Settings, get_settings
 from rekordbox_mcp.domain.models import OperationMode
 
-# Try to import pyrekordbox
+# Try to import pyrekordbox.  MasterDatabase was removed from pyrekordbox in
+# 0.4.x; Rekordbox6Database is the replacement for both read and write access.
 try:
     import pyrekordbox
-    from pyrekordbox import Rekordbox6Database, MasterDatabase
+    from pyrekordbox import Rekordbox6Database
+    from pyrekordbox.db6 import tables as db6_tables
     from pyrekordbox.utils import get_rekordbox_pid
 
     PYREKORDBOX_AVAILABLE = True
 except ImportError:
     pyrekordbox = None
     Rekordbox6Database = None
-    MasterDatabase = None
+    db6_tables = None
     get_rekordbox_pid = None
-PYREKORDBOX_AVAILABLE = False
 
 
 def is_rekordbox_database(path: Path | None) -> bool:
@@ -46,7 +47,47 @@ def is_rekordbox_database(path: Path | None) -> bool:
             ).fetchone()
         return row is not None
     except sqlite3.Error:
-        return False
+        # Current Rekordbox master.db files are SQLCipher databases and cannot
+        # be inspected by the stdlib sqlite driver.  A non-empty unreadable
+        # database is therefore still a candidate for pyrekordbox; empty test
+        # fixtures remain mock databases.
+        return path.stat().st_size > 0
+
+
+class _Db6Table:
+    """Small compatibility layer for pyrekordbox <=0.3 table API.
+
+    The project historically consumed dictionaries from ``get_all`` and
+    ``get_by_id``.  pyrekordbox 0.4 exposes SQLAlchemy models instead.
+    Keeping the conversion here avoids spreading version-specific code over
+    the repository.
+    """
+
+    def __init__(self, database: Any, model: Any):
+        self.database = database
+        self.model = model
+
+    @staticmethod
+    def _dict(row: Any) -> dict[str, Any]:
+        data = row.to_dict() if hasattr(row, "to_dict") else dict(row.__dict__)
+        data.pop("_sa_instance_state", None)
+        # Names used by the repository's older pyrekordbox adapter.
+        if "BPM" in data:
+            data.setdefault("AverageBpm", data["BPM"])
+        if "Length" in data:
+            data.setdefault("TotalTime", data["Length"])
+        if "AnalysisDataPath" in data:
+            data.setdefault("AnalysisPath", data["AnalysisDataPath"])
+        if "SmartList" in data:
+            data.setdefault("SmartListXML", data["SmartList"])
+        return data
+
+    def get_all(self) -> list[dict[str, Any]]:
+        return [self._dict(row) for row in self.database.query(self.model).all()]
+
+    def get_by_id(self, identifier: Any) -> dict[str, Any] | None:
+        row = self.database.query(self.model).filter(self.model.ID == str(identifier)).first()
+        return self._dict(row) if row else None
 
 
 class RekordboxConnection:
@@ -106,15 +147,21 @@ class RekordboxConnection:
 
             try:
                 if self._mode == OperationMode.MASTERDB:
-                    # Direct database write mode - use MasterDatabase
-                    self._db = MasterDatabase(str(self._db_path))
+                    # Direct database write mode - use the current db6 API.
+                    self._db = Rekordbox6Database(str(self._db_path))
                 else:
                     # Read-only or XML mode - use Rekordbox6Database
                     self._db = Rekordbox6Database(str(self._db_path))
 
                 # Also get a raw SQLite connection for backup operations
-                self._sqlite_conn = sqlite3.connect(str(self._db_path))
-                self._sqlite_conn.row_factory = sqlite3.Row
+                # master.db is encrypted.  Keep a raw connection only when it
+                # is actually a normal SQLite file (tests and old databases).
+                try:
+                    self._sqlite_conn = sqlite3.connect(str(self._db_path))
+                    self._sqlite_conn.execute("SELECT 1")
+                    self._sqlite_conn.row_factory = sqlite3.Row
+                except sqlite3.DatabaseError:
+                    self._sqlite_conn = None
 
                 self._connected = True
 
@@ -127,6 +174,8 @@ class RekordboxConnection:
             if self._sqlite_conn:
                 self._sqlite_conn.close()
                 self._sqlite_conn = None
+            if self._db is not None and hasattr(self._db, "close"):
+                self._db.close()
             self._db = None
             self._connected = False
 
@@ -176,6 +225,7 @@ class RekordboxConnection:
 
         if system == "Darwin":  # macOS
             candidates = [
+                home / "Library/Pioneer/rekordbox/master.db",
                 home / "Library/Application Support/Pioneer/rekordbox/master.db",
                 home / "Library/Application Support/Pioneer/rekordbox 6/master.db",
             ]
@@ -287,6 +337,11 @@ class RekordboxConnection:
             if result != "ok":
                 raise RuntimeError(f"Database integrity check failed: {result}")
 
+            return True
+        except sqlite3.DatabaseError:
+            # Rekordbox 6/7 master.db is SQLCipher-encrypted and therefore
+            # intentionally cannot be checked with the stdlib sqlite driver.
+            # Rekordbox6Database performs the real decrypt/open validation.
             return True
         except sqlite3.Error as e:
             raise RuntimeError(f"Database integrity check error: {e}") from e
@@ -443,22 +498,22 @@ class RekordboxConnection:
         """Get djmdContent table (tracks)."""
         if not PYREKORDBOX_AVAILABLE:
             return None
-        return self.db.get_table("djmdContent") if self._db else None
+        return _Db6Table(self.db, db6_tables.DjmdContent) if self._db else None
 
     def get_cue_table(self) -> Any:
         """Get djmdCue table."""
         if not PYREKORDBOX_AVAILABLE:
             return None
-        return self.db.get_table("djmdCue") if self._db else None
+        return _Db6Table(self.db, db6_tables.DjmdCue) if self._db else None
 
     def get_playlist_table(self) -> Any:
         """Get djmdPlaylist table."""
         if not PYREKORDBOX_AVAILABLE:
             return None
-        return self.db.get_table("djmdPlaylist") if self._db else None
+        return _Db6Table(self.db, db6_tables.DjmdPlaylist) if self._db else None
 
     def get_playlist_content_table(self) -> Any:
         """Get djmdPlaylistContent table."""
         if not PYREKORDBOX_AVAILABLE:
             return None
-        return self.db.get_table("djmdPlaylistContent") if self._db else None
+        return _Db6Table(self.db, db6_tables.DjmdSongPlaylist) if self._db else None
