@@ -19,7 +19,6 @@ export const INITIAL_FILTERS: FilterState = {
   maxBrightness: 1.0,
   minYear: null,
   maxYear: null,
-  vibePrompt: null,
 };
 
 // Camelot Wheel 対応表

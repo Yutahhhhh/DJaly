@@ -130,6 +130,7 @@ def _add_track(
     bpm: float = 120,
     duration: float = 100,
     year: int | None = None,
+    energy: float = 0.5,
 ) -> Track:
     """テスト用の Track を DB に追加して返す。"""
     track = Track(
@@ -142,6 +143,7 @@ def _add_track(
         bpm=bpm,
         duration=duration,
         year=year,
+        energy=energy,
     )
     session.add(track)
     session.commit()
@@ -172,23 +174,23 @@ async def test_initialize_returns_server_info(mcp_session):
 
 @pytest.mark.asyncio
 async def test_list_tools_returns_all_tools(mcp_session):
-    """list_tools で全 36 ツールが返り、主要ツール名が含まれることを検証する。"""
+    """list_tools で全ツールが返り、MCP-client reasoning toolsが含まれることを検証する。"""
     result = await mcp_session.list_tools()
     names = [t.name for t in result.tools]
-    assert len(names) == 36
+    assert len(names) == 34
     for expected in [
         "search_tracks",
-        "vibe_search",
         "list_setlists",
         "create_setlist",
         "generate_auto_setlist",
         "export_setlist_m3u8",
         "find_wordplay_links",
-        "generate_wordplay_setlist",
         "add_track_to_setlist_with_wordplay",
         "update_setlist_track_wordplay",
         "clear_setlist_track_wordplay",
-        "analyze_track_genre",
+        "get_genre_analysis_context",
+        "apply_genre_analysis",
+        "apply_genre_analyses",
         "get_track_lyrics",
         "search_lyrics",
     ]:
@@ -225,23 +227,6 @@ async def test_search_tracks(mcp_session, session: Session):
     data = _result_dict(result)
     assert data["count"] == 1
     assert data["tracks"][0]["title"] == "Sunset"
-
-
-@pytest.mark.asyncio
-async def test_vibe_search(mcp_session, session: Session, mocker):
-    """Track 作成後 vibe_search を呼び、resolved_params キーが結果に含まれることを検証する。"""
-    _add_track(session, "/v1.mp3", "Chill", genre="House", bpm=90)
-    # LLM の vibe パラメータ解決をモック (ネットワーク依存を避ける)
-    mocker.patch(
-        "mcp_server.tools.tracks.generate_vibe_parameters",
-        return_value={"bpm": 90, "energy": 0.3},
-    )
-    result = await mcp_session.call_tool(
-        "vibe_search", {"prompt": "夜のドライブ用チルR&B"}
-    )
-    data = _result_dict(result)
-    assert "resolved_params" in data
-    assert data["resolved_params"]["bpm"] == 90
 
 
 @pytest.mark.asyncio
@@ -454,53 +439,34 @@ async def test_validate_setlist_export(mcp_session, session: Session):
 
 
 @pytest.mark.asyncio
-async def test_generate_auto_setlist_with_vibe(mcp_session, session: Session, mocker):
-    """Track 3 件作成 → generate_auto_setlist(vibe=..., length=3) がエラーなく 3 件返ることを検証する。"""
-    _add_track(session, "/auto1.mp3", "Auto1", genre="House", bpm=120)
-    _add_track(session, "/auto2.mp3", "Auto2", genre="House", bpm=122)
-    _add_track(session, "/auto3.mp3", "Auto3", genre="House", bpm=124)
-    # LLM の vibe パラメータ解決をモック (サービス内で参照されるためサービスモジュールをパッチ)
-    mocker.patch(
-        "app.services.setlist_app_service.generate_vibe_parameters",
-        return_value={},
-    )
-
+async def test_generate_auto_setlist_with_structured_targets(mcp_session, session: Session):
+    """MCP client-selected targets generate a set without another LLM call."""
+    _add_track(session, "/auto1.mp3", "Auto1", genre="House", bpm=120, energy=0.6)
+    _add_track(session, "/auto2.mp3", "Auto2", genre="House", bpm=122, energy=0.7)
+    _add_track(session, "/auto3.mp3", "Auto3", genre="House", bpm=124, energy=0.8)
     result = await mcp_session.call_tool(
-        "generate_auto_setlist", {"vibe": "deep house warm up", "length": 3}
+        "generate_auto_setlist", {"target_bpm": 122, "target_energy": 0.7, "length": 3}
     )
     data = _result_dict(result)
     assert data["count"] == 3
 
 
 @pytest.mark.asyncio
-async def test_generate_auto_setlist_default_length(mcp_session, session: Session, mocker):
+async def test_generate_auto_setlist_default_length(mcp_session, session: Session):
     """length 指定なしで generate_auto_setlist を呼んでもエラーにならないことを検証する。"""
     _add_track(session, "/autod1.mp3", "AutoD1", genre="House", bpm=120)
-    mocker.patch(
-        "app.services.setlist_app_service.generate_vibe_parameters",
-        return_value={},
-    )
-
-    result = await mcp_session.call_tool(
-        "generate_auto_setlist", {"vibe": "chill sunset house"}
-    )
+    result = await mcp_session.call_tool("generate_auto_setlist", {})
     data = _result_dict(result)
     # デフォルト曲数 (10) と候補プール (1 件) の小さい方になるが、エラーにはならない
     assert 1 <= data["count"] <= 10
 
 
 @pytest.mark.asyncio
-async def test_recommend_next_track_with_vibe(mcp_session, session: Session, mocker):
-    """Track 2 件作成 → recommend_next_track(track_id=..., vibe=...) がエラーなく返ることを検証する。"""
+async def test_recommend_next_track_with_structured_target(mcp_session, session: Session):
     t1 = _add_track(session, "/rec1.mp3", "Rec1", genre="House", bpm=120)
     _add_track(session, "/rec2.mp3", "Rec2", genre="House", bpm=122)
-    mocker.patch(
-        "app.services.setlist_app_service.generate_vibe_parameters",
-        return_value={},
-    )
-
     result = await mcp_session.call_tool(
-        "recommend_next_track", {"track_id": t1.id, "vibe": "peak time techno"}
+        "recommend_next_track", {"track_id": t1.id, "target_energy": 0.9}
     )
     data = _result_dict(result)
     assert "count" in data
@@ -518,22 +484,18 @@ def _add_lyrics(session: Session, track_id: int, content: str):
 
 
 @pytest.mark.asyncio
-async def test_find_wordplay_links(mcp_session, session: Session, mocker):
+async def test_find_wordplay_links(mcp_session, session: Session):
     """共通キーワード 'midnight' を含む歌詞 2 件 → find_wordplay_links が links を返すことを検証する。"""
     t1 = _add_track(session, "/wp1.mp3", "Wp1")
     t2 = _add_track(session, "/wp2.mp3", "Wp2")
     _add_lyrics(session, t1.id, "Walking through the midnight city")
     _add_lyrics(session, t2.id, "Meet me at the midnight train")
-    # LLM のキーワード抽出をモック
-    mocker.patch(
-        "api.routers.lyrics.generate_text",
-        return_value='{"keywords": ["midnight"]}',
+    result = await mcp_session.call_tool(
+        "find_wordplay_links", {"track_id": t1.id, "keywords": ["midnight"]}
     )
-
-    result = await mcp_session.call_tool("find_wordplay_links", {"track_id": t1.id})
     data = _result_dict(result)
     assert data["track_id"] == t1.id
-    assert any(kw["keyword"] == "midnight" for kw in data["keywords"])
+    assert "midnight" in data["keywords"]
     assert len(data["links"]) >= 1
     link = data["links"][0]
     assert link["keyword"] == "midnight"
@@ -610,26 +572,6 @@ async def test_update_and_clear_setlist_track_wordplay(mcp_session, session: Ses
     assert data["tracks"][0]["wordplay_json"] is None
 
 
-@pytest.mark.asyncio
-async def test_generate_wordplay_setlist(mcp_session, session: Session, mocker):
-    """共通キーワードを持つ Track 2 件 → generate_wordplay_setlist がエラーなく返ることを検証する。"""
-    t1 = _add_track(session, "/wpg1.mp3", "WpG1", bpm=120)
-    t2 = _add_track(session, "/wpg2.mp3", "WpG2", bpm=122)
-    _add_lyrics(session, t1.id, "Dancing in the midnight glow")
-    _add_lyrics(session, t2.id, "Until the midnight fades away")
-    mocker.patch(
-        "api.routers.lyrics.generate_text",
-        return_value='{"keywords": ["midnight"]}',
-    )
-
-    result = await mcp_session.call_tool(
-        "generate_wordplay_setlist", {"start_track_id": t1.id, "length": 2}
-    )
-    data = _result_dict(result)
-    assert data["count"] == 2
-    assert [t["title"] for t in data["tracks"]] == ["WpG1", "WpG2"]
-
-
 # ---------------------------------------------------------------------------
 # ジャンル・歌詞
 # ---------------------------------------------------------------------------
@@ -670,20 +612,24 @@ async def test_get_unknown_genre_tracks(mcp_session, session: Session):
 
 
 @pytest.mark.asyncio
-async def test_analyze_track_genre(mcp_session, session: Session, mocker):
-    """LLM をモックし、analyze_track_genre がエラーなく genre を設定することを検証する。"""
+async def test_genre_context_and_apply_use_client_result(mcp_session, session: Session):
+    """The MCP client reads context and submits its own structured classification."""
     t1 = _add_track(session, "/an1.mp3", "An1", genre="Unknown")
-    mocker.patch(
-        "app.services.genre_app_service.generate_text",
-        return_value=(
-            '{"genre": "Techno", "subgenre": "Minimal Techno", '
-            '"reason": "test", "confidence": "High"}'
-        ),
+    context_result = await mcp_session.call_tool(
+        "get_genre_analysis_context", {"track_ids": [t1.id], "mode": "both"}
     )
+    context = _result_dict(context_result)
+    assert context["tracks"][0]["title"] == "An1"
 
-    result = await mcp_session.call_tool("analyze_track_genre", {"track_id": t1.id})
+    result = await mcp_session.call_tool("apply_genre_analysis", {
+        "track_id": t1.id,
+        "genre": "Techno",
+        "subgenre": "Minimal Techno",
+        "reason": "client classification",
+        "confidence": "High",
+    })
     data = _result_dict(result)
-    assert data["genre"] == "Techno"
+    assert data["analysis"]["genre"] == "Techno"
 
 
 @pytest.mark.asyncio

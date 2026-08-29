@@ -1,7 +1,5 @@
 import os
 import asyncio
-import re
-import json
 from typing import List, Dict, Any, Optional
 from concurrent.futures import Executor
 from unittest.mock import MagicMock
@@ -19,31 +17,6 @@ from infra.repositories.ingestion_repository import IngestionRepository
 class IngestionDomainService:
     def __init__(self):
         self.repository = IngestionRepository()
-
-    def _clean_llm_response(self, text: str) -> str:
-        if not text: return ""
-        lines = text.split('\n')
-        candidate_line = ""
-        for line in lines:
-            clean_line = line.strip()
-            if not clean_line: continue
-            match = re.match(r'^(Genre|Output|Result|Classification):\s*(.+)', clean_line, re.IGNORECASE)
-            if match:
-                candidate_line = match.group(2)
-                break
-        if not candidate_line:
-            for line in lines:
-                clean_line = line.strip()
-                lower_line = clean_line.lower()
-                if any(phrase in lower_line for phrase in ["based on", "i would classify", "here are", "context:", "output format:"]):
-                    continue
-                if len(clean_line) > 2:
-                    candidate_line = clean_line
-                    break
-        if candidate_line:
-            cleaned = re.sub(r"['\"\[\]\.]", "", candidate_line)
-            return cleaned.strip()
-        return ""
 
     def _process_metadata_update(self, filepath: str, existing_data_cache: Dict[str, Any], lyrics_from_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """ファイルのメタデータタグ情報のみを更新する高速パス。"""

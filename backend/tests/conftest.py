@@ -3,7 +3,6 @@ import pytest
 import sys
 import tempfile
 import uuid
-import json
 from typing import Generator
 from sqlmodel import Session, create_engine
 
@@ -98,21 +97,10 @@ def mock_external_deps(mocker):
     mocker.patch("essentia.standard.Flux")
     mocker.patch("essentia.standard.TensorflowPredictMusiCNN")
     mocker.patch("essentia.standard.LoudnessEBUR128")
-    
-    # LLM API のモック
-    mock_response = mocker.MagicMock()
-    mock_response.read.return_value = json.dumps({
-        "choices": [{"message": {"content": '{"bpm": 120, "energy": 0.8}'}}],
-        "content": [{"text": '{"genre": "House", "subgenre": "Deep House", "reason": "test", "confidence": "High"}'}],
-        "candidates": [{"content": {"parts": [{"text": '{"genre": "Techno"}'}]}}]
-    }).encode("utf-8")
-    mocker.patch("urllib.request.urlopen", return_value=mock_response)
-    
+
     # メタデータ抽出ライブラリのモック
     mocker.patch("tinytag.TinyTag.get")
     mocker.patch("mutagen.File")
     mocker.patch("mutagen.id3.ID3")
     mocker.patch("mutagen.mp4.MP4")
     mocker.patch("mutagen.flac.FLAC")
-    
-    return mock_response

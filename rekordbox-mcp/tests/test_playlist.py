@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from rekordbox_mcp.domain.models import Playlist
+from rekordbox_mcp.config import Settings
+from rekordbox_mcp.db.repository import RekordboxRepository
+from rekordbox_mcp.domain.models import OperationMode, Playlist
 from rekordbox_mcp.domain.playlist import PlaylistManager
 
 
@@ -219,6 +221,78 @@ class TestMoveCopyReorder:
         assert manager.get_tracks(playlist.id) == [2, 1, 3]
 
 
+class TestStaleCacheRegression:
+    """Regression tests for the case where tracks already exist in the repository
+    (e.g. added directly in Rekordbox) before ``PlaylistManager`` ever loads the
+    playlist. ``get_all()``/``get_by_id()`` return a ``Playlist`` with empty
+    ``track_ids`` (as the real DB-backed repository's ``_row_to_playlist`` does),
+    while ``get_tracks()`` returns the real, populated list. Track mutations must
+    use the latter as the source of truth and never silently wipe it out."""
+
+    def _repo_with_preexisting_tracks(self, track_ids: list[int]) -> InMemoryPlaylistRepository:
+        repo = InMemoryPlaylistRepository()
+        playlist = Playlist(id="pl1", name="dance", parent_id="root", seq=0, attribute=0)
+        repo._playlists["pl1"] = playlist
+        repo._tracks["pl1"] = list(track_ids)
+        return repo
+
+    def test_add_tracks_with_position_preserves_existing(self):
+        existing = [171130058, 146738848, 62420465, 61027647, 253890131]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.add_tracks("pl1", [210744670], position=2)
+
+        assert manager.get_tracks("pl1") == [
+            171130058, 146738848, 210744670, 62420465, 61027647, 253890131,
+        ]
+
+    def test_add_tracks_without_position_preserves_existing(self):
+        existing = [171130058, 146738848, 62420465, 61027647, 253890131]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.add_tracks("pl1", [210744670])
+
+        assert manager.get_tracks("pl1") == existing + [210744670]
+
+    def test_remove_track_preserves_other_existing_tracks(self):
+        existing = [1, 2, 3, 4, 5]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.remove_track("pl1", 3)
+
+        assert manager.get_tracks("pl1") == [1, 2, 4, 5]
+
+    def test_move_track_preserves_existing_tracks(self):
+        existing = [1, 2, 3, 4, 5]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.move_track("pl1", from_index=0, to_index=4)
+
+        assert manager.get_tracks("pl1") == [2, 3, 4, 5, 1]
+
+    def test_copy_track_preserves_existing_tracks(self):
+        existing = [1, 2, 3, 4, 5]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.copy_track("pl1", track_id=3, position=1)
+
+        assert manager.get_tracks("pl1") == [1, 3, 2, 3, 4, 5]
+
+    def test_dedupe_preserves_existing_tracks(self):
+        existing = [1, 2, 2, 3, 4, 5]
+        repo = self._repo_with_preexisting_tracks(existing)
+        manager = PlaylistManager(repository=repo)
+
+        manager.dedupe("pl1")
+
+        assert manager.get_tracks("pl1") == [1, 2, 3, 4, 5]
+
+
 class TestQueryHelpers:
     def test_get_root_folders(self, manager: PlaylistManager):
         manager.create_playlist("A")
@@ -255,3 +329,177 @@ class TestWithoutRepository:
         playlist = manager.create_playlist("Standalone")
         manager.add_tracks(playlist.id, [1, 2])
         assert manager.get_tracks(playlist.id) == [1, 2]
+
+
+@pytest.fixture
+def mock_repo(monkeypatch, tmp_path) -> RekordboxRepository:
+    """Repository configured to use mock backend (no real database)."""
+    # Create a dummy SQLite file that is NOT a Rekordbox database
+    dummy_db = tmp_path / "dummy_master.db"
+    dummy_db.write_bytes(b"not a rekordbox db")
+
+    # Force mock mode by making is_rekordbox_database return False
+    # and PYREKORDBOX_AVAILABLE return False (in both connection and repository modules)
+    import rekordbox_mcp.db.connection as conn_module
+    import rekordbox_mcp.db.repository as repo_module
+    monkeypatch.setattr(conn_module, "is_rekordbox_database", lambda path: False)
+    monkeypatch.setattr(conn_module, "PYREKORDBOX_AVAILABLE", False)
+    monkeypatch.setattr(repo_module, "PYREKORDBOX_AVAILABLE", False)
+    monkeypatch.setattr(conn_module.RekordboxConnection, "get_db_path", lambda self: dummy_db)
+
+    settings = Settings(db_path=str(dummy_db), mode="masterdb")
+    repo = RekordboxRepository(settings=settings, mode=OperationMode.MASTERDB)
+    repo.connect()
+    yield repo
+    repo.close()
+
+
+class TestRepositoryPlaylistPersistence:
+    """Tests for RekordboxRepository save_playlist and delete_playlist methods."""
+
+    def test_save_playlist_creates_new(self, mock_repo: RekordboxRepository):
+        playlist = Playlist(
+            id="test-new-playlist",
+            name="New Playlist",
+            parent_id="root",
+            seq=0,
+            attribute=0,
+        )
+        saved = mock_repo.save_playlist(playlist)
+
+        assert saved.id == "test-new-playlist"
+        assert saved.name == "New Playlist"
+
+        # Verify it can be retrieved
+        playlists = mock_repo.get_playlists()
+        found = next((p for p in playlists if p.id == "test-new-playlist"), None)
+        assert found is not None
+        assert found.name == "New Playlist"
+
+    def test_save_playlist_updates_existing(self, mock_repo: RekordboxRepository):
+        # Create initial playlist
+        playlist = Playlist(
+            id="test-update-playlist",
+            name="Original Name",
+            parent_id="root",
+            seq=0,
+            attribute=0,
+        )
+        mock_repo.save_playlist(playlist)
+
+        # Update it
+        playlist.name = "Updated Name"
+        playlist.seq = 5
+        saved = mock_repo.save_playlist(playlist)
+
+        assert saved.name == "Updated Name"
+        assert saved.seq == 5
+
+        # Verify update persisted
+        playlists = mock_repo.get_playlists()
+        found = next((p for p in playlists if p.id == "test-update-playlist"), None)
+        assert found is not None
+        assert found.name == "Updated Name"
+        assert found.seq == 5
+
+    def test_save_playlist_preserves_smart_list_xml(self, mock_repo: RekordboxRepository):
+        playlist = Playlist(
+            id="test-smart-playlist",
+            name="Smart Playlist",
+            parent_id="root",
+            seq=0,
+            attribute=2,  # smart playlist
+            smart_list_xml='<smartlist><rule field="Genre" op="equals" value="House"/></smartlist>',
+        )
+        saved = mock_repo.save_playlist(playlist)
+
+        assert saved.smart_list_xml is not None
+        assert "Genre" in saved.smart_list_xml
+
+        playlists = mock_repo.get_playlists()
+        found = next((p for p in playlists if p.id == "test-smart-playlist"), None)
+        assert found is not None
+        assert found.smart_list_xml == playlist.smart_list_xml
+
+    def test_delete_playlist_removes_playlist(self, mock_repo: RekordboxRepository):
+        # Create playlist with tracks
+        playlist = Playlist(
+            id="test-delete-playlist",
+            name="To Delete",
+            parent_id="root",
+            seq=0,
+            attribute=0,
+        )
+        mock_repo.save_playlist(playlist)
+        mock_repo.set_playlist_tracks("test-delete-playlist", [1, 2, 3])
+
+        # Verify it exists
+        assert mock_repo.get_playlist_tracks("test-delete-playlist") == [1, 2, 3]
+
+        # Delete it
+        result = mock_repo.delete_playlist("test-delete-playlist")
+        assert result is True
+
+        # Verify it's gone
+        playlists = mock_repo.get_playlists()
+        found = next((p for p in playlists if p.id == "test-delete-playlist"), None)
+        assert found is None
+
+        # Verify tracks are also gone
+        assert mock_repo.get_playlist_tracks("test-delete-playlist") == []
+
+    def test_delete_playlist_nonexistent_returns_false(self, mock_repo: RekordboxRepository):
+        result = mock_repo.delete_playlist("nonexistent-playlist")
+        assert result is False
+
+    def test_save_playlist_rejected_in_readonly_mode(self, monkeypatch, tmp_path):
+        from rekordbox_mcp.db.repository import RekordboxRepository
+        from rekordbox_mcp.domain.models import OperationMode, Playlist
+
+        dummy_db = tmp_path / "dummy_master.db"
+        dummy_db.write_bytes(b"not a rekordbox db")
+        import rekordbox_mcp.db.connection as conn_module
+        import rekordbox_mcp.db.repository as repo_module
+        monkeypatch.setattr(conn_module, "is_rekordbox_database", lambda path: False)
+        monkeypatch.setattr(conn_module, "PYREKORDBOX_AVAILABLE", False)
+        monkeypatch.setattr(repo_module, "PYREKORDBOX_AVAILABLE", False)
+        monkeypatch.setattr(conn_module.RekordboxConnection, "get_db_path", lambda self: dummy_db)
+
+        settings = Settings(db_path=str(dummy_db), mode="readonly")
+        repo = RekordboxRepository(settings=settings, mode=OperationMode.READONLY)
+        repo.connect()
+
+        playlist = Playlist(
+            id="test-readonly",
+            name="Readonly Test",
+            parent_id="root",
+            seq=0,
+            attribute=0,
+        )
+
+        with pytest.raises(RuntimeError, match="Playlist save only allowed in masterdb mode"):
+            repo.save_playlist(playlist)
+
+        repo.close()
+
+    def test_delete_playlist_rejected_in_readonly_mode(self, monkeypatch, tmp_path):
+        from rekordbox_mcp.db.repository import RekordboxRepository
+        from rekordbox_mcp.domain.models import OperationMode
+
+        dummy_db = tmp_path / "dummy_master.db"
+        dummy_db.write_bytes(b"not a rekordbox db")
+        import rekordbox_mcp.db.connection as conn_module
+        import rekordbox_mcp.db.repository as repo_module
+        monkeypatch.setattr(conn_module, "is_rekordbox_database", lambda path: False)
+        monkeypatch.setattr(conn_module, "PYREKORDBOX_AVAILABLE", False)
+        monkeypatch.setattr(repo_module, "PYREKORDBOX_AVAILABLE", False)
+        monkeypatch.setattr(conn_module.RekordboxConnection, "get_db_path", lambda self: dummy_db)
+
+        settings = Settings(db_path=str(dummy_db), mode="readonly")
+        repo = RekordboxRepository(settings=settings, mode=OperationMode.READONLY)
+        repo.connect()
+
+        with pytest.raises(RuntimeError, match="Playlist deletion only allowed in masterdb mode"):
+            repo.delete_playlist("some-playlist")
+
+        repo.close()

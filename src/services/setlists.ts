@@ -70,31 +70,27 @@ export const setlistsService = {
     }>(`/setlists/${id}/export/validate`);
   },
 
-  // --- AI / Recommendation ---
+  // --- Deterministic recommendation ---
 
   recommendNext: async (
     trackId: number,
-    vibe?: string,
     genres?: string[],
     subgenres?: string[]
   ) => {
     return apiClient.get<Track[]>("/recommendations/next", {
       track_id: trackId,
-      vibe: vibe,
       genres: genres,
       subgenres: subgenres,
     });
   },
 
   generateAuto: async (
-    vibe: string,
     length?: number,
     seedTrackIds?: number[],
     genres?: string[],
     subgenres?: string[]
   ) => {
     return apiClient.post<Track[]>("/recommendations/auto", {
-      vibe,
       limit: length,
       seed_track_ids: seedTrackIds,
       genres: genres,

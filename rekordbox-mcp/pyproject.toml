@@ -68,7 +68,7 @@ python_functions = ["test_*"]
 line-length = 100
 target-version = "py312"
 select = ["E", "F", "I", "UP", "W", "C90", "ANN", "ARG", "B", "COM", "DTZ", "EXE", "FA", "ISC", "ICN", "PD", "PGH", "PIE", "PL", "PT", "Q", "RET", "RSE", "SIM", "T20", "TCH", "TRY", "TID", "UP", "YTT"]
-ignore = ["ANN101", "ANN102", "ANN201", "ANN202", "ANN204", "ARG001", "ARG002", "B008", "C901", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "EXE002", "FA100", "ISC001", "PD011", "PGH003", "PIE001", "PLW0602", "PT004", "PT006", "PT012", "PT015", "Q000", "RET503", "RSE001", "SIM103", "SIM117", "T201", "T203", "TCH001", "TCH003", "TRY003", "UP006", "UP007", "UP035", "YTT101", "YTT102", "YTT103"]
+ignore = ["ANN101", "ANN102", "ANN201", "ANN202", "ANN204", "ARG001", "ARG002", "B008", "C901", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "EXE002", "FA100", "ISC001", "PD011", "PGH003", "PLW0602", "PT004", "PT006", "PT012", "PT015", "Q000", "RET503", "SIM103", "SIM117", "T201", "T203", "TCH001", "TCH003", "TRY003", "UP006", "UP007", "UP035", "YTT101", "YTT102", "YTT103"]
 
 [tool.black]
 line-length = 100

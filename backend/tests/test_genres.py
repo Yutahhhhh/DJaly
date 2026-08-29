@@ -72,65 +72,47 @@ def test_get_unknown_tracks_both_mode_includes_genre_and_subgenre_gaps(client: T
     assert verified_empty_subgenre.id in ids
     assert complete_track.id not in ids
 
-def test_llm_analyze(client: TestClient, session: Session, mocker):
-    # LLMのモックはconftest.pyで行われているが、
-    # GenreService内でgenerate_textの結果をパースするロジックがあるため、
-    # 適切なJSONを返すように調整が必要かもしれない。
-    # conftest.pyのmock_llmはvibe parameters用のJSONを返している。
-    # GenreServiceが期待するのはジャンル文字列やJSONなど。
-    
-    # GenreService.analyze_track_with_llmの実装を見ると、
-    # generate_textの結果をパースしてジャンルを抽出しているはず。
-    # ここでは特定のレスポンスを返すようにモックを上書きする。
-    
-    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
-    mock_gen.return_value = '{"genre": "Techno", "subgenre": "Minimal Techno", "reason": "It sounds minimal.", "confidence": "High"}'
-    
+def test_apply_genre_analysis_uses_structured_mcp_result(session: Session):
+    from app.services.genre_app_service import GenreAppService
+    from api.schemas.genres import AnalysisMode
+
     t1 = Track(filepath="/l1.mp3", title="L1", artist="A", album="B", genre="Unknown", bpm=120, duration=100)
     session.add(t1)
     session.commit()
-    
-    response = client.post("/api/genres/llm-analyze", json={"track_id": t1.id})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["genre"] == "Techno"
-    assert data["subgenre"] == "Minimal Techno"
+
+    result = GenreAppService(session).apply_genre_analysis(
+        t1.id,
+        {"genre": "Techno", "subgenre": "Minimal Techno", "reason": "Minimal production", "confidence": "High"},
+        AnalysisMode.BOTH,
+    )
+    assert result.genre == "Techno"
+    assert result.subgenre == "Minimal Techno"
     
     session.refresh(t1)
     assert t1.genre == "Techno"
     assert t1.subgenre == "Minimal Techno"
 
-def test_llm_analyze_subgenre_updates_known_genre_track(client: TestClient, session: Session, mocker):
-    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
-    mock_gen.return_value = '{"subgenre": "Deep House", "reason": "Known house style.", "confidence": "High"}'
-
+def test_apply_subgenre_preserves_known_genre(session: Session):
+    from app.services.genre_app_service import GenreAppService
+    from api.schemas.genres import AnalysisMode
     t1 = Track(filepath="/known-genre.mp3", title="Known Genre", artist="A", album="B", genre="House", subgenre="", bpm=124, duration=100, is_genre_verified=True)
     session.add(t1)
     session.commit()
 
-    response = client.post("/api/genres/llm-analyze", json={"track_id": t1.id, "mode": "subgenre"})
-    assert response.status_code == 200
+    GenreAppService(session).apply_genre_analysis(
+        t1.id,
+        {"subgenre": "Deep House", "reason": "Known house style", "confidence": "High"},
+        AnalysisMode.SUBGENRE,
+    )
 
     session.refresh(t1)
     assert t1.genre == "House"
     assert t1.subgenre == "Deep House"
     assert t1.is_genre_verified is True
 
-def test_batch_llm_analyze_rejects_unparseable_response(client: TestClient, session: Session, mocker):
-    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
-    mock_gen.return_value = "not a parseable response"
-
-    t1 = Track(filepath="/bad-batch.mp3", title="Bad Batch", artist="A", album="B", genre="Unknown", bpm=120, duration=100)
-    session.add(t1)
-    session.commit()
-
-    response = client.post("/api/genres/batch-llm-analyze", json={"track_ids": [t1.id]})
-    assert response.status_code == 500
-
-    session.refresh(t1)
-    assert t1.is_genre_verified is False
-
-def test_batch_llm_analyze_normalizes_labels_without_forcing_track_specific_genres(client: TestClient, session: Session, mocker):
+def test_apply_genre_analyses_normalizes_labels(session: Session):
+    from app.services.genre_app_service import GenreAppService
+    from api.schemas.genres import AnalysisMode
     t1 = Track(filepath="/calm-down.mp3", title="Calm Down", artist="Rema, Selena Gomez", album="B", genre="Unknown", bpm=107, duration=100)
     t2 = Track(filepath="/water.mp3", title="Water", artist="Tyla", album="B", genre="Unknown", bpm=117, duration=100)
     t3 = Track(filepath="/yeah.mp3", title="Yeah!", artist="Usher feat. Lil Jon, Ludacris", album="B", genre="Unknown", bpm=105, duration=100)
@@ -139,15 +121,12 @@ def test_batch_llm_analyze_normalizes_labels_without_forcing_track_specific_genr
     session.add(t3)
     session.commit()
 
-    mock_gen = mocker.patch("app.services.genre_app_service.generate_text")
-    mock_gen.return_value = "\n".join([
-        f"{t1.id}|afrobeat|afro pop",
-        f"{t2.id}|amapiano|popiano",
-        f"{t3.id}|rnb|crunk b",
-    ])
-
-    response = client.post("/api/genres/batch-llm-analyze", json={"track_ids": [t1.id, t2.id, t3.id], "mode": "both"})
-    assert response.status_code == 200
+    results = GenreAppService(session).apply_genre_analyses([
+        {"track_id": t1.id, "genre": "afrobeat", "subgenre": "afro pop", "confidence": "High"},
+        {"track_id": t2.id, "genre": "amapiano", "subgenre": "popiano", "confidence": "High"},
+        {"track_id": t3.id, "genre": "rnb", "subgenre": "crunk b", "confidence": "High"},
+    ], AnalysisMode.BOTH)
+    assert len(results) == 3
 
     session.refresh(t1)
     session.refresh(t2)
@@ -157,9 +136,17 @@ def test_batch_llm_analyze_normalizes_labels_without_forcing_track_specific_genr
     assert (t3.genre, t3.subgenre) == ("R&B", "Crunk&B")
     assert t1.is_genre_verified is True
 
-    prompt = mock_gen.call_args.args[1]
-    assert "Do not restrict yourself to any fixed genre list" in prompt
-    assert "Main genre examples" not in prompt
+
+def test_genre_analysis_context_contains_features_and_taxonomy(session: Session):
+    from app.services.genre_app_service import GenreAppService
+    from api.schemas.genres import AnalysisMode
+    track = Track(filepath="/ctx.mp3", title="Context", artist="Artist", genre="Unknown", bpm=128, energy=0.8)
+    session.add(track)
+    session.commit()
+    context = GenreAppService(session).get_analysis_context([track.id], AnalysisMode.BOTH)
+    assert context["tracks"][0]["bpm"] == 128
+    assert context["tracks"][0]["energy"] == pytest.approx(0.8)
+    assert "Do not restrict yourself" in context["taxonomy_guide"]
 
 def test_batch_update_genres(client: TestClient, session: Session):
     # GenreBatchUpdateRequest: parent_track_idのジャンルをtarget_track_idsに適用する

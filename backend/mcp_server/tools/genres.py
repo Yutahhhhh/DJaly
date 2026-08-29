@@ -32,19 +32,60 @@ def get_unknown_genre_tracks(offset: int = 0, limit: int = 50, mode: str = "genr
 
 
 @mcp.tool()
-def analyze_track_genre(track_id: int, overwrite: bool = False, mode: str = "both") -> Dict[str, Any]:
-    """LLM で1曲のジャンル/サブジャンルを解析し、DB を自動更新する。overwrite=True で既に検証済みの曲も再解析する。"""
+def get_genre_analysis_context(
+    track_ids: Optional[List[int]] = None,
+    mode: str = "both",
+    offset: int = 0,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """ジャンル判定に必要な曲メタデータ、Essentia特徴量、既存語彙、分類ルールを返す。
+    このツールを呼んだMCPクライアント自身のLLMで判定し、結果を
+    apply_genre_analysis または apply_genre_analyses に渡すこと。
+    """
     with db_session() as session:
         service = GenreAppService(session)
-        return serialize(service.analyze_track_with_llm(track_id, overwrite, AnalysisMode(mode)))
+        return serialize(service.get_analysis_context(track_ids, AnalysisMode(mode), offset, limit))
 
 
 @mcp.tool()
-def analyze_tracks_genre_batch(track_ids: List[int], mode: str = "both", overwrite: bool = False) -> Dict[str, Any]:
-    """複数曲をまとめて1回のLLM呼び出しでジャンル解析し、DBを自動更新する（曲数が多い場合はチャンク分割を推奨、15曲程度まで）。"""
+def apply_genre_analysis(
+    track_id: int,
+    genre: Optional[str] = None,
+    subgenre: Optional[str] = None,
+    confidence: str = "Medium",
+    reason: str = "",
+    mode: str = "both",
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """接続中のMCPクライアントが判定した1曲のジャンル結果を検証して適用する。"""
     with db_session() as session:
         service = GenreAppService(session)
-        results = service.analyze_tracks_batch_with_llm(track_ids, AnalysisMode(mode), overwrite)
+        result = service.apply_genre_analysis(
+            track_id,
+            {
+                "genre": genre,
+                "subgenre": subgenre,
+                "confidence": confidence,
+                "reason": reason,
+            },
+            AnalysisMode(mode),
+            overwrite,
+        )
+        return {"track_id": track_id, "analysis": serialize(result)}
+
+
+@mcp.tool()
+def apply_genre_analyses(
+    analyses: List[Dict[str, Any]],
+    mode: str = "both",
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """接続中のMCPクライアントが判定した複数曲の結果を一括適用する。
+    各要素は track_id, genre, subgenre, confidence, reason を持つ。
+    """
+    with db_session() as session:
+        service = GenreAppService(session)
+        results = service.apply_genre_analyses(analyses, AnalysisMode(mode), overwrite)
         return {"results": serialize(results)}
 
 

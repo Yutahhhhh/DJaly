@@ -65,7 +65,7 @@ export function AnalysisModal({
           <DialogTitle>Confirm Analysis</DialogTitle>
           <DialogDescription>
             You are about to analyze {selectedPaths.size} items. This process
-            extracts BPM, Key, and embeddings for AI search.
+            extracts BPM, Key, and MusiCNN embeddings for similarity search.
           </DialogDescription>
         </DialogHeader>
 

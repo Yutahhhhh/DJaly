@@ -26,6 +26,7 @@ from rekordbox_mcp.mcp.server import (
     get_repository,
     get_settings_instance,
     ensure_initial_backup_if_needed,
+    require_db,
 )
 
 mcp: FastMCP = get_mcp()
@@ -94,6 +95,7 @@ def _get_domain_beat_grid(track: Any) -> BeatGridDomain:
     tags={"cue", "read"},
     annotations={"readOnlyHint": True},
 )
+@require_db
 async def get_cues(track_id: int) -> dict[str, Any]:
     """Get all cue points for a track."""
     repo = get_repository()
@@ -113,6 +115,7 @@ async def get_cues(track_id: int) -> dict[str, Any]:
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def add_hot_cue(
     track_id: int,
     position_ms: float | None = None,
@@ -174,6 +177,7 @@ async def add_hot_cue(
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def add_memory_cue(
     track_id: int,
     position_ms: float | None = None,
@@ -226,6 +230,7 @@ async def add_memory_cue(
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def add_loop(
     track_id: int,
     position_ms: float | None = None,
@@ -281,6 +286,7 @@ async def add_loop(
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def update_cue(
     cue_id: str,
     track_id: int | None = None,
@@ -352,6 +358,7 @@ async def update_cue(
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def delete_cue(cue_id: str, track_id: int | None = None) -> dict[str, Any]:
     """Delete a cue point."""
     mode = _check_write_mode()
@@ -377,6 +384,7 @@ async def delete_cue(cue_id: str, track_id: int | None = None) -> dict[str, Any]
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def snap_to_beatgrid(track_id: int, cue_id: str, grid: Literal["beat", "bar"] = "beat") -> dict[str, Any]:
     """Snap an existing cue to the beat grid."""
     mode = _check_write_mode()
@@ -409,6 +417,7 @@ async def snap_to_beatgrid(track_id: int, cue_id: str, grid: Literal["beat", "ba
     tags={"cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def generate_cues(
     track_id: int,
     profile: str = "default",

@@ -17,9 +17,6 @@ export const lyricsService = {
   getLyrics: (trackId: number) =>
     apiClient.get<{ content: string }>(`/tracks/${trackId}/lyrics`),
 
-  analyzeLyrics: (trackId: number) =>
-    apiClient.post<KeywordMatch[]>(`/tracks/${trackId}/lyrics/analyze`, {}),
-
   searchLyrics: (query: string, excludeTrackId?: number) => {
     const params: any = { q: query };
     if (excludeTrackId) {

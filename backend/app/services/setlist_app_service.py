@@ -15,7 +15,7 @@ from infra.repositories.recommendation_repository import RecommendationRepositor
 from domain.services.setlist_builder import SetlistBuilder
 from infra.database.connection import get_setting_value
 
-from utils.llm import generate_vibe_parameters
+from domain.services.target_parameters import sanitize_target_parameters
 from utils.audio_math import calculate_mixability_score
 
 class SetlistAppService:
@@ -143,7 +143,7 @@ class SetlistAppService:
         self,
         track_id: int,
         limit: int = 20,
-        vibe: Optional[str] = None,
+        target_params: Optional[Dict[str, Any]] = None,
         genres: Optional[List[str]] = None,
         subgenres: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
@@ -151,15 +151,13 @@ class SetlistAppService:
         if not target_track:
             raise ValueError("Track not found")
 
-        vibe_params = {}
-        if vibe:
-            vibe_params = generate_vibe_parameters(vibe, session=self.session)
+        validated_targets = sanitize_target_parameters(target_params)
 
-        if "bpm" not in vibe_params:
-            vibe_params["bpm"] = target_track.bpm
+        if "bpm" not in validated_targets:
+            validated_targets["bpm"] = target_track.bpm
 
         pool = self.recommendation_repository.fetch_candidates_pool(
-            vibe_params,
+            validated_targets,
             genres=genres,
             subgenres=subgenres,
             limit=200,
@@ -199,7 +197,7 @@ class SetlistAppService:
 
     def generate_auto_setlist(
         self,
-        vibe: str,
+        target_params: Optional[Dict[str, Any]] = None,
         limit: Optional[int] = None,
         min_length: Optional[int] = None,
         max_length: Optional[int] = None,
@@ -222,7 +220,7 @@ class SetlistAppService:
             except (TypeError, ValueError):
                 target_length = 10
 
-        vibe_params = generate_vibe_parameters(vibe, session=self.session)
+        validated_targets = sanitize_target_parameters(target_params)
 
         seeds = []
         if seed_track_ids:
@@ -241,7 +239,7 @@ class SetlistAppService:
 
         exclude_ids = seed_track_ids or []
         pool = self.recommendation_repository.fetch_candidates_pool(
-            vibe_params,
+            validated_targets,
             genres=genres,
             subgenres=subgenres,
             limit=300,
@@ -249,7 +247,7 @@ class SetlistAppService:
         )
 
         # pool と seeds から Track オブジェクトのリストを取得
-        result_tracks = self.setlist_builder.build_chain(pool, seeds, target_length, vibe_params)
+        result_tracks = self.setlist_builder.build_chain(pool, seeds, target_length, validated_targets)
         
         enriched_result = []
         for t_obj in result_tracks:
@@ -318,57 +316,3 @@ class SetlistAppService:
             enriched_result.append(t_dict)
             
         return enriched_result
-
-    def generate_wordplay_setlist(
-        self,
-        start_track_id: int,
-        length: int = 10,
-        genres: Optional[List[str]] = None,
-        subgenres: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
-        """開始曲から、歌詞キーワードの一致（ワードプレイ）で曲を繋いだチェーンを構築する。"""
-        from api.routers.lyrics import analyze_lyrics, search_lyrics
-
-        start_track = self.track_repository.get_by_id(start_track_id)
-        if not start_track:
-            raise ValueError("Track not found")
-
-        chain: List[Track] = [start_track]
-        used_ids = {start_track.id}
-
-        while len(chain) < length:
-            current = chain[-1]
-            keywords = analyze_lyrics(current.id, False, self.session)
-
-            candidates = []  # (score, track)
-            for kw in keywords:
-                results = search_lyrics(kw["keyword"], exclude_track_id=current.id, session=self.session)
-                for r in results:
-                    cand_track_id = r["track"]["id"]
-                    if cand_track_id in used_ids:
-                        continue
-                    if genres and r["track"].get("genre") not in genres:
-                        continue
-                    if subgenres and r["track"].get("subgenre") not in subgenres:
-                        continue
-                    cand_track = self.track_repository.get_by_id(cand_track_id)
-                    if not cand_track:
-                        continue
-                    score = kw["count"] * 0.5 + calculate_mixability_score(
-                        target_bpm=current.bpm,
-                        target_key=current.key,
-                        candidate_bpm=cand_track.bpm,
-                        candidate_key=cand_track.key,
-                        vector_similarity=0.0
-                    )
-                    candidates.append((score, cand_track))
-
-            if not candidates:
-                break
-
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            best_track = candidates[0][1]
-            chain.append(best_track)
-            used_ids.add(best_track.id)
-
-        return [t.model_dump() for t in chain]

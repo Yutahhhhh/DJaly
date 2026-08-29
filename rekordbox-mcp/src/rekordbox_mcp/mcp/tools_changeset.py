@@ -14,6 +14,7 @@ from rekordbox_mcp.mcp.server import (
     get_repository,
     get_settings_instance,
     ensure_initial_backup_if_needed,
+    require_db,
 )
 
 mcp: FastMCP = get_mcp()
@@ -41,6 +42,7 @@ def _check_write_mode() -> OperationMode:
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def create_changeset(name: str) -> dict[str, Any]:
     """Create a new empty ChangeSet."""
     _check_write_mode()
@@ -84,6 +86,7 @@ async def preview_changeset(changeset_id: str) -> dict[str, Any]:
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def apply_changeset(changeset_id: str, dry_run: bool = False) -> dict[str, Any]:
     """Apply a ChangeSet atomically."""
     _check_write_mode()
@@ -100,6 +103,7 @@ async def apply_changeset(changeset_id: str, dry_run: bool = False) -> dict[str,
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def undo_changeset(changeset_id: str) -> dict[str, Any]:
     """Undo an applied ChangeSet."""
     _check_write_mode()
@@ -116,6 +120,7 @@ async def undo_changeset(changeset_id: str) -> dict[str, Any]:
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def rollback_changeset(changeset_id: str) -> dict[str, Any]:
     """Rollback a ChangeSet (alias for undo)."""
     _check_write_mode()
@@ -198,6 +203,7 @@ async def list_changesets() -> dict[str, Any]:
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def add_change_to_changeset(
     changeset_id: str,
     action: Literal["create", "update", "delete", "replace", "merge"],
@@ -247,6 +253,7 @@ async def add_change_to_changeset(
     tags={"changeset", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def delete_changeset(changeset_id: str) -> dict[str, Any]:
     """Delete a ChangeSet (only if not applied)."""
     _check_write_mode()

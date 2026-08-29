@@ -15,7 +15,7 @@ class PlaylistRepository(Protocol):
     def get_all(self) -> list[Playlist]: ...
     def get_by_id(self, playlist_id: str) -> Playlist | None: ...
     def get_children(self, parent_id: str) -> list[Playlist]: ...
-    def save(self, playlist: Playlist) -> None: ...
+    def save(self, playlist: Playlist) -> Playlist | None: ...
     def delete(self, playlist_id: str) -> None: ...
     def get_tracks(self, playlist_id: str) -> list[int]: ...
     def set_tracks(self, playlist_id: str, track_ids: list[int]) -> None: ...
@@ -41,11 +41,17 @@ class PlaylistManager:
         self._ensure_initialized()
         return self._playlists.get(playlist_id)
 
-    def _save_playlist(self, playlist: Playlist) -> None:
+    def _save_playlist(self, playlist: Playlist) -> Playlist:
         playlist.updated_at = datetime.now()
-        self._playlists[playlist.id] = playlist
         if self._repository:
-            self._repository.save(playlist)
+            saved = self._repository.save(playlist)
+            if saved is not None and saved.id != playlist.id:
+                # master.db stores playlist IDs as integers; the repository
+                # may have replaced the UUID placeholder with a real ID.
+                self._playlists.pop(playlist.id, None)
+                playlist.id = saved.id
+        self._playlists[playlist.id] = playlist
+        return playlist
 
     def _delete_playlist(self, playlist_id: str) -> None:
         if playlist_id in self._playlists:
@@ -198,16 +204,16 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
-        existing = set(playlist.track_ids)
+        current_tracks = self.get_tracks(playlist_id)
+        existing = set(current_tracks)
         new_tracks = [tid for tid in track_ids if not skip_duplicates or tid not in existing]
 
-        if position is None or position >= len(playlist.track_ids):
-            playlist.track_ids.extend(new_tracks)
+        if position is None or position >= len(current_tracks):
+            current_tracks.extend(new_tracks)
         else:
-            playlist.track_ids = (
-                playlist.track_ids[:position] + new_tracks + playlist.track_ids[position:]
-            )
+            current_tracks = current_tracks[:position] + new_tracks + current_tracks[position:]
 
+        playlist.track_ids = current_tracks
         self._save_playlist(playlist)
         if self._repository:
             self._repository.set_tracks(playlist_id, playlist.track_ids)
@@ -219,14 +225,16 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
+        current_tracks = self.get_tracks(playlist_id)
         try:
-            playlist.track_ids.remove(track_id)
-            self._save_playlist(playlist)
-            if self._repository:
-                self._repository.set_tracks(playlist_id, playlist.track_ids)
-            return playlist
+            current_tracks.remove(track_id)
         except ValueError:
             return None
+        playlist.track_ids = current_tracks
+        self._save_playlist(playlist)
+        if self._repository:
+            self._repository.set_tracks(playlist_id, playlist.track_ids)
+        return playlist
 
     def remove_track_at(self, playlist_id: str, index: int) -> Playlist | None:
         """Remove a track at a specific position."""
@@ -234,8 +242,10 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
-        if 0 <= index < len(playlist.track_ids):
-            playlist.track_ids.pop(index)
+        current_tracks = self.get_tracks(playlist_id)
+        if 0 <= index < len(current_tracks):
+            current_tracks.pop(index)
+            playlist.track_ids = current_tracks
             self._save_playlist(playlist)
             if self._repository:
                 self._repository.set_tracks(playlist_id, playlist.track_ids)
@@ -253,13 +263,15 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
-        if not (0 <= from_index < len(playlist.track_ids)):
+        current_tracks = self.get_tracks(playlist_id)
+        if not (0 <= from_index < len(current_tracks)):
             return None
 
-        track_id = playlist.track_ids.pop(from_index)
-        to_index = max(0, min(to_index, len(playlist.track_ids)))
-        playlist.track_ids.insert(to_index, track_id)
+        track_id = current_tracks.pop(from_index)
+        to_index = max(0, min(to_index, len(current_tracks)))
+        current_tracks.insert(to_index, track_id)
 
+        playlist.track_ids = current_tracks
         self._save_playlist(playlist)
         if self._repository:
             self._repository.set_tracks(playlist_id, playlist.track_ids)
@@ -276,14 +288,16 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
-        if track_id not in playlist.track_ids:
+        current_tracks = self.get_tracks(playlist_id)
+        if track_id not in current_tracks:
             return None
 
-        if position is None or position >= len(playlist.track_ids):
-            playlist.track_ids.append(track_id)
+        if position is None or position >= len(current_tracks):
+            current_tracks.append(track_id)
         else:
-            playlist.track_ids.insert(position, track_id)
+            current_tracks.insert(position, track_id)
 
+        playlist.track_ids = current_tracks
         self._save_playlist(playlist)
         if self._repository:
             self._repository.set_tracks(playlist_id, playlist.track_ids)
@@ -295,7 +309,8 @@ class PlaylistManager:
         if not playlist or playlist.is_folder or playlist.is_smart_playlist:
             return None
 
-        if set(track_ids) != set(playlist.track_ids):
+        current_tracks = self.get_tracks(playlist_id)
+        if set(track_ids) != set(current_tracks):
             raise ValueError("Track list must contain exactly the same tracks")
 
         playlist.track_ids = track_ids
@@ -324,7 +339,7 @@ class PlaylistManager:
 
         seen = set()
         unique = []
-        for tid in playlist.track_ids:
+        for tid in self.get_tracks(playlist_id):
             if tid not in seen:
                 seen.add(tid)
                 unique.append(tid)

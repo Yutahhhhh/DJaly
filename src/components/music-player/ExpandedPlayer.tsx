@@ -106,12 +106,12 @@ export function ExpandedPlayer({
               className="rounded-full h-7 px-3 gap-1.5 text-[10px]"
             />
 
-            {/* AI Suggestion Overlay */}
+            {/* Artwork suggestion overlay */}
             {aiArtworkInfo && aiArtworkInfo.startsWith("data:image") && (
               <div className="absolute top-0 left-full ml-4 w-40 p-2 bg-background/95 backdrop-blur border rounded-xl shadow-2xl animate-in fade-in slide-in-from-left-4 duration-300 z-50">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-1.5 text-primary font-bold text-[10px]">
-                    <Sparkles className="h-3 w-3" /> AI Suggestion
+                    <Sparkles className="h-3 w-3" /> Artwork Suggestion
                   </div>
                   <Button
                     variant="ghost"

@@ -131,6 +131,23 @@ MCP ツールは合計 46 個です（上記の Cue、プレイリスト、Chang
 
 起動時は `--mode` または `REKORDBOX_MODE`、実行中は `set_mode`／`PUT /api/mode` で切り替えます。
 
+## DB が存在しない環境での動作
+
+Rekordbox の `master.db` が見つからない環境（`--database-path` 未指定かつ自動検出
+でも見つからない場合）でも、サーバーは**エラーで落ちずに起動**します。この場合:
+
+- `get_status` は `db_connected: false` と `db_unavailable_reason`（検出パスまたは
+  「自動検出で見つからず」の理由）を返します。
+- DB に依存するツール（`list_playlists`、`get_cues`、`add_hot_cue`、
+  `create_playlist` など）は例外を投げず、`{"success": false, "error": "Rekordbox
+  database not available: ..."}` のような graceful な失敗レスポンスを返します。
+- DB に依存しない機能（`get_mode`、`set_mode`、`get_status`、バックアップ一覧など）は
+  通常どおり動作します。
+
+DB を用意したら `set_mode` でモードを切り替えるか、サーバーを再起動すると
+DB 依存機能が利用可能になります。テスト用のプレースホルダ SQLite ファイルが
+存在する場合は従来どおり mock バックエンドにフォールバックします。
+
 ## バックアップ
 
 初回書込み前の保護されたフルバックアップと、操作単位の差分バックアップを作成できます。

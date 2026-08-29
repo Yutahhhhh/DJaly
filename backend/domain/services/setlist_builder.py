@@ -17,7 +17,7 @@ class SetlistBuilder:
         pool: List[Dict[str, Any]],
         seeds: List[Dict[str, Any]],
         target_length: int,
-        vibe_params: Dict[str, Any]
+        target_params: Dict[str, Any]
     ) -> List[Track]:
         """Greedy Algorithm for Infinite Flow"""
         if not pool and not seeds:
@@ -34,7 +34,7 @@ class SetlistBuilder:
             def start_score(node):
                 t = node["track"]
                 score = 0
-                if "energy" in vibe_params: score -= abs(t.energy - vibe_params["energy"])
+                if "energy" in target_params: score -= abs(t.energy - target_params["energy"])
                 return score
 
             pool.sort(key=start_score, reverse=True)
@@ -56,9 +56,9 @@ class SetlistBuilder:
                 # Vibe 近接スコア: energy だけでなく danceability / brightness も評価
                 vibe_score = 0.0
                 for feat in ("energy", "danceability", "brightness"):
-                    if feat in vibe_params:
+                    if feat in target_params:
                         cand_val = getattr(candidate["track"], feat, None) or 0.0
-                        vibe_score -= abs(cand_val - vibe_params[feat]) * 0.1
+                        vibe_score -= abs(cand_val - target_params[feat]) * 0.1
 
                 # 同一アーティスト連続のペナルティ
                 artist_penalty = 0.0

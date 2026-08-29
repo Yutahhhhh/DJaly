@@ -1,9 +1,10 @@
-from sqlmodel import create_engine, Session, text
+from sqlmodel import create_engine, Session, text, select
 from sqlalchemy.pool import NullPool
 import os
 import threading
 from config import settings
 from infra.database.schema import init_raw_db
+from infra.database.compaction import ensure_healthy_db
 
 # DBパス設定
 DB_PATH = settings.DB_PATH
@@ -30,16 +31,41 @@ def init_db():
 
     with db_lock:
         try:
+            # 0. SQLAlchemy エンジンが接続する前に、スキーマ移行(v4: BLOB化)や
+            #    肥大ファイルのコンパクションが必要ならファイルを再構築する。
+            ensure_healthy_db(DB_PATH)
+
             # 1. Raw SQL によるテーブル作成 + マイグレーション実行
             init_raw_db(engine)
             
             # 2. 初期データの投入
             with Session(engine) as session:
                 seed_initial_data(session)
+                # v0.4+: model/API credentials are owned by the MCP client.
+                # Remove credentials previously stored by Djaly.
+                from app.services.setting_app_service import is_retired_llm_setting_key
+                from domain.models.setting import Setting
+                for saved_setting in session.exec(select(Setting)).all():
+                    if is_retired_llm_setting_key(saved_setting.key):
+                        session.delete(saved_setting)
+                session.commit()
                 
         except Exception as e:
             print(f"Error during database initialization: {e}")
             raise e
+
+def checkpoint_db():
+    """
+    WAL を本体ファイルへ畳み込む。正常終了時に呼び、肥大の抑制を助ける。
+    (Tauri が SIGKILL する場合は動かないため、あくまで補助。)
+    """
+    try:
+        with db_lock:
+            with engine.connect() as conn:
+                conn.execute(text("CHECKPOINT"))
+    except Exception as e:
+        print(f"DEBUG: CHECKPOINT skipped: {e}")
+
 
 def close_db():
     """

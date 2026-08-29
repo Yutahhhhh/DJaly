@@ -5,7 +5,6 @@ import duckdb
 from typing import Dict, Any, List
 from pydantic import BaseModel
 from infra.database.connection import get_session, get_setting_value
-from utils.llm import PROVIDER_CODEX, PROVIDER_OLLAMA, check_llm_status, get_llm_config
 from models import Track, Setlist, Lyrics
 
 import subprocess
@@ -63,12 +62,11 @@ def reveal_file_in_os(req: RevealFileRequest):
 @router.get("/api/")
 def health_check(session: Session = Depends(get_session)):
     db_version = duckdb.__version__
-    ollama_status = check_llm_status(session)
 
     return {
         "status": "ok",
         "duckdb_version": db_version,
-        "ollama_status": ollama_status
+        "ai_runtime": "mcp-client"
     }
 
 @router.get("/api/dashboard")
@@ -118,15 +116,6 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
 
     # 6. System Config Check
     root_path = get_setting_value(session, "root_path", "")
-    llm_provider, llm_model, llm_api_key, _ = get_llm_config(session)
-    
-    # LLM Status check (lightweight)
-    # 実際のリクエストはタイムアウトする可能性があるので、ここでは設定値の有無のみ確認し、
-    # 接続テストはフロントエンドで非同期に行うか、Health Check APIを利用する。
-    llm_configured = bool(llm_model) and (
-        llm_provider in [PROVIDER_OLLAMA, PROVIDER_CODEX] or bool(llm_api_key)
-    )
-
     return {
         "total_tracks": total_tracks,
         "analyzed_tracks": analyzed_tracks,
@@ -136,8 +125,6 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
         "lyrics_tracks_count": lyrics_count,
         "recent_setlists": recent_setlists,
         "config": {
-            "has_root_path": bool(root_path),
-            "llm_model": llm_model,
-            "llm_configured": llm_configured
+            "has_root_path": bool(root_path)
         }
     }

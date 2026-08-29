@@ -9,7 +9,6 @@ pydantic
 python-multipart
 websockets
 requests
-ollama
 mutagen
 platformdirs
 pyinstaller

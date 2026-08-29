@@ -95,10 +95,5 @@ export function buildTrackSearchParams(query: string, filters: FilterState) {
   if (filters.maxBrightness < 1)
     params["max_brightness"] = filters.maxBrightness.toString();
 
-  // Vibe Search
-  if (filters.vibePrompt) {
-    params["vibe_prompt"] = filters.vibePrompt;
-  }
-
   return params;
 }

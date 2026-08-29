@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import signal
 import sys
-from contextlib import asynccontextmanager
 from typing import Any
 
 from fastmcp import FastMCP
@@ -17,7 +17,6 @@ from rekordbox_mcp.db.repository import RekordboxRepository
 from rekordbox_mcp.domain.audit import AuditLogger
 from rekordbox_mcp.domain.backup import BackupManager
 from rekordbox_mcp.domain.changeset import ChangeSetManager
-from rekordbox_mcp.domain.cue import CueManager
 from rekordbox_mcp.domain.models import OperationMode
 from rekordbox_mcp.domain.playlist import PlaylistManager
 from rekordbox_mcp.domain.strategy import CueStrategy, create_cue_strategy
@@ -56,6 +55,39 @@ def get_connection() -> RekordboxConnection:
     if conn is None:
         raise RuntimeError("Connection not initialized. Call initialize_services() first.")
     return conn
+
+
+def db_unavailable_error() -> dict[str, Any] | None:
+    """Return a graceful error response when the Rekordbox database is unavailable.
+
+    Returns ``None`` when the database is available (or services are not yet
+    initialized), otherwise a ``{"success": False, "error": ...}`` dict that
+    tools can return directly instead of raising an MCP protocol error.
+    """
+    conn = get_service("connection")
+    if conn is None or not conn.db_unavailable_reason:
+        return None
+    return {
+        "success": False,
+        "error": f"Rekordbox database not available: {conn.db_unavailable_reason}",
+    }
+
+
+def require_db(func: Any) -> Any:
+    """Decorator: make a tool return a graceful error when the DB is unavailable.
+
+    Keeps the original signature (via ``functools.wraps``) so FastMCP still
+    registers the tool with the correct parameter schema.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        unavailable = db_unavailable_error()
+        if unavailable is not None:
+            return unavailable
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 def get_audit_logger() -> AuditLogger:
@@ -127,7 +159,13 @@ def initialize_services(
 
     # Create connection
     connection = RekordboxConnection(settings, mode)
-    connection.connect()
+    try:
+        connection.connect()
+    except Exception as e:
+        # A missing/unreadable Rekordbox database must not prevent the server
+        # from starting.  The connection records the reason (via
+        # ``db_unavailable_reason``) and DB-dependent tools fail gracefully.
+        print(f"Warning: Rekordbox database unavailable: {e}", file=sys.stderr)
 
     # Create repository
     repository = RekordboxRepository(settings, mode)
@@ -156,18 +194,20 @@ def initialize_services(
             return [p for p in self._repo.get_playlists() if p.parent_id == parent_id]
 
         def save(self, playlist):
-            # In masterdb mode, this would write to DB
-            pass
+            if mode == OperationMode.MASTERDB:
+                return self._repo.save_playlist(playlist)
+            return None
 
         def delete(self, playlist_id: str):
-            pass
+            if mode == OperationMode.MASTERDB:
+                self._repo.delete_playlist(playlist_id)
 
         def get_tracks(self, playlist_id: str):
             return self._repo.get_playlist_tracks(playlist_id)
 
         def set_tracks(self, playlist_id: str, track_ids: list[int]):
             if mode == OperationMode.MASTERDB:
-                self._repo.add_tracks_to_playlist(playlist_id, track_ids)
+                self._repo.set_playlist_tracks(playlist_id, track_ids)
 
     playlist_manager = PlaylistManager(RepositoryPlaylistAdapter(repository))
 
@@ -274,6 +314,7 @@ Operation Modes:
 - masterdb: Direct database writes (requires Rekordbox to be closed)
 
 Available Tools:
+- Track Management: search_tracks, get_track, get_playlist_tracks_with_details
 - Cue Management: get_cues, add_hot_cue, add_memory_cue, add_loop, update_cue, delete_cue, snap_to_beatgrid, generate_cues, get_cue_profiles, set_cue_profile
 - Playlist Management: list_playlists, get_playlist_tracks, create_playlist, create_folder, rename_playlist, move_playlist, delete_playlist, add_tracks_to_playlist, remove_track_from_playlist, move_track_in_playlist, copy_track_in_playlist, reorder_playlist, replace_playlist_tracks, dedupe_playlist, process_playlist_cues
 - ChangeSet Management: create_changeset, preview_changeset, apply_changeset, undo_changeset, rollback_changeset, get_audit_log
@@ -287,7 +328,14 @@ All write operations require masterdb mode and Rekordbox to be closed.
     mcp = server
 
     # Import tool modules to register tools (lazy import to avoid circular deps)
-    from rekordbox_mcp.mcp import tools_backup, tools_changeset, tools_cue, tools_mode, tools_playlist  # noqa: F401
+    from rekordbox_mcp.mcp import (  # noqa: F401
+        tools_backup,
+        tools_changeset,
+        tools_cue,
+        tools_mode,
+        tools_playlist,
+        tools_track,
+    )
 
     return server
 

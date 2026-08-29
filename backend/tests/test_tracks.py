@@ -101,24 +101,16 @@ def test_update_track_genre(client, session: Session):
     session.refresh(track)
     assert track.genre == "New Genre"
 
-def test_vibe_search_integration(client, session: Session, mocker):
-    """LLMプロンプトを用いたVibe検索の統合テスト"""
-    # 1. データの準備
+def test_structured_target_search(session: Session):
+    """A connected MCP model can pass structured targets without an internal LLM."""
+    from app.services.track_app_service import TrackAppService
     t1 = Track(filepath="/v1.mp3", title="Chill", energy=0.2, bpm=90, duration=100, artist="A", album="B", genre="C")
     t2 = Track(filepath="/v2.mp3", title="Energy", energy=0.9, bpm=140, duration=100, artist="A", album="B", genre="C")
     session.add(t1)
     session.add(t2)
     session.commit()
 
-    # 2. LLMのレスポンスをモック (エナジーが高い値を返すように)
-    mock_params = mocker.patch("app.services.track_app_service.generate_vibe_parameters")
-    mock_params.return_value = {"bpm": 140, "energy": 0.9, "danceability": 0.8, "brightness": 0.8, "noisiness": 0.1}
-
-    # 3. リクエスト実行
-    response = client.get("/api/tracks", params={"vibe_prompt": "Fast and energetic peak time track"})
-    data = response.json()
-
-    # 4. 期待値: Energyが高い t2 が先頭に来る
+    data = TrackAppService(session).get_tracks(target_params={"bpm": 140, "energy": 0.9})
     assert data[0]["title"] == "Energy"
 
 def test_suggest_genre(client, session: Session, mocker):

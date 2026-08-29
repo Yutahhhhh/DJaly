@@ -21,16 +21,6 @@ class GenreCleanupRequest(BaseModel):
     track_ids: List[int]
     mode: AnalysisMode = AnalysisMode.GENRE
 
-class GenreLLMAnalyzeRequest(BaseModel):
-    track_id: int
-    overwrite: bool = False
-    mode: AnalysisMode = AnalysisMode.BOTH
-
-class GenreBatchLLMAnalyzeRequest(BaseModel):
-    track_ids: List[int]
-    mode: AnalysisMode = AnalysisMode.BOTH
-    overwrite: bool = False
-
 class GenreUpdateResult(BaseModel):
     track_id: int
     title: str

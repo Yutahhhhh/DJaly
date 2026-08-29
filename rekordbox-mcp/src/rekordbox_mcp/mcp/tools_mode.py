@@ -36,7 +36,7 @@ async def set_mode(mode: str) -> dict[str, Any]:
         }
 
     settings = get_settings_instance()
-    old_mode = settings.mode
+    old_mode = OperationMode(settings.mode)
 
     if new_mode == old_mode:
         return {
@@ -78,14 +78,15 @@ async def set_mode(mode: str) -> dict[str, Any]:
 async def get_mode() -> dict[str, Any]:
     """Get the current operation mode."""
     settings = get_settings_instance()
+    current_mode = OperationMode(settings.mode).value
     return {
         "success": True,
-        "mode": settings.mode.value,
+        "mode": current_mode,
         "description": {
             "readonly": "Read-only access to tracks, cues, playlists",
             "xml": "Export cues to Rekordbox collection XML (Automark-for-Rekordbox compatible)",
             "masterdb": "Direct database writes (requires Rekordbox to be closed)",
-        }.get(settings.mode.value, "Unknown mode"),
+        }.get(current_mode, "Unknown mode"),
     }
 
 
@@ -103,13 +104,16 @@ async def get_status() -> dict[str, Any]:
     # Check DB connection
     db_connected = False
     db_path = None
+    db_unavailable_reason = None
     track_count = 0
     playlist_count = 0
+    db_error = None
 
     try:
         conn = get_connection()
         db_connected = conn.is_connected
         db_path = str(conn.db_path) if conn.db_path else None
+        db_unavailable_reason = conn.db_unavailable_reason
 
         if db_connected:
             repo = get_repository()
@@ -117,8 +121,12 @@ async def get_status() -> dict[str, Any]:
             track_count = len(tracks)
             playlists = await asyncio.to_thread(repo.get_playlists)
             playlist_count = len(playlists)
-    except Exception:
-        pass
+    except Exception as e:
+        # Do not let a read failure crash status reporting, but surface the
+        # error instead of silently reporting 0 counts as if the library were
+        # empty. The underlying connection may have already recovered itself
+        # (see RekordboxConnection.recover_from_error); the caller can retry.
+        db_error = str(e)
 
     # Check if Rekordbox is running
     rekordbox_running = False
@@ -146,9 +154,11 @@ async def get_status() -> dict[str, Any]:
         mode=mode,
         db_connected=db_connected,
         db_path=db_path,
+        db_unavailable_reason=db_unavailable_reason,
         rekordbox_running=rekordbox_running,
         track_count=track_count,
         playlist_count=playlist_count,
+        db_error=db_error,
         backup_usage=backup_usage,
         last_backup=last_backup,
     )

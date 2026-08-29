@@ -12,6 +12,7 @@ from rekordbox_mcp.mcp.server import (
     get_backup_manager,
     get_mcp,
     get_settings_instance,
+    require_db,
 )
 
 mcp: FastMCP = get_mcp()
@@ -38,6 +39,7 @@ def _check_write_mode() -> OperationMode:
     tags={"backup", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def backup_now(
     type: Literal["full", "differential"] = "full",
     description: str = "",
@@ -132,6 +134,7 @@ async def protect_backup(backup_id: str, protect: bool = True) -> dict[str, Any]
     tags={"backup", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def restore_backup(backup_id: str, target_path: str | None = None) -> dict[str, Any]:
     """Restore a full backup to the database."""
     if get_settings_instance().mode != OperationMode.MASTERDB:
@@ -233,6 +236,7 @@ async def get_backup(backup_id: str) -> dict[str, Any]:
     tags={"backup", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def ensure_initial_backup() -> dict[str, Any]:
     """Ensure an initial protected full backup exists."""
     _check_write_mode()

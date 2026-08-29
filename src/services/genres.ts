@@ -27,12 +27,6 @@ export interface GenreBatchUpdateRequest {
 
 export type AnalysisMode = "genre" | "subgenre" | "both";
 
-export interface GenreLLMAnalyzeRequest {
-  track_id: number;
-  overwrite?: boolean;
-  mode?: AnalysisMode;
-}
-
 export interface GenreAnalysisResult {
   genre: string;
   subgenre?: string;
@@ -105,28 +99,6 @@ export const genreService = {
     );
   },
 
-  analyzeTrackWithLlm: async (
-    trackId: number,
-    overwrite: boolean = false,
-    mode: AnalysisMode = "both"
-  ): Promise<GenreAnalysisResult> => {
-    return apiClient.post<GenreAnalysisResult>("/genres/llm-analyze", {
-      track_id: trackId,
-      overwrite,
-      mode,
-    });
-  },
-
-  analyzeTracksBatchWithLlm: async (
-    trackIds: number[],
-    mode: AnalysisMode = "both"
-  ): Promise<GenreUpdateResult[]> => {
-    return apiClient.post<GenreUpdateResult[]>("/genres/batch-llm-analyze", {
-      track_ids: trackIds,
-      mode,
-    });
-  },
-
   batchUpdateGenres: async (
     parentTrackId: number,
     targetTrackIds: number[]
@@ -138,31 +110,6 @@ export const genreService = {
         target_track_ids: targetTrackIds,
       }
     );
-  },
-
-  startAnalyzeAll: async (
-    mode: "keep" | "overwrite"
-  ): Promise<{ status: string; message: string }> => {
-    return apiClient.post<{ status: string; message: string }>(
-      "/genres/analyze-all",
-      { mode }
-    );
-  },
-
-  cancelAnalyzeAll: async (): Promise<{ status: string }> => {
-    return apiClient.post<{ status: string }>("/genres/batch-analyze/cancel", {});
-  },
-
-  startBatchAnalysis: async (
-    trackIds: number[],
-    overwrite: boolean,
-    mode: AnalysisMode = "both"
-  ): Promise<{ status: string }> => {
-    return apiClient.post<{ status: string }>("/genres/batch-analyze/start", {
-      track_ids: trackIds,
-      overwrite,
-      mode,
-    });
   },
 
   getCleanupSuggestions: async (mode: AnalysisMode = "genre"): Promise<GenreCleanupGroup[]> => {

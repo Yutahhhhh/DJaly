@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
-from typing import Any
 
 from rekordbox_mcp.config import Settings, get_settings
 from rekordbox_mcp.db.connection import (
@@ -194,13 +192,30 @@ class RekordboxRepository:
         self._connection = RekordboxConnection(self._settings, self._mode)
         self._mock_db: MockDatabase | None = None
         db_path = self._connection.get_db_path()
-        self._use_mock = not PYREKORDBOX_AVAILABLE or not is_rekordbox_database(db_path)
+        # A missing database is *not* a mock-backend case: the mock fallback is
+        # only for placeholder SQLite files (tests / no pyrekordbox).  When no
+        # master.db exists at all the repository must report the database as
+        # unavailable instead of silently serving mock data.
+        self._db_unavailable = db_path is None
+        self._use_mock = not self._db_unavailable and (
+            not PYREKORDBOX_AVAILABLE or not is_rekordbox_database(db_path)
+        )
+
+    def _ensure_db_available(self) -> None:
+        """Raise a clear error when the Rekordbox database is unavailable."""
+        if self._db_unavailable:
+            raise RuntimeError(
+                "Rekordbox database not found or not available. "
+                "The server is running without a Rekordbox database; "
+                "database-dependent operations are unavailable.",
+            )
 
     def connect(self) -> None:
         """Connect to the database."""
         if self._use_mock:
             self._mock_db = MockDatabase()
         else:
+            self._ensure_db_available()
             self._connection.connect()
 
     def close(self) -> None:
@@ -232,12 +247,17 @@ class RekordboxRepository:
         if self._use_mock:
             return self._get_tracks_mock(filter)
 
+        self._ensure_db_available()
         self._connection.connect()
         content_table = self._connection.get_content_table()
         if not content_table:
             return []
 
-        rows = content_table.get_all()
+        try:
+            rows = content_table.get_all()
+        except Exception as e:
+            self._connection.recover_from_error(e)
+            raise RuntimeError(f"Failed to read tracks: {e}") from e
         tracks = []
         for row in rows:
             # Listing the library must not parse every cue and ANLZ file.
@@ -263,6 +283,7 @@ class RekordboxRepository:
                 return self._row_to_track(row)
             return None
 
+        self._ensure_db_available()
         self._connection.connect()
         content_table = self._connection.get_content_table()
         if not content_table:
@@ -321,6 +342,11 @@ class RekordboxRepository:
     def _matches_filter(self, track: Track, filter: dict | None) -> bool:
         if not filter:
             return True
+        # ``query`` matches title OR artist (partial, case-insensitive).
+        if "query" in filter:
+            q = filter["query"].lower()
+            if q not in track.title.lower() and q not in track.artist.lower():
+                return False
         if "genre" in filter and track.genre != filter["genre"]:
             return False
         if "artist" in filter and filter["artist"].lower() not in track.artist.lower():
@@ -348,6 +374,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._get_cues_mock(track_id)
 
+        self._ensure_db_available()
         self._connection.connect()
         cue_table = self._connection.get_cue_table()
         if not cue_table:
@@ -374,6 +401,7 @@ class RekordboxRepository:
             row = self._mock_db.get_cue_table().get_by_id(cue_id)
             return CuePoint.from_db_dict(row) if row else None
 
+        self._ensure_db_available()
         self._connection.connect()
         cue_table = self._connection.get_cue_table()
         if not cue_table:
@@ -397,6 +425,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._add_cue_mock(track_id, cue)
 
+        self._ensure_db_available()
         self._connection.connect()
 
         # Verify Rekordbox is not running
@@ -438,6 +467,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._update_cue_mock(cue_id, data)
 
+        self._ensure_db_available()
         self._connection.connect()
 
         if self._connection.is_rekordbox_running():
@@ -501,6 +531,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._mock_db.get_cue_table().delete(cue_id)
 
+        self._ensure_db_available()
         self._connection.connect()
 
         if self._connection.is_rekordbox_running():
@@ -524,12 +555,17 @@ class RekordboxRepository:
         if self._use_mock:
             return self._get_playlists_mock()
 
+        self._ensure_db_available()
         self._connection.connect()
         playlist_table = self._connection.get_playlist_table()
         if not playlist_table:
             return []
 
-        rows = playlist_table.get_all()
+        try:
+            rows = playlist_table.get_all()
+        except Exception as e:
+            self._connection.recover_from_error(e)
+            raise RuntimeError(f"Failed to read playlists: {e}") from e
         playlists = []
         for row in rows:
             playlist = self._row_to_playlist(row)
@@ -563,14 +599,50 @@ class RekordboxRepository:
         if self._use_mock:
             return self._mock_db.get_playlist_content_table().get_tracks(playlist_id)
 
+        self._ensure_db_available()
         self._connection.connect()
         content_table = self._connection.get_playlist_content_table()
         if not content_table:
             return []
 
-        # This would need a proper query in real implementation
-        # For now, return empty list
-        return []
+        # In pyrekordbox 0.4.x playlist membership is represented by
+        # ``DjmdSongPlaylist``.  The generic table adapter intentionally only
+        # exposes get_all/get_by_id, so query the database model directly here
+        # and preserve Rekordbox's TrackNo ordering.
+        try:
+            rows = self._connection.db.get_playlist_songs(
+                PlaylistID=str(playlist_id),
+            ).all()
+            rows.sort(key=lambda row: (row.TrackNo is None, row.TrackNo or 0))
+            return [int(row.ContentID) for row in rows if row.ContentID is not None]
+        except Exception as e:
+            self._connection.recover_from_error(e)
+            raise RuntimeError(f"Failed to read playlist tracks: {e}") from e
+
+    def set_playlist_tracks(self, playlist_id: str, track_ids: list[int]) -> None:
+        """Replace all tracks in a playlist with the given ordered list. Only allowed in masterdb mode."""
+        if self._mode != OperationMode.MASTERDB:
+            raise RuntimeError("Playlist modification only allowed in masterdb mode")
+
+        if self._use_mock:
+            self._mock_db.get_playlist_content_table().set_tracks(playlist_id, track_ids)
+            return
+
+        self._ensure_db_available()
+        self._connection.connect()
+
+        if self._connection.is_rekordbox_running():
+            raise RuntimeError("Rekordbox is running. Cannot write to database.")
+
+        content_table = self._connection.get_playlist_content_table()
+        if not content_table:
+            raise RuntimeError("Playlist content table not available")
+
+        try:
+            content_table.set_tracks(playlist_id, track_ids)
+        except Exception as e:
+            self._connection.recover_from_error(e)
+            raise RuntimeError(f"Failed to set playlist tracks: {e}") from e
 
     def create_playlist(self, name: str, parent_id: str = "root") -> Playlist:
         """Create a new playlist. Only allowed in masterdb mode."""
@@ -580,6 +652,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._create_playlist_mock(name, parent_id)
 
+        self._ensure_db_available()
         self._connection.connect()
 
         if self._connection.is_rekordbox_running():
@@ -605,9 +678,12 @@ class RekordboxRepository:
         }
 
         try:
-            playlist_table.insert(playlist_data)
+            inserted = playlist_table.insert(playlist_data)
+            # master.db stores playlist IDs as integers; use the ID the
+            # database actually assigned instead of the UUID placeholder.
+            actual_id = str(inserted.get("ID", playlist_id))
             return Playlist(
-                id=playlist_id,
+                id=actual_id,
                 name=name,
                 parent_id=parent_id,
                 seq=seq,
@@ -640,6 +716,105 @@ class RekordboxRepository:
             attribute=0,
         )
 
+    def save_playlist(self, playlist: Playlist) -> Playlist:
+        """Save (upsert) a playlist. Creates if not exists, updates if exists. Only allowed in masterdb mode."""
+        if self._mode != OperationMode.MASTERDB:
+            raise RuntimeError("Playlist save only allowed in masterdb mode")
+
+        if self._use_mock:
+            return self._save_playlist_mock(playlist)
+
+        self._ensure_db_available()
+        self._connection.connect()
+
+        if self._connection.is_rekordbox_running():
+            raise RuntimeError("Rekordbox is running. Cannot write to database.")
+
+        playlist_table = self._connection.get_playlist_table()
+        if not playlist_table:
+            raise RuntimeError("Playlist table not available")
+
+        playlist_data = {
+            "ID": playlist.id,
+            "Name": playlist.name,
+            "ParentID": playlist.parent_id,
+            "Seq": playlist.seq,
+            "Attribute": playlist.attribute,
+            "SmartListXML": playlist.smart_list_xml,
+        }
+
+        try:
+            # Check if playlist exists
+            existing = playlist_table.get_by_id(playlist.id)
+            if existing:
+                # Update existing playlist
+                playlist_table.update(playlist.id, playlist_data)
+            else:
+                # Insert new playlist (respects the ID provided by PlaylistManager)
+                inserted = playlist_table.insert(playlist_data)
+                # master.db stores playlist IDs as integers; reflect the ID the
+                # database actually assigned so callers keep using a valid ID.
+                actual_id = str(inserted.get("ID", playlist.id))
+                if actual_id != playlist.id:
+                    playlist.id = actual_id
+        except Exception as e:
+            self._connection.recover_from_error(e)
+            raise RuntimeError(f"Failed to save playlist: {e}") from e
+        return playlist
+
+    def _save_playlist_mock(self, playlist: Playlist) -> Playlist:
+        playlist_data = {
+            "ID": playlist.id,
+            "Name": playlist.name,
+            "ParentID": playlist.parent_id,
+            "Seq": playlist.seq,
+            "Attribute": playlist.attribute,
+            "SmartListXML": playlist.smart_list_xml,
+        }
+        self._mock_db.get_playlist_table().insert(playlist_data)
+        # Ensure playlist content entry exists
+        if playlist.id not in self._mock_db._playlist_content:
+            self._mock_db._playlist_content[playlist.id] = []
+        return playlist
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist. Only allowed in masterdb mode."""
+        if self._mode != OperationMode.MASTERDB:
+            raise RuntimeError("Playlist deletion only allowed in masterdb mode")
+
+        if self._use_mock:
+            return self._delete_playlist_mock(playlist_id)
+
+        self._ensure_db_available()
+        self._connection.connect()
+
+        if self._connection.is_rekordbox_running():
+            raise RuntimeError("Rekordbox is running. Cannot write to database.")
+
+        playlist_table = self._connection.get_playlist_table()
+        if not playlist_table:
+            raise RuntimeError("Playlist table not available")
+
+        try:
+            # Also delete playlist content (tracks)
+            content_table = self._connection.get_playlist_content_table()
+            if content_table:
+                # Remove all tracks from playlist first
+                existing_tracks = content_table.get_tracks(playlist_id)
+                for track_id in existing_tracks:
+                    content_table.remove_track(playlist_id, track_id)
+
+            # Delete the playlist itself
+            return playlist_table.delete(playlist_id)
+        except Exception as e:
+            raise RuntimeError(f"Failed to delete playlist: {e}") from e
+
+    def _delete_playlist_mock(self, playlist_id: str) -> bool:
+        # Delete playlist content
+        self._mock_db.get_playlist_content_table().set_tracks(playlist_id, [])
+        # Delete playlist
+        return self._mock_db.get_playlist_table().delete(playlist_id)
+
     def _get_next_seq(self, parent_id: str) -> int:
         playlists = self.get_playlists()
         children = [p for p in playlists if p.parent_id == parent_id]
@@ -659,6 +834,7 @@ class RekordboxRepository:
             self._add_tracks_to_playlist_mock(playlist_id, track_ids)
             return
 
+        self._ensure_db_available()
         self._connection.connect()
 
         if self._connection.is_rekordbox_running():
@@ -686,6 +862,7 @@ class RekordboxRepository:
         if self._use_mock:
             return self._mock_db.get_playlist_content_table().remove_track(playlist_id, track_id)
 
+        self._ensure_db_available()
         self._connection.connect()
 
         if self._connection.is_rekordbox_running():
@@ -742,7 +919,7 @@ class RekordboxRepository:
                 from rekordbox_mcp.domain.phrase import analyze_phrases_from_anlz
                 if track.beat_grid:
                     phrase_result = analyze_phrases_from_anlz(
-                        anlz_data, track.beat_grid, track.duration_ms
+                        anlz_data, track.beat_grid, track.duration_ms,
                     )
                     result["phrases"] = phrase_result.phrases
 
@@ -772,7 +949,6 @@ class RekordboxRepository:
     def _read_anlz_mock(self, track: Track) -> dict:
         """Mock ANLZ data for testing."""
         from rekordbox_mcp.domain.phrase import create_default_phrases
-        from rekordbox_mcp.domain.beatgrid import create_beat_grid_from_analysis
 
         result = {
             "phrases": [],

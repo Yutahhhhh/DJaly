@@ -75,7 +75,7 @@ def test_export_m3u8(client: TestClient, session: Session):
     assert "#EXTM3U" in response.text
     assert "/music/song.mp3" in response.text
 
-def test_recommend_next_track(client: TestClient, session: Session, mocker):
+def test_recommend_next_track(client: TestClient, session: Session):
     # データ準備
     t1 = Track(filepath="/r1.mp3", title="R1", artist="A", album="B", genre="Techno", bpm=120, duration=100, key="1A", energy=0.8)
     t2 = Track(filepath="/r2.mp3", title="R2", artist="A", album="B", genre="Techno", bpm=122, duration=100, key="1A", energy=0.8)
@@ -95,20 +95,14 @@ def test_recommend_next_track(client: TestClient, session: Session, mocker):
     session.add(te2)
     session.commit()
 
-    # vibe 指定時は LLM の vibe パラメータ解決をモック
-    mocker.patch(
-        "app.services.setlist_app_service.generate_vibe_parameters",
-        return_value={"bpm": 120, "energy": 0.8},
-    )
-
-    response = client.get("/api/recommendations/next", params={"track_id": t1.id, "vibe": "peak time techno"})
+    response = client.get("/api/recommendations/next", params={"track_id": t1.id})
     assert response.status_code == 200
     data = response.json()
     # 自分自身は除外されるはずなので、t2が返る
     assert len(data) > 0
     assert data[0]["title"] == "R2"
 
-def test_generate_auto_setlist(client: TestClient, session: Session, mocker):
+def test_generate_auto_setlist(client: TestClient, session: Session):
     t1 = Track(filepath="/a1.mp3", title="A1", artist="A", album="B", genre="House", bpm=120, duration=100, key="5A", energy=0.8)
     t2 = Track(filepath="/a2.mp3", title="A2", artist="A", album="B", genre="House", bpm=122, duration=100, key="5A", energy=0.8)
     t3 = Track(filepath="/a3.mp3", title="A3", artist="A", album="B", genre="House", bpm=124, duration=100, key="5A", energy=0.8)
@@ -117,13 +111,7 @@ def test_generate_auto_setlist(client: TestClient, session: Session, mocker):
     session.add(t3)
     session.commit()
 
-    # LLM の vibe パラメータ解決をモック
-    mocker.patch(
-        "app.services.setlist_app_service.generate_vibe_parameters",
-        return_value={"bpm": 120, "energy": 0.8},
-    )
-
-    response = client.post("/api/recommendations/auto", json={"vibe": "deep house warm up", "limit": 3})
+    response = client.post("/api/recommendations/auto", json={"limit": 3})
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 3

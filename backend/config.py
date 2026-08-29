@@ -23,8 +23,7 @@ class Settings(BaseSettings):
     DJALY_PORT: int = 8001
     FRONTEND_PORT: int = 1420
     
-    # AI/ML
-    OLLAMA_HOST: str = "http://localhost:11434"
+    # Audio ML
     TF_CPP_MIN_LOG_LEVEL: str = "3"
     
     # Workers

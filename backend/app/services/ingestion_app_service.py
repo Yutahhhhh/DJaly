@@ -40,7 +40,6 @@ class IngestionAppService(BackgroundTaskService):
         })
         self.executor = None
         self.db_lock = asyncio.Lock()
-        self.llm_sem = asyncio.Semaphore(1)
         self.domain_service = IngestionDomainService()
         self.repository = IngestionRepository()
 

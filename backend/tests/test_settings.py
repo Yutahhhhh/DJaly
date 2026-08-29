@@ -21,6 +21,21 @@ def test_update_setting(client: TestClient, session: Session):
     s = session.get(Setting, "new_k")
     assert s.value == "new_v"
 
+def test_rejects_retired_llm_settings(client: TestClient, session: Session):
+    response = client.post("/api/settings", json={"key": "openai_api_key", "value": "secret"})
+    assert response.status_code == 400
+    assert session.get(Setting, "openai_api_key") is None
+
+def test_hides_existing_retired_llm_settings(client: TestClient, session: Session):
+    session.add(Setting(key="llm_model_experimental", value="legacy-model"))
+    session.add(Setting(key="root_path", value="/music"))
+    session.commit()
+
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    assert "llm_model_experimental" not in response.json()
+    assert response.json()["root_path"] == "/music"
+
 def test_export_csv(client: TestClient, session: Session):
     t1 = Track(filepath="/c1.mp3", title="C1", artist="A", album="B", genre="G", bpm=120, duration=100)
     session.add(t1)

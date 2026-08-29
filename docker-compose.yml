@@ -17,7 +17,6 @@ services:
       - ./db_data:/db_data
       
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
       - DB_PATH=/db_data/djaly.duckdb
       # 開発中のリロードは便利な反面、不安定要素になるため今回は無効化推奨
       # (start.sh で制御しているので、ここでの設定は念のため)

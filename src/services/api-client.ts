@@ -7,7 +7,7 @@ const SERVER_PORT = import.meta.env.VITE_SERVER_PORT || "8001";
 export const API_BASE_URL = envApiUrl || `http://127.0.0.1:${SERVER_PORT}/api`;
 export const WS_BASE_URL = envWsUrl || `ws://127.0.0.1:${SERVER_PORT}/ws`;
 
-// LLM 呼び出しを含むリクエストがあるため長めに設定
+// Large library operations can take time.
 const REQUEST_TIMEOUT_MS = 120_000;
 
 /**

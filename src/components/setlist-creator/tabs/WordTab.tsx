@@ -2,13 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import { Track } from "@/types";
 import { lyricsService } from "@/services/lyrics";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Loader2,
   Link as LinkIcon,
@@ -16,7 +12,6 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronUp,
-  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlayerStore } from "@/stores/playerStore";
@@ -28,17 +23,11 @@ interface WordTabProps {
   onAddTrack: (track: Track, wordplayData?: any) => void;
 }
 
-interface KeywordMatch {
-  keyword: string;
-  count: number;
-}
-
 export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
   const [lyricsText, setLyricsText] = useState("");
-  const [keywords, setKeywords] = useState<KeywordMatch[]>([]);
+  const [keywordInput, setKeywordInput] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [keywordsLoading, setKeywordsLoading] = useState(false);
   const [lyricsNotFound, setLyricsNotFound] = useState(false);
   const [searching, setSearching] = useState(false);
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
@@ -69,15 +58,12 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
     if (!sourceTrack) return;
     let cancelled = false;
 
-    // 歌詞とキーワード解析を分離してロードする。
-    // 歌詞は取得でき次第すぐ表示し、LLM キーワード解析 (時間がかかる) は後から差し込む。
     setLoading(true);
-    setKeywordsLoading(true);
     setLyricsNotFound(false);
     setSearchResults([]);
     setActiveKeyword(null);
     setLyricsText("");
-    setKeywords([]);
+    setKeywordInput("");
 
     lyricsService
       .getLyrics(sourceTrack.id)
@@ -94,30 +80,18 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
         if (!cancelled) setLoading(false);
       });
 
-    lyricsService
-      .analyzeLyrics(sourceTrack.id)
-      .then((kwData) => {
-        if (cancelled) return;
-        setKeywords(Array.isArray(kwData) ? kwData : []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to analyze keywords", error);
-      })
-      .finally(() => {
-        if (!cancelled) setKeywordsLoading(false);
-      });
-
     return () => {
       cancelled = true;
     };
   }, [sourceTrack?.id]);
 
   const handleKeywordSearch = async (kw: string) => {
-    setActiveKeyword(kw);
+    const normalized = kw.trim();
+    if (normalized.length < 3) return;
+    setActiveKeyword(normalized);
     setSearching(true);
     try {
-      const results = await lyricsService.searchLyrics(kw, sourceTrack?.id);
+      const results = await lyricsService.searchLyrics(normalized, sourceTrack?.id);
       setSearchResults(results);
     } catch (error) {
       console.error("Search failed", error);
@@ -155,53 +129,13 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
 
       if (!cleanLine) return <div key={lineIdx} className="h-4" />;
 
-      const lineKeywords = Array.isArray(keywords)
-        ? keywords.filter((k) =>
-            cleanLine.toLowerCase().includes(k.keyword.toLowerCase())
-          )
-        : [];
-
       return (
         <div
           key={lineIdx}
           className="group/line flex items-start gap-2 py-1 hover:bg-muted/30 rounded px-2 transition-colors"
         >
           <div className="flex-1 text-sm leading-relaxed">
-            {lineKeywords.length > 0 ? (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <span className="cursor-pointer border-b border-dashed border-primary/60 hover:text-primary transition-colors">
-                    {cleanLine}
-                  </span>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-56 p-2 shadow-2xl z-60"
-                  side="top"
-                  align="start"
-                >
-                  <div className="text-[10px] font-bold text-muted-foreground mb-2 uppercase flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 text-purple-500" />
-                    Connectable Keywords
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {lineKeywords.map((k, ki) => (
-                      <Badge
-                        key={ki}
-                        variant={
-                          activeKeyword === k.keyword ? "default" : "secondary"
-                        }
-                        className="cursor-pointer hover:bg-primary hover:text-primary-foreground text-[11px]"
-                        onClick={() => handleKeywordSearch(k.keyword)}
-                      >
-                        {k.keyword} ({k.count})
-                      </Badge>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            ) : (
-              <span className="text-muted-foreground/70">{cleanLine}</span>
-            )}
+            <span className="text-muted-foreground/70">{cleanLine}</span>
           </div>
           {timestamp !== null && (
             <PlayButton
@@ -216,7 +150,7 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
         </div>
       );
     });
-  }, [lyricsText, keywords, activeKeyword, sourceTrack]);
+  }, [lyricsText, sourceTrack]);
 
   if (!sourceTrack) {
     return (
@@ -269,12 +203,6 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {keywordsLoading && !loading && (
-            <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wide">
-              <Loader2 className="h-3 w-3 animate-spin text-primary/50" />
-              Analyzing keywords…
-            </span>
-          )}
           {loading && (
             <Loader2 className="h-4 w-4 animate-spin text-primary/50" />
           )}
@@ -329,8 +257,8 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
 
       {/* Search Results / Matches */}
       <div className="flex-[2] min-h-0 flex flex-col bg-background">
-        <div className="px-4 py-2 border-b flex justify-between items-center shrink-0 bg-muted/20">
-          <div className="flex items-center gap-2">
+        <div className="px-4 py-2 border-b flex gap-2 items-center shrink-0 bg-muted/20">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
               Matched Connections
             </span>
@@ -340,6 +268,24 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
               </Badge>
             )}
           </div>
+          <Input
+            value={keywordInput}
+            onChange={(event) => setKeywordInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") handleKeywordSearch(keywordInput);
+            }}
+            placeholder="Enter a lyric phrase (3+ characters)"
+            className="h-8 text-xs"
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-8 text-xs"
+            onClick={() => handleKeywordSearch(keywordInput)}
+            disabled={keywordInput.trim().length < 3 || searching}
+          >
+            Find links
+          </Button>
           {searching && (
             <Loader2 className="h-3 w-3 animate-spin text-primary" />
           )}

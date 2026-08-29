@@ -1,6 +1,5 @@
 from typing import List, Optional, Dict, Any
 from sqlmodel import Session
-import json
 import re
 from collections import defaultdict
 
@@ -16,7 +15,6 @@ from api.schemas.genres import (
     GenreUpdateResult,
     AnalysisMode
 )
-from utils.llm import generate_text, is_llm_error
 from utils.metadata import update_file_genre, update_file_tags_extended
 from utils.logger import get_logger
 from domain.constants import GENRE_ABBREVIATIONS, GENRE_SEPARATORS_REGEX
@@ -81,289 +79,133 @@ class GenreAppService:
         """Get all unique subgenres"""
         return self.repository.get_all_subgenres()
 
-    def _build_vocabulary_hint(self) -> str:
-        """
-        ライブラリの既存ジャンル語彙をプロンプトに注入するためのヒント文字列を生成。
-        既存ラベルの再利用を促し、表記揺れの発生源を断つ。
-        """
-        existing_genres = self.repository.get_all_genres()[:60]
-        existing_subgenres = self.repository.get_all_subgenres()[:80]
-        hint = ""
-        if existing_genres:
-            hint += (
-                "\nExisting genres in this library (REUSE these labels when applicable, "
-                "including exact spelling/casing):\n" + ", ".join(existing_genres) + "\n"
-            )
-        if existing_subgenres:
-            hint += "\nExisting subgenres:\n" + ", ".join(existing_subgenres) + "\n"
-        if hint:
-            hint += "\nOnly introduce a new label when none of the existing ones fits.\n"
-        return hint
+    def get_analysis_context(
+        self,
+        track_ids: Optional[List[int]] = None,
+        mode: AnalysisMode = AnalysisMode.BOTH,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Return everything the connected MCP model needs to classify tracks."""
+        tracks = (
+            self.repository.get_tracks_by_ids(track_ids)
+            if track_ids
+            else self.get_unknown_tracks(offset, limit, mode)
+        )
+        fields = (
+            "id", "title", "artist", "album", "year", "bpm", "key",
+            "energy", "danceability", "brightness", "noisiness", "genre",
+            "subgenre", "is_genre_verified",
+        )
+        return {
+            "mode": mode.value,
+            "taxonomy_guide": DJ_GENRE_GUIDE,
+            "rules": [
+                "Use English genre labels.",
+                "Choose one dominant genre and one concise subgenre when applicable.",
+                "Do not include edit labels such as Intro, Clean, Dirty, or Extended.",
+                "Reuse the library vocabulary when it fits; introduce a label only when needed.",
+                "Use confidence High, Medium, or Low. Do not mark uncertain guesses as High.",
+            ],
+            "existing_genres": self.repository.get_all_genres()[:60],
+            "existing_subgenres": self.repository.get_all_subgenres()[:80],
+            "tracks": [
+                {field: getattr(track, field, None) for field in fields}
+                for track in tracks
+            ],
+        }
 
-    def analyze_track_with_llm(self, track_id: int, overwrite: bool = False, mode: AnalysisMode = AnalysisMode.BOTH) -> GenreAnalysisResponse:
+    def apply_genre_analysis(
+        self,
+        track_id: int,
+        analysis: Dict[str, Any],
+        mode: AnalysisMode = AnalysisMode.BOTH,
+        overwrite: bool = False,
+        commit: bool = True,
+    ) -> GenreAnalysisResponse:
+        """Validate and apply a classification produced by the MCP client's model."""
         track = self.track_repository.get_by_id(track_id)
         if not track:
             raise ValueError("Track not found")
+        normalized = self._normalize_analysis_data(track, analysis, mode)
+        confidence = str(normalized.get("confidence", "Medium")).strip().title()
+        if confidence not in {"High", "Medium", "Low"}:
+            confidence = "Low"
+        normalized["confidence"] = confidence
+        normalized["reason"] = str(
+            normalized.get("reason") or "Classified by the connected MCP client."
+        )[:500]
+        response = GenreAnalysisResponse(**normalized)
 
-        bpm_str = f"{int(track.bpm)}" if track.bpm and track.bpm > 0 else "Unknown"
+        can_update_genre = (
+            overwrite
+            or not track.is_genre_verified
+            or not track.genre
+            or track.genre.lower() == "unknown"
+        )
+        can_update_subgenre = overwrite or not track.subgenre
+        if mode in (AnalysisMode.GENRE, AnalysisMode.BOTH) and can_update_genre:
+            track.genre = response.genre
+        if mode in (AnalysisMode.SUBGENRE, AnalysisMode.BOTH) and can_update_subgenre:
+            track.subgenre = response.subgenre
 
-        prompt = f"""
-        Analyze metadata to determine music genre for a DJ music library.
-        Track: {track.title} / {track.artist} (BPM: {bpm_str})
-        Album: {track.album or "Unknown"} (hint only, may be a compilation)
-        Year: {track.year or "Unknown"}
-        Audio features: energy={track.energy or 0:.2f}, danceability={track.danceability or 0:.2f}, brightness={track.brightness or 0:.2f}
-        Current genre (may be wrong): {track.genre or "None"}
+        applied_genre = (track.genre or "").strip().lower()
+        track.is_genre_verified = bool(
+            applied_genre and applied_genre != "unknown" and confidence != "Low"
+        )
+        self.session.add(track)
+        if commit:
+            self.session.commit()
+            self.session.refresh(track)
+        return response
 
-        Mode: {mode.value.upper()}
-
-        {DJ_GENRE_GUIDE}
-        {self._build_vocabulary_hint()}
-        """
-
-        if mode == AnalysisMode.GENRE:
-            prompt += """
-            Output JSON: {"genre": "Main Category", "reason": "short reason", "confidence": "High/Medium/Low"}
-            """
-        elif mode == AnalysisMode.SUBGENRE:
-            prompt += """
-            Output JSON: {"subgenre": "Specific Style", "reason": "short reason", "confidence": "High/Medium/Low"}
-            """
-        else:
-            prompt += """
-            Output JSON: {"genre": "Main Category", "subgenre": "Specific Style", "reason": "short reason", "confidence": "High/Medium/Low"}
-            """
-
-        prompt += """
-        Rules:
-        - Use standard genres. Genre labels must be in English.
-        - No "Intro", "Clean" etc.
-        - Output only ONE single genre/subgenre. Do NOT use slashes (/) or commas (,).
-        - If multiple genres apply, choose the most dominant one.
-        - JSON ONLY.
-        """
-
-        raw_response = generate_text(self.session, prompt, json_mode=True, temperature=0.0)
-        
-        if is_llm_error(raw_response):
-            logger.error(f"Single Analysis Failed: {raw_response}")
-            raise RuntimeError(raw_response)
-
-        if not raw_response:
-            logger.warning("Empty response from LLM")
-            raise RuntimeError("LLM returned empty response")
-
-        try:
-            cleaned_response = self._clean_json_string(raw_response)
-            data = json.loads(cleaned_response)
-            
-            # Fill missing fields for response model
-            if "genre" not in data: data["genre"] = track.genre or "Unknown"
-            if "subgenre" not in data: data["subgenre"] = track.subgenre or ""
-            
-            data = self._normalize_analysis_data(track, data, mode)
-            response = GenreAnalysisResponse(**data)
-            
-            should_update_genre = (
-                overwrite
-                or not track.is_genre_verified
-                or not track.genre
-                or track.genre.lower() == "unknown"
-            )
-            should_update_subgenre = overwrite or not track.subgenre
-            should_update = False
-            
-            if mode in [AnalysisMode.GENRE, AnalysisMode.BOTH] and should_update_genre:
-                if track.genre != response.genre:
-                    track.genre = response.genre
-                should_update = True
-
-            if mode in [AnalysisMode.SUBGENRE, AnalysisMode.BOTH] and should_update_subgenre:
-                if track.subgenre != response.subgenre:
-                    track.subgenre = response.subgenre
-                should_update = True
-
-            if should_update:
-                # "Unknown" や低確信度の結果は検証済みにしない
-                # (未解析リストから消えて再解析の導線が失われるのを防ぐ)
-                applied_genre = (track.genre or "").strip().lower()
-                if applied_genre and applied_genre != "unknown" and (response.confidence or "").lower() != "low":
-                    track.is_genre_verified = True
-                self.session.commit()
-                self.session.refresh(track)
-
-            return response
-        except Exception as e:
-            logger.error(f"LLM JSON Parse Error: {e}, Raw: {raw_response}")
-            raise RuntimeError(f"Failed to parse LLM response: {str(e)}")
-
-    def analyze_tracks_batch_with_llm(self, track_ids: List[int], mode: AnalysisMode = AnalysisMode.BOTH, overwrite: bool = False) -> List[GenreUpdateResult]:
-        if not track_ids:
-            return []
-
-        tracks = self.repository.get_tracks_by_ids(track_ids)
-        if not tracks:
-            return []
-
-        track_lines = []
-        for t in tracks:
-            safe_title = (t.title or "").replace("|", " ")
-            safe_artist = (t.artist or "").replace("|", " ")
-            safe_album = (t.album or "").replace("|", " ")
-            bpm_str = f"{int(t.bpm)}" if t.bpm and t.bpm > 0 else ""
-            year_str = str(t.year) if t.year else ""
-
-            # Input: ID|Title|Artist|BPM|Year|Album
-            features = [str(t.id), safe_title, safe_artist, bpm_str, year_str, safe_album]
-            track_lines.append("|".join(features))
-
-        input_text = "\n".join(track_lines)
-
-        prompt = f"""
-        Analyze tracks to determine {mode.value} for a DJ music library.
-        Input: ID|Title|Artist|BPM|Year|Album (Album is a hint only, may be a compilation)
-        {input_text}
-
-        {DJ_GENRE_GUIDE}
-        {self._build_vocabulary_hint()}
-
-        Output Format:
-        """
-
-        if mode == AnalysisMode.GENRE:
-            prompt += "ID|Genre"
-        elif mode == AnalysisMode.SUBGENRE:
-            prompt += "ID|Subgenre"
-        else:
-            prompt += "ID|Genre|Subgenre"
-
-        prompt += """
-
-        Rules:
-        - One line per track.
-        - Standard DJ library genres only. Genre labels must be in English.
-        - Output only ONE single genre/subgenre per column. Do NOT use slashes (/) or commas (,).
-        - If multiple genres apply, choose the most dominant one.
-        - No markdown/header.
-        """
-
-        raw_response = generate_text(self.session, prompt, temperature=0.0)
-        
-        if is_llm_error(raw_response):
-            logger.error(f"Batch Analysis Failed: {raw_response}")
-            raise RuntimeError(raw_response)
-        if not raw_response.strip():
-            logger.error("Batch Analysis Failed: empty response from LLM")
-            raise RuntimeError("LLM returned empty response")
-
-        new_genres_map = {}
-        lines = raw_response.strip().split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            if not line: continue
-            parts = line.split('|')
-            
+    def apply_genre_analyses(
+        self,
+        analyses: List[Dict[str, Any]],
+        mode: AnalysisMode = AnalysisMode.BOTH,
+        overwrite: bool = False,
+    ) -> List[GenreUpdateResult]:
+        """Apply a batch of structured classifications from the MCP client."""
+        results: List[GenreUpdateResult] = []
+        for item in analyses:
+            track_id = item.get("track_id")
+            if isinstance(track_id, bool):
+                continue
             try:
-                t_id_str = parts[0].strip()
-                t_id_match = re.search(r'\d+', t_id_str)
-                if not t_id_match: continue
-                track_id = int(t_id_match.group(0))
-                
-                if mode == AnalysisMode.GENRE and len(parts) >= 2:
-                    new_genres_map[track_id] = {"genre": parts[1].strip()}
-                elif mode == AnalysisMode.SUBGENRE and len(parts) >= 2:
-                    new_genres_map[track_id] = {"subgenre": parts[1].strip()}
-                elif mode == AnalysisMode.BOTH and len(parts) >= 3:
-                    new_genres_map[track_id] = {"genre": parts[1].strip(), "subgenre": parts[2].strip()}
-            except Exception as e:
+                track_id = int(track_id)
+            except (TypeError, ValueError):
                 continue
-
-        if not new_genres_map:
-            logger.error(f"Batch Analysis Failed: no parseable rows. Raw: {raw_response}")
-            raise RuntimeError("Failed to parse LLM response: no parseable rows")
-        
-        updated_results = []
-        
-        for track in tracks:
-            updates = new_genres_map.get(track.id)
-            if not updates:
+            track = self.track_repository.get_by_id(track_id)
+            if not track:
                 continue
-
             old_genre = track.genre or "Unknown"
-            has_changes = False
-            updates = self._normalize_analysis_data(track, updates, mode)
-
-            # overwrite=False のとき、検証済みジャンルは上書きしない
-            can_update_genre = (
-                overwrite
-                or not track.is_genre_verified
-                or not track.genre
-                or track.genre.lower() == "unknown"
-            )
-            can_update_subgenre = overwrite or not track.subgenre
-
-            if "genre" in updates and can_update_genre:
-                new_g = re.sub(r'^[\"\']|[\"\']$', '', updates["genre"])
-                if new_g and new_g.lower() != "unknown" and track.genre != new_g:
-                    track.genre = new_g
-                    has_changes = True
-
-            if "subgenre" in updates and can_update_subgenre:
-                new_s = re.sub(r'^[\"\']|[\"\']$', '', updates["subgenre"])
-                if track.subgenre != new_s:
-                    track.subgenre = new_s
-                    has_changes = True
-
-            if has_changes:
-                updated_results.append(GenreUpdateResult(
-                    track_id=track.id,
-                    title=track.title,
-                    artist=track.artist,
-                    old_genre=old_genre,
-                    new_genre=track.genre # Return the new main genre for display
-                ))
-
-            # "Unknown" のままの曲は検証済みにしない (再解析の導線を残す)
-            applied_genre = (track.genre or "").strip().lower()
-            if applied_genre and applied_genre != "unknown":
-                track.is_genre_verified = True
-            # SQLModelは変更を自動追跡するため、session.add()は不要
-        
+            self.apply_genre_analysis(track_id, item, mode, overwrite, commit=False)
+            results.append(GenreUpdateResult(
+                track_id=track.id,
+                title=track.title,
+                artist=track.artist,
+                old_genre=old_genre,
+                new_genre=track.genre,
+            ))
         self.session.commit()
-        logger.info(f"Batch analyzed {len(tracks)} tracks. Updated {len(updated_results)} tracks.")
-        
-        return updated_results
-
-    def _clean_json_string(self, text: str) -> str:
-        text = text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        
-        if text.endswith("```"):
-            text = text[:-3]
-            
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1:
-            text = text[start:end+1]
-            
-        return text.strip()
+        return results
 
     def _normalize_analysis_data(self, track: Track, data: Dict[str, Any], mode: AnalysisMode) -> Dict[str, Any]:
         normalized = dict(data)
 
-        if "genre" in normalized:
+        if normalized.get("genre") is not None:
             normalized["genre"] = self._normalize_genre_label(str(normalized["genre"]))
-        if "subgenre" in normalized:
+        else:
+            normalized.pop("genre", None)
+        if normalized.get("subgenre") is not None:
             normalized["subgenre"] = self._normalize_subgenre_label(str(normalized["subgenre"]))
+        else:
+            normalized.pop("subgenre", None)
 
-        if mode in [AnalysisMode.GENRE, AnalysisMode.BOTH]:
-            normalized["genre"] = normalized.get("genre", track.genre or "Unknown")
-        if mode in [AnalysisMode.SUBGENRE, AnalysisMode.BOTH]:
-            normalized["subgenre"] = normalized.get("subgenre", track.subgenre or "")
+        # The response contract always includes both fields. In single-field mode,
+        # preserve the other value from the track instead of inventing one.
+        normalized["genre"] = normalized.get("genre", track.genre or "Unknown")
+        normalized["subgenre"] = normalized.get("subgenre", track.subgenre or "")
 
         normalized.setdefault("reason", "Classified from title, artist, BPM, and DJ taxonomy.")
         normalized.setdefault("confidence", "Medium")

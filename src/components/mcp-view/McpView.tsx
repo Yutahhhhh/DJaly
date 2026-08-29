@@ -142,7 +142,7 @@ export function McpView() {
             利用可能なツール {info && <Badge variant="secondary">{info.tool_count}</Badge>}
           </CardTitle>
           <CardDescription>
-            AI クライアントからはこれらのツールを通じて楽曲検索・セットリスト操作・ジャンル解析・歌詞解析などを実行できます。
+            AI クライアントからはこれらのツールを通じて楽曲検索・セットリスト操作・ジャンル分類・歌詞検索などを実行できます。
           </CardDescription>
         </CardHeader>
         <CardContent>

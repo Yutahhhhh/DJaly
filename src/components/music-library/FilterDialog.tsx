@@ -31,7 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { FilterState } from "./types";
 import { INITIAL_FILTERS, KEY_OPTIONS } from "./constants";
@@ -42,12 +41,11 @@ interface FilterDialogProps {
   onOpenChange: (open: boolean) => void;
   currentFilters: FilterState;
   onApply: (filters: FilterState) => void;
-  enabledSections?: ("vibe" | "features" | "metadata")[];
+  enabledSections?: ("features" | "metadata")[];
   triggerLabel?: string;
 }
 
-const DEFAULT_SECTIONS: ("vibe" | "features" | "metadata")[] = [
-  "vibe",
+const DEFAULT_SECTIONS: ("features" | "metadata")[] = [
   "features",
   "metadata",
 ];
@@ -117,32 +115,6 @@ export function FilterDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          {/* Vibe Search Section */}
-          {enabledSections.includes("vibe") && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold">
-                  Vibe Prompt (AI Search)
-                </Label>
-                <Textarea
-                  placeholder="Describe the vibe (e.g. 'Dark industrial techno for peak time')"
-                  value={localFilters.vibePrompt || ""}
-                  onChange={(e) => {
-                    setLocalFilters({
-                      ...localFilters,
-                      vibePrompt: e.target.value,
-                    });
-                  }}
-                  className="h-20 text-xs resize-none"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  雰囲気を自然言語で記述すると、AI が検索パラメータに変換します。
-                </p>
-              </div>
-              <Separator />
-            </div>
-          )}
-
           <div className="grid gap-6 px-1">
             {/* Features Section */}
             {enabledSections.includes("features") && (

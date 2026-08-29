@@ -13,11 +13,9 @@ import { Separator } from "@/components/ui/separator";
 import {
   Settings as SettingsIcon,
   AlertCircle,
-  Check,
   FileSpreadsheet,
-  Cpu,
+  Bot,
   Globe,
-  Loader2,
 } from "lucide-react";
 import {
   Select,
@@ -36,93 +34,6 @@ import { LibraryImportDialog } from "./LibraryImportDialog";
 import { MetadataImportDialog } from "./MetadataImportDialog";
 import { useTheme } from "@/components/theme-provider";
 import { downloadFile } from "@/lib/download";
-
-const MODEL_PRESETS: Record<
-  string,
-  { value: string; label: string; note: string }[]
-> = {
-  ollama: [
-    {
-      value: "llama3.2",
-      label: "llama3.2 - Local default",
-      note: "ローカルで完結させたい場合の標準候補です。",
-    },
-    {
-      value: "qwen2.5:7b",
-      label: "qwen2.5:7b - Structured output",
-      note: "インストール済みなら、短いJSON出力系のタスクで安定しやすい候補です。",
-    },
-  ],
-  openai: [
-    {
-      value: "gpt-5.4-mini",
-      label: "gpt-5.4-mini - Recommended for Djaly",
-      note: "ジャンル分析、歌詞キーワード抽出、vibeのJSON化に対して品質と速度のバランスが良い候補です。",
-    },
-    {
-      value: "gpt-5.5",
-      label: "gpt-5.5 - Highest quality",
-      note: "速度やコストより精度を優先したい場合の高品質候補です。",
-    },
-    {
-      value: "gpt-5.4-nano",
-      label: "gpt-5.4-nano - Low cost",
-      note: "大量のシンプルな分類を低コストで回したい場合に向いています。",
-    },
-  ],
-  codex: [
-    {
-      value: "gpt-5.5",
-      label: "gpt-5.5 - Codex CLI 推奨",
-      note: "ローカルのCodex CLIにログイン済みのChatGPTサブスク認証を使います。APIキーは不要です。",
-    },
-    {
-      value: "gpt-5.4-mini",
-      label: "gpt-5.4-mini - 軽量",
-      note: "Codex CLI経由で、速度を優先したい場合の候補です。",
-    },
-    {
-      value: "codex-mini-latest",
-      label: "codex-mini-latest - 実験用",
-      note: "Codex CLI向けの実験候補です。利用できない場合は別モデルを選んでください。",
-    },
-  ],
-  anthropic: [
-    {
-      value: "claude-sonnet-4-20250514",
-      label: "claude-sonnet-4 - Recommended Claude",
-      note: "微妙なジャンル/サブジャンル判断と、きれいな構造化レスポンスに向いたClaude候補です。",
-    },
-    {
-      value: "claude-3-5-haiku-20241022",
-      label: "claude-3.5-haiku - Fast/low cost",
-      note: "シンプルな一括分類を速く低コストで回したい場合に向いています。",
-    },
-    {
-      value: "claude-opus-4-20250514",
-      label: "claude-opus-4 - Highest quality",
-      note: "難しいメタデータ判断で、コストより品質を優先したい場合の候補です。",
-    },
-  ],
-  google: [
-    {
-      value: "gemini-1.5-flash",
-      label: "gemini-1.5-flash - Fast default",
-      note: "素早い分類や抽出に使いやすい標準候補です。",
-    },
-    {
-      value: "gemini-flash-latest",
-      label: "gemini-flash-latest - Latest Flash alias",
-      note: "Googleの高速モデルの最新エイリアスを使いたい場合の候補です。",
-    },
-  ],
-};
-
-const PROVIDER_KEY_LABELS: Record<string, string> = {
-  openai: "OpenAI API Key",
-  anthropic: "Anthropic API Key",
-  google: "Google API Key",
-};
 
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
@@ -171,56 +82,6 @@ export function SettingsView() {
       setTimeout(() => setStatus(""), 2000);
     } catch (e: any) {
       console.error("Failed to save setting", e);
-      setStatus(`Error: ${e.message}`);
-      setIsError(true);
-    }
-  };
-
-  // 一括保存
-  const [llmTesting, setLlmTesting] = useState(false);
-  const [llmTestResult, setLlmTestResult] = useState<{
-    ok: boolean;
-    provider: string;
-    model: string;
-    latency_ms: number;
-    error?: string;
-  } | null>(null);
-
-  const handleTestLlm = async () => {
-    setLlmTesting(true);
-    setLlmTestResult(null);
-    try {
-      // 入力中の設定でテストできるよう、先に保存してから実打鍵する
-      for (const [key, value] of Object.entries(settings)) {
-        await settingsService.save(key, value);
-      }
-      const result = await settingsService.testLlm();
-      setLlmTestResult(result);
-    } catch (e: any) {
-      console.error("LLM test failed", e);
-      setLlmTestResult({
-        ok: false,
-        provider: settings["llm_provider"] || "ollama",
-        model: settings["llm_model"] || "",
-        latency_ms: 0,
-        error: e?.detail || e?.message || String(e),
-      });
-    } finally {
-      setLlmTesting(false);
-    }
-  };
-
-  const saveAllSettings = async () => {
-    setStatus("Saving all settings...");
-    setIsError(false);
-    try {
-      for (const [key, value] of Object.entries(settings)) {
-        await settingsService.save(key, value);
-      }
-      setStatus("All settings saved.");
-      setTimeout(() => setStatus(""), 2000);
-    } catch (e: any) {
-      console.error("Failed to save settings", e);
       setStatus(`Error: ${e.message}`);
       setIsError(true);
     }
@@ -299,42 +160,6 @@ export function SettingsView() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const getDefaultModel = (provider: string) => {
-    switch (provider) {
-      case "ollama": return "llama3.2";
-      case "openai": return "gpt-5.4-mini";
-      case "codex": return "gpt-5.5";
-      case "anthropic": return "claude-sonnet-4-20250514";
-      case "google": return "gemini-flash-latest";
-      default: return "";
-    }
-  };
-
-  const handleProviderChange = (newProvider: string) => {
-    setSettings((prev) => {
-      // Try to find a saved model for this provider, otherwise use default
-      const savedModel = prev[`${newProvider}_model`];
-      const nextModel = savedModel || getDefaultModel(newProvider);
-      
-      return {
-        ...prev,
-        llm_provider: newProvider,
-        llm_model: nextModel
-      };
-    });
-  };
-
-  const handleModelNameChange = (newModel: string) => {
-    setSettings((prev) => {
-      const provider = prev["llm_provider"] || "ollama";
-      return {
-        ...prev,
-        llm_model: newModel,
-        [`${provider}_model`]: newModel // Save specifically for this provider
-      };
-    });
-  };
-
   const handleExport = async (sectionId: string, url: string, filename: string) => {
     setExportingSectionId(sectionId);
     try {
@@ -343,18 +168,6 @@ export function SettingsView() {
       setExportingSectionId(null);
     }
   };
-
-  const currentProvider = settings["llm_provider"] || "ollama";
-  const currentModelPresets = MODEL_PRESETS[currentProvider] || [];
-  const currentModel = settings["llm_model"] || "";
-  const selectedPreset = currentModelPresets.find(
-    (preset) => preset.value === currentModel
-  );
-  const apiKeySettingKey =
-    `${currentProvider}_api_key`;
-  const requiresApiKey = ["openai", "anthropic", "google"].includes(
-    currentProvider
-  );
 
   const importSections = [
     {
@@ -392,7 +205,7 @@ export function SettingsView() {
             Application Settings
           </CardTitle>
           <CardDescription>
-            Manage your application configuration and AI connections.
+            Manage local application configuration and library data.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -490,206 +303,20 @@ export function SettingsView() {
 
           <Separator />
 
-          {/* AI Settings Section */}
+          {/* MCP-owned AI runtime */}
           <div className="space-y-4">
             <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Cpu className="h-4 w-4" />
-              AI & LLM Configuration
+              <Bot className="h-4 w-4" />
+              AI Runtime
             </h3>
-
-            <div className="grid gap-4 p-4 border rounded-md bg-muted/20">
-              <div className="space-y-2">
-                <Label htmlFor="llm_provider">AI Provider</Label>
-                <Select
-                  value={currentProvider}
-                  onValueChange={handleProviderChange}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Select Provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
-                    <SelectItem value="codex">
-                      Codex CLI (ChatGPT Subscription)
-                    </SelectItem>
-                    <SelectItem value="anthropic">
-                      Anthropic (Claude)
-                    </SelectItem>
-                    <SelectItem value="google">Google (Gemini)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {currentModelPresets.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="model_preset">Recommended Model</Label>
-                  <Select
-                    value={selectedPreset ? selectedPreset.value : "__custom__"}
-                    onValueChange={(value) => {
-                      if (value !== "__custom__") {
-                        handleModelNameChange(value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="bg-background">
-                      <SelectValue placeholder="Select recommended model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currentModelPresets.map((preset) => (
-                        <SelectItem key={preset.value} value={preset.value}>
-                          {preset.label}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="__custom__">Custom model</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedPreset?.note ||
-                      "下の入力欄で任意のモデルIDを指定できます。"}
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="llm_model">Model Name</Label>
-                <Input
-                  id="llm_model"
-                  placeholder={getDefaultModel(currentProvider)}
-                  value={settings["llm_model"] || ""}
-                  onChange={(e) => handleModelNameChange(e.target.value)}
-                  className="bg-background"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Djaly mainly uses this for genre/subgenre analysis, lyric
-                  keyword extraction, and vibe-to-JSON parameter generation.
-                </p>
-              </div>
-
-              {/* Provider specific inputs */}
-              {currentProvider === "ollama" ? (
-                <div className="space-y-2 animate-in fade-in">
-                  <Label htmlFor="ollama_host">Ollama Host URL</Label>
-                  <Input
-                    id="ollama_host"
-                    placeholder="http://localhost:11434"
-                    value={settings["ollama_host"] || ""}
-                    onChange={(e) =>
-                      updateLocalSetting("ollama_host", e.target.value)
-                    }
-                    className="bg-background"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    <div>
-                      Please install Ollama and run it in the background
-                    </div>
-                    <code>Default: http://localhost:11434</code>
-                  </div>
-                </div>
-              ) : currentProvider === "codex" ? (
-                <div className="space-y-3 animate-in fade-in">
-                  <div className="space-y-2">
-                    <Label htmlFor="codex_cli_path">Codex CLI Path</Label>
-                    <Input
-                      id="codex_cli_path"
-                      placeholder="codex または /opt/homebrew/bin/codex"
-                      value={settings["codex_cli_path"] || ""}
-                      onChange={(e) =>
-                        updateLocalSetting("codex_cli_path", e.target.value)
-                      }
-                      className="bg-background"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      空欄の場合はPATH、/opt/homebrew/bin/codex、/usr/local/bin/codex の順に探します。
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="codex_timeout_seconds">
-                      Codex Timeout Seconds
-                    </Label>
-                    <Input
-                      id="codex_timeout_seconds"
-                      inputMode="numeric"
-                      placeholder="180"
-                      value={settings["codex_timeout_seconds"] || ""}
-                      onChange={(e) =>
-                        updateLocalSetting(
-                          "codex_timeout_seconds",
-                          e.target.value
-                        )
-                      }
-                      className="bg-background"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Codex CLIにログイン済みのChatGPTサブスク認証を使います。APIキーは不要です。
-                    </p>
-                  </div>
-                </div>
-              ) : requiresApiKey ? (
-                <div className="space-y-2 animate-in fade-in">
-                  <Label htmlFor="api_key">
-                    {PROVIDER_KEY_LABELS[currentProvider] || "API Key"}
-                  </Label>
-                  <Input
-                    id="api_key"
-                    type="password"
-                    placeholder={`sk-...`}
-                    value={settings[apiKeySettingKey] || ""}
-                    onChange={(e) =>
-                      updateLocalSetting(
-                        apiKeySettingKey,
-                        e.target.value
-                      )
-                    }
-                    className="bg-background"
-                  />
-                </div>
-              ) : null}
-
-              <div className="flex gap-2 mt-2">
-                <Button onClick={saveAllSettings} className="flex-1">
-                  <Check className="mr-2 h-4 w-4" /> Save AI Settings
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleTestLlm}
-                  disabled={llmTesting}
-                  className="flex-1"
-                >
-                  {llmTesting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Cpu className="mr-2 h-4 w-4" />
-                  )}
-                  Test Connection
-                </Button>
-              </div>
-
-              {llmTestResult && (
-                <div
-                  className={`text-xs rounded-md border p-3 ${
-                    llmTestResult.ok
-                      ? "border-green-500/40 text-green-600 bg-green-500/5"
-                      : "border-destructive/40 text-destructive bg-destructive/5"
-                  }`}
-                >
-                  {llmTestResult.ok ? (
-                    <span>
-                      接続成功: {llmTestResult.provider} / {llmTestResult.model}（
-                      {llmTestResult.latency_ms}ms）
-                    </span>
-                  ) : (
-                    <div className="space-y-1">
-                      <div>
-                        接続失敗: {llmTestResult.provider} / {llmTestResult.model}
-                      </div>
-                      <div className="break-all opacity-80">
-                        {llmTestResult.error}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className="grid gap-2 p-4 border rounded-md bg-muted/20">
+              <p className="text-sm font-medium">Provided by the connected MCP client</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Djaly does not store model names or API keys. Genre classification,
+                natural-language vibe interpretation, and lyric wordplay reasoning use
+                the model in Codex, Claude, or whichever MCP client is connected.
+                Connection details and available tools are shown on the MCP page.
+              </p>
             </div>
           </div>
 

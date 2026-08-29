@@ -138,10 +138,10 @@ class TrackRepository:
         target_params: Optional[Dict[str, float]] = None,
         already_joined_lyrics: bool = False
     ):
-        """検索条件や Vibe パラメータをクエリに適用する内部ヘルパー"""
+        """検索条件や構造化された特徴量ターゲットをクエリに適用する。"""
         
-        # 1. Vibe 検索 (LLM 推論値との距離でソート)
-        # target_params は utils.llm.sanitize_vibe_params 済みの想定だが、
+        # 1. MCPクライアント等が解釈した特徴量ターゲットとの距離でソート
+        # target_params はサービス層で検証済みの想定だが、
         # 外部から直接渡されるケースに備えて数値以外は無視する
         def _safe_num(value) -> Optional[float]:
             if isinstance(value, bool):

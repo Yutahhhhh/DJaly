@@ -114,7 +114,10 @@ class CsvAppService:
                 track = Track(**t_dict)
                 self.session.add(track)
                 self.session.flush()
-                self.session.add(TrackAnalysis(track_id=track.id, beat_positions=analysis_info["beats"], waveform_peaks=analysis_info["peaks"], features_extra_json=analysis_info["extras"]))
+                new_analysis = TrackAnalysis(track_id=track.id, features_extra_json=analysis_info["extras"])
+                new_analysis.beat_positions = analysis_info["beats"]
+                new_analysis.waveform_peaks = analysis_info["peaks"]
+                self.session.add(new_analysis)
                 import_count += 1
         self.session.commit()
         return import_count, update_count

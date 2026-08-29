@@ -65,17 +65,6 @@ export const settingsService = {
     return apiClient.post("/settings", { key, value });
   },
 
-  testLlm: async () => {
-    return apiClient.post<{
-      ok: boolean;
-      provider: string;
-      model: string;
-      latency_ms: number;
-      response?: string;
-      error?: string;
-    }>("/settings/llm-test", {});
-  },
-
   getExportUrl: (type: 'library' | 'metadata') => {
     const endpoints = {
       library: "/settings/export/csv",

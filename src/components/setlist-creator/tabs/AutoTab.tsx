@@ -12,7 +12,6 @@ import {
   Check,
 } from "lucide-react";
 import { MultiSelect } from "@/components/ui/multi-select";
-import { Textarea } from "@/components/ui/textarea";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
 import { genreService } from "@/services/genres";
@@ -53,9 +52,6 @@ export function AutoTab({
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
   const [availableSubgenres, setAvailableSubgenres] = useState<string[]>([]);
 
-  // Infinite Mode State
-  const [vibeText, setVibeText] = useState("");
-
   // Bridge Mode State (Fallback if bridgeState not provided)
   const [localStart, setLocalStart] = useState<Track | null>(null);
   const [localEnd, setLocalEnd] = useState<Track | null>(null);
@@ -80,13 +76,10 @@ export function AutoTab({
   }, [mode, currentSetlistTracks]);
 
   const generateInfinite = async () => {
-    const vibe = vibeText.trim();
-    if (!vibe) return;
     setIsAutoLoading(true);
     try {
       const seedIds = currentSetlistTracks.slice(-3).map((t) => t.id);
       const data = await setlistsService.generateAuto(
-        vibe,
         length,
         seedIds.length > 0 ? seedIds : undefined,
         autoGenres.length > 0 ? autoGenres : undefined,
@@ -96,7 +89,7 @@ export function AutoTab({
       if (data.length === 0) {
         toast.info(
           "条件に合う曲が見つかりませんでした",
-          "ジャンルフィルタを外すか、別の Vibe を試してください。"
+          "ジャンルフィルタを外すか、条件を変更してください。"
         );
       }
     } catch (e) {
@@ -190,15 +183,11 @@ export function AutoTab({
           {/* Mode Specific Controls */}
           {mode === "infinite" ? (
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground mb-2 block">
-                Target Vibe (自然言語で説明)
-              </Label>
-              <Textarea
-                placeholder="例: サンセットのメロディックハウス、ピークタイムのハイエナジー"
-                value={vibeText}
-                onChange={(e) => setVibeText(e.target.value)}
-                className="h-20 text-xs resize-none bg-background"
-              />
+              <p className="text-xs text-muted-foreground">
+                Uses the selected genres plus Essentia/MusiCNN features. For a
+                natural-language flow, ask the connected MCP client to call
+                <code className="ml-1">generate_auto_setlist</code>.
+              </p>
               {currentSetlistTracks.length > 0 && (
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Sparkles className="h-3 w-3 shrink-0 text-purple-400" />
@@ -290,7 +279,6 @@ export function AutoTab({
             className="w-full gap-2 mt-2"
             disabled={
               isAutoLoading ||
-              (mode === "infinite" && !vibeText.trim()) ||
               (mode === "bridge" && (!startTrack || !endTrack))
             }
             onClick={mode === "infinite" ? generateInfinite : generateBridge}
@@ -393,7 +381,7 @@ export function AutoTab({
                     <>
                       <Sparkles className="h-8 w-8" />
                       <div className="text-center text-xs">
-                        Vibe を入力して
+                        条件を指定して
                         <br />
                         generate an infinite mix.
                       </div>
@@ -415,7 +403,7 @@ export function AutoTab({
                 <div className="h-full flex flex-col items-center justify-center p-8 min-h-[200px]">
                   <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
                   <p className="text-xs text-muted-foreground mt-2">
-                    AI is thinking...
+                    Generating setlist...
                   </p>
                 </div>
               )}

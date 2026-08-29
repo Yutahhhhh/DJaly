@@ -1,86 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
-from typing import List, Optional, Dict
+from typing import List, Optional
 from infra.database.connection import get_session
 from models import Track
 from api.schemas.genres import (
     GenreBatchUpdateRequest, 
-    GenreLLMAnalyzeRequest, 
     GroupedSuggestionSummary, 
     TrackSuggestion, 
-    GenreAnalysisResponse,
     GenreCleanupGroup,
     GenreCleanupRequest,
     GenreApplyRequest,
-    GenreBatchLLMAnalyzeRequest,
-    GenreBatchAnalysisResponse,
-    GenreUpdateResult,
     GenreBatchUpdateResponse,
     AnalysisMode
 )
 from api.schemas.track import TrackRead
 from app.services.recommendation_app_service import RecommendationAppService
-from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
 from app.services.genre_app_service import GenreAppService
-from app.services.genre_background_service import genre_background_service
 
 router = APIRouter()
-
-@router.websocket("/ws/genres/analysis")
-async def websocket_genre_analysis(websocket: WebSocket):
-    await genre_background_service.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        genre_background_service.disconnect(websocket)
-
-@router.post("/api/genres/batch-analyze/start")
-async def start_batch_analysis(
-    request: GenreBatchLLMAnalyzeRequest,
-):
-    success = await genre_background_service.start_batch_analysis(
-        request.track_ids, 
-        request.overwrite,
-        request.mode
-    )
-    if not success:
-        raise HTTPException(status_code=409, detail="Analysis already in progress")
-    return {"status": "started"}
-
-@router.post("/api/genres/batch-analyze/cancel")
-async def cancel_batch_analysis():
-    await genre_background_service.cancel_analysis()
-    return {"status": "cancelled"}
-
-@router.post("/api/genres/analyze-all")
-async def start_analyze_all(
-    body: Dict[str, str],
-    session: Session = Depends(get_session)
-):
-    """
-    ライブラリ全体のジャンル解析をバックグラウンドで開始する。
-    mode="keep": 未検証/Unknown の曲のみ / mode="overwrite": 全曲を再解析。
-    進捗は /ws/genres/analysis で配信される。
-    """
-    mode = body.get("mode", "keep")
-    overwrite = mode == "overwrite"
-
-    service = GenreAppService(session)
-    if overwrite:
-        track_ids = service.track_repository.search_track_ids()
-    else:
-        track_ids = service.get_all_unknown_track_ids(AnalysisMode.BOTH)
-
-    if not track_ids:
-        return {"status": "noop", "message": "No tracks to analyze"}
-
-    success = await genre_background_service.start_batch_analysis(
-        list(track_ids), overwrite, AnalysisMode.BOTH
-    )
-    if not success:
-        raise HTTPException(status_code=409, detail="Analysis already in progress")
-    return {"status": "started", "message": f"Analyzing {len(track_ids)} tracks"}
 
 @router.get("/api/genres/list", response_model=List[str])
 def get_all_genres(session: Session = Depends(get_session)):
@@ -143,32 +80,6 @@ def get_suggestions_for_track(
     service = RecommendationAppService(session)
     results = service.get_suggestions_for_track(track_id=track_id, threshold=threshold)
     return results
-
-@router.post("/api/genres/llm-analyze", response_model=GenreAnalysisResponse)
-def analyze_track_with_llm(
-    request: GenreLLMAnalyzeRequest,
-    session: Session = Depends(get_session)
-):
-    service = GenreAppService(session)
-    try:
-        return service.analyze_track_with_llm(request.track_id, request.overwrite, request.mode)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@router.post("/api/genres/batch-llm-analyze", response_model=List[GenreUpdateResult])
-def analyze_batch_tracks_with_llm(
-    request: GenreBatchLLMAnalyzeRequest,
-    session: Session = Depends(get_session)
-):
-    """
-    複数トラックをまとめてLLMで解析し、自動更新する。
-    """
-    service = GenreAppService(session)
-    try:
-        return service.analyze_tracks_batch_with_llm(request.track_ids, request.mode)
-    except Exception as e:
-        print(f"Batch Analysis Failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/genres/batch-update", response_model=GenreBatchUpdateResponse)
 def batch_update_genres(

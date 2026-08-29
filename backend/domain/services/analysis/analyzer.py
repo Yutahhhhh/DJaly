@@ -85,7 +85,7 @@ class AudioAnalyzer:
                 }
 
             if not skip_waveform:
-                peaks = self._compute_waveform_peaks(audio, num_points=2000)
+                peaks = self._compute_waveform_peaks(audio, num_points=500)
                 if "features_extra" not in result: result["features_extra"] = {}
                 result["features_extra"]["waveform_peaks"] = peaks
 

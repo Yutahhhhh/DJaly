@@ -627,9 +627,17 @@ class ServerStatus(BaseModel):
     mode: OperationMode = Field(description="Current operation mode")
     db_connected: bool = Field(description="Whether database is connected")
     db_path: str | None = Field(default=None, description="Database path")
+    db_unavailable_reason: str | None = Field(
+        default=None,
+        description="Reason the Rekordbox database is unavailable (None when available)",
+    )
     rekordbox_running: bool = Field(description="Whether rekordbox is currently running")
     track_count: int = Field(default=0, description="Total tracks in library")
     playlist_count: int = Field(default=0, description="Total playlists")
+    db_error: str | None = Field(
+        default=None,
+        description="Error raised while reading track/playlist counts (None when the read succeeded)",
+    )
     backup_usage: BackupUsage | None = Field(default=None, description="Backup usage stats")
     last_backup: datetime | None = Field(default=None, description="Last backup timestamp")
 

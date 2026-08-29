@@ -11,11 +11,13 @@ mcp = MCPServer(
     title="Djaly Music Library",
     instructions=(
         "Djaly is a local-first DJ music library. Use these tools to search tracks, "
-        "resolve natural-language 'vibe' descriptions into audio-feature filters, "
-        "manage setlists (create/reorder/auto-generate/bridge/export), run AI genre "
-        "analysis, and inspect lyrics/wordplay. Prefer search_tracks/vibe_search "
-        "before assuming a track exists; track ids returned by these tools are "
-        "required by setlist and genre tools."
+        "manage setlists, classify genres, and inspect lyrics/wordplay. You are the "
+        "reasoning model: Djaly never calls a separate LLM. Translate natural-language "
+        "vibes into search/setlist tool parameters yourself. For genre work, call "
+        "get_genre_analysis_context, classify the returned tracks, then call "
+        "apply_genre_analysis or apply_genre_analyses. For wordplay, inspect lyrics, "
+        "choose phrases yourself, then call find_wordplay_links. Prefer search_tracks "
+        "before assuming a track exists; returned track ids are required by mutation tools."
     ),
 )
 

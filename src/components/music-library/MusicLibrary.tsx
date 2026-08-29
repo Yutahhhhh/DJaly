@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Search, X, Loader2 } from "lucide-react";
+import { Sparkles, Search, X } from "lucide-react";
 import { Track } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { FilterDialog } from "./FilterDialog";
@@ -10,7 +10,6 @@ import { FilterState } from "./types";
 import { useTrackSearch } from "./useTrackSearch";
 import { LIMIT, INITIAL_FILTERS } from "./constants";
 import { useIngestion } from "@/contexts/IngestionContext";
-import { tracksService } from "@/services/tracks";
 import { toast } from "@/components/ui/toast";
 import { getErrorDetail } from "@/services/api-client";
 
@@ -22,11 +21,6 @@ export function MusicLibrary({
   isPlayerLoading,
 }: MusicLibraryProps) {
   const [analyzingId, setAnalyzingId] = useState<number | null>(null);
-  const [vibeParams, setVibeParams] = useState<Record<string, number> | null>(
-    null
-  );
-  const [vibeResolving, setVibeResolving] = useState(false);
-
   const { startIngestion, waitForIngestionComplete } = useIngestion();
 
   const {
@@ -46,30 +40,6 @@ export function MusicLibrary({
     search,
     totalCount,
   } = useTrackSearch({ limit: LIMIT });
-
-  // Vibe プロンプトの AI 解釈結果を取得して表示 (検索自体はキャッシュを共有)
-  useEffect(() => {
-    let cancelled = false;
-    if (!filters.vibePrompt) {
-      setVibeParams(null);
-      return;
-    }
-    setVibeResolving(true);
-    tracksService
-      .resolveVibe(filters.vibePrompt)
-      .then((res) => {
-        if (!cancelled) setVibeParams(res.resolved ? res.params : null);
-      })
-      .catch(() => {
-        if (!cancelled) setVibeParams(null);
-      })
-      .finally(() => {
-        if (!cancelled) setVibeResolving(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filters.vibePrompt]);
 
   const observer = useRef<IntersectionObserver | null>(null);
   const lastTrackElementRef = useCallback(
@@ -96,7 +66,6 @@ export function MusicLibrary({
     else if (key === "lyrics") newFilters.lyrics = "";
     else if (key === "genres") newFilters.genres = [];
     else if (key === "subgenres") newFilters.subgenres = [];
-    else if (key === "vibePrompt") newFilters.vibePrompt = "";
     else if (key === "minYear" || key === "maxYear") {
       newFilters.minYear = INITIAL_FILTERS.minYear;
       newFilters.maxYear = INITIAL_FILTERS.maxYear;
@@ -142,19 +111,6 @@ export function MusicLibrary({
 
   // Helper to count active filters for display logic (hook provides total count, but we need specific checks for badges)
   const isFeatureActive = (min: number, max: number) => min > 0 || max < 1;
-
-  const formatVibeParams = (params: Record<string, number>) => {
-    const parts: string[] = [];
-    if (params.bpm) parts.push(`BPM~${Math.round(params.bpm)}`);
-    if (params.energy !== undefined) parts.push(`Energy ${params.energy}`);
-    if (params.danceability !== undefined)
-      parts.push(`Dance ${params.danceability}`);
-    if (params.brightness !== undefined)
-      parts.push(`Bright ${params.brightness}`);
-    if (params.year_min || params.year_max)
-      parts.push(`${params.year_min ?? "~"}-${params.year_max ?? "~"}`);
-    return parts.join(" / ");
-  };
 
   return (
     <div className="h-full min-h-0 flex flex-col p-4 gap-4">
@@ -203,28 +159,6 @@ export function MusicLibrary({
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs text-muted-foreground mr-1">Active:</span>
-
-            {/* Vibe プロンプトの AI 解釈結果 */}
-            {filters.vibePrompt && (
-              <Badge
-                variant="outline"
-                className="gap-1 border-purple-400 text-purple-500 max-w-md"
-              >
-                {vibeResolving ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3 w-3" />
-                )}
-                <span className="truncate">
-                  "{filters.vibePrompt}"
-                  {vibeParams ? ` → ${formatVibeParams(vibeParams)}` : ""}
-                </span>
-                <X
-                  className="h-3 w-3 cursor-pointer shrink-0"
-                  onClick={() => clearFilter("vibePrompt")}
-                />
-              </Badge>
-            )}
 
             {filters.bpm && (
               <Badge variant="secondary" className="gap-1">

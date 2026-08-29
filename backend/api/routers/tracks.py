@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from infra.database.connection import get_session
 from models import Track
 from api.schemas.track import TrackRead
 from app.services.track_app_service import TrackAppService
 from app.services.recommendation_app_service import RecommendationAppService
-from utils.llm import generate_vibe_parameters
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -19,18 +18,6 @@ class TrackInfoUpdate(BaseModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     year: Optional[int] = None
-
-@router.post("/api/vibe/resolve")
-def resolve_vibe_prompt(
-    prompt: str = Body(..., embed=True),
-    session: Session = Depends(get_session)
-) -> Dict[str, Any]:
-    """
-    自然言語の Vibe プロンプトを LLM でオーディオ特徴量に変換する。
-    結果は TTL キャッシュされ、以降の /api/tracks 検索ではキャッシュが再利用される。
-    """
-    params = generate_vibe_parameters(prompt, session=session)
-    return {"prompt": prompt, "params": params, "resolved": bool(params)}
 
 @router.patch("/api/tracks/{track_id}/info")
 def update_track_info(
@@ -116,8 +103,6 @@ def get_tracks(
     year_status: str = "all",
     lyrics_status: str = "all",
     lyrics: Optional[str] = None,
-    # Vibe Search
-    vibe_prompt: Optional[str] = None,
     limit: int = 100, 
     offset: int = 0, 
     session: Session = Depends(get_session)
@@ -147,7 +132,6 @@ def get_tracks(
         year_status=year_status,
         lyrics_status=lyrics_status,
         lyrics=lyrics,
-        vibe_prompt=vibe_prompt,
         limit=limit,
         offset=offset
     )
@@ -177,7 +161,6 @@ def get_tracks_count(
     year_status: str = "all",
     lyrics_status: str = "all",
     lyrics: Optional[str] = None,
-    vibe_prompt: Optional[str] = None,
     session: Session = Depends(get_session)
 ):
     """検索条件に一致する楽曲の総数を返す (一覧表示のカウント用)"""
@@ -206,7 +189,6 @@ def get_tracks_count(
         year_status=year_status,
         lyrics_status=lyrics_status,
         lyrics=lyrics,
-        vibe_prompt=vibe_prompt
     )
     return {"count": len(ids)}
 
@@ -235,7 +217,6 @@ def get_track_ids(
     year_status: str = "all",
     lyrics_status: str = "all",
     lyrics: Optional[str] = None,
-    vibe_prompt: Optional[str] = None,
     session: Session = Depends(get_session)
 ):
     app_service = TrackAppService(session)
@@ -263,5 +244,4 @@ def get_track_ids(
         year_status=year_status,
         lyrics_status=lyrics_status,
         lyrics=lyrics,
-        vibe_prompt=vibe_prompt
     )

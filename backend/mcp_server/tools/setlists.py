@@ -42,7 +42,6 @@ def delete_setlist(setlist_id: int) -> Dict[str, Any]:
             raise ValueError(f"Setlist {setlist_id} not found")
         return {"ok": True}
 
-
 @mcp.tool()
 def get_setlist_tracks(setlist_id: int) -> Dict[str, Any]:
     """セットリストに含まれる楽曲を、並び順どおりに返す。"""
@@ -93,35 +92,52 @@ def remove_track_from_setlist(setlist_id: int, track_id: int) -> Dict[str, Any]:
 @mcp.tool()
 def recommend_next_track(
     track_id: int,
-    vibe: Optional[str] = None,
     limit: int = 10,
     genres: Optional[List[str]] = None,
     subgenres: Optional[List[str]] = None,
+    target_bpm: Optional[float] = None,
+    target_energy: Optional[float] = None,
+    target_danceability: Optional[float] = None,
+    target_brightness: Optional[float] = None,
 ) -> Dict[str, Any]:
     """指定した曲の次に繋ぐのに適した楽曲を、BPM/キー/音響類似度からスコアリングして提案する。
-    vibe を指定すると（任意の自然言語の方向性、例: 'ピークタイムのハイエナジー'）、
-    その雰囲気も考慮した提案になる。未指定なら純粋にベクトル/BPM/キーのみで評価する。
+    ユーザーの自然言語の方向性はMCPクライアント側で target_* 値へ解釈する。
+    target未指定なら純粋にベクトル/BPM/キーのみで評価する。
     """
     with db_session() as session:
         service = SetlistAppService(session)
         results = service.recommend_next_track(
-            track_id, limit=limit, vibe=vibe, genres=genres, subgenres=subgenres
+            track_id,
+            limit=limit,
+            target_params={
+                "bpm": target_bpm,
+                "energy": target_energy,
+                "danceability": target_danceability,
+                "brightness": target_brightness,
+            },
+            genres=genres,
+            subgenres=subgenres,
         )
         return track_list_payload(results)
 
 
 @mcp.tool()
 def generate_auto_setlist(
-    vibe: str,
     length: Optional[int] = None,
     min_length: Optional[int] = None,
     max_length: Optional[int] = None,
     seed_track_ids: Optional[List[int]] = None,
     genres: Optional[List[str]] = None,
     subgenres: Optional[List[str]] = None,
+    target_bpm: Optional[float] = None,
+    target_energy: Optional[float] = None,
+    target_danceability: Optional[float] = None,
+    target_brightness: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """自然言語の vibe（例: 'サンセットのメロディックハウス'）に基づき、セットリスト候補を自動生成する
+    """構造化された音響特徴量ターゲットに基づき、セットリスト候補を自動生成する
     （DBには保存しない、結果一覧を返すのみ。保存するには set_setlist_tracks を別途呼ぶこと）。
+    ユーザーの自然言語のvibeは、このツールを呼ぶMCPクライアント自身が target_* と
+    genres/subgenres に解釈する。
     曲数は length で指定、min_length/max_length を渡すとその範囲でランダムに決定する。
     length 未指定時は UI 設定のデフォルト曲数（setlist_default_length）を使用する。
     seed_track_ids を渡すとその曲群の流れを引き継いで生成する。
@@ -129,7 +145,12 @@ def generate_auto_setlist(
     with db_session() as session:
         service = SetlistAppService(session)
         results = service.generate_auto_setlist(
-            vibe,
+            target_params={
+                "bpm": target_bpm,
+                "energy": target_energy,
+                "danceability": target_danceability,
+                "brightness": target_brightness,
+            },
             limit=length,
             min_length=min_length,
             max_length=max_length,
@@ -250,19 +271,3 @@ def clear_setlist_track_wordplay(setlist_track_id: int) -> Dict[str, Any]:
         session.add(st)
         session.commit()
         return {"ok": True}
-
-
-@mcp.tool()
-def generate_wordplay_setlist(
-    start_track_id: int,
-    length: int = 10,
-    genres: Optional[List[str]] = None,
-    subgenres: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """開始曲からワードプレイ（歌詞キーワードの一致）で繋ぐセットリスト候補を生成する（DBには保存しない）。"""
-    with db_session() as session:
-        service = SetlistAppService(session)
-        results = service.generate_wordplay_setlist(
-            start_track_id, length, genres=genres, subgenres=subgenres
-        )
-        return track_list_payload(results)

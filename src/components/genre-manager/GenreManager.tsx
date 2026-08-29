@@ -1,7 +1,7 @@
 import React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnalyzeMissingTab } from "./AnalyzeMissingTab";
-import { SuggestionsTab } from "./SuggestionsTab";
+import { McpAnalysisTab } from "./McpAnalysisTab";
 import { CleanupTab } from "./CleanupTab";
 import { Track } from "@/types";
 
@@ -21,7 +21,7 @@ export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay, mode }) => {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
           <p className="text-muted-foreground">
-            Manage and organize your music library {mode}s using AI and similarity analysis.
+            Manage labels with deterministic similarity tools or your connected MCP client's model.
           </p>
         </div>
       </div>
@@ -30,7 +30,7 @@ export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay, mode }) => {
         <TabsList>
           <TabsTrigger value="cleanup">Cleanup</TabsTrigger>
           <TabsTrigger value="missing">Analyze Missing</TabsTrigger>
-          <TabsTrigger value="suggestions">Suggestions</TabsTrigger>
+          <TabsTrigger value="mcp-analysis">MCP Analysis</TabsTrigger>
         </TabsList>
 
         <div className="flex-1 mt-4 border rounded-lg bg-background/50 flex flex-col min-h-0 overflow-hidden">
@@ -47,10 +47,10 @@ export const GenreManager: React.FC<GenreManagerProps> = ({ onPlay, mode }) => {
             <AnalyzeMissingTab onPlay={onPlay} mode={mode} />
           </TabsContent>
           <TabsContent
-            value="suggestions"
+            value="mcp-analysis"
             className="flex-1 p-0 m-0 min-h-0 data-[state=inactive]:hidden"
           >
-            <SuggestionsTab onPlay={onPlay} mode={mode} />
+            <McpAnalysisTab mode={mode} />
           </TabsContent>
         </div>
       </Tabs>

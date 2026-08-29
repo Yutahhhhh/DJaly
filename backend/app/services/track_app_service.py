@@ -3,8 +3,7 @@ from sqlmodel import Session
 
 from domain.models.track import Track
 from infra.repositories.track_repository import TrackRepository
-from utils.llm import generate_vibe_parameters
-from infra.database.connection import get_setting_value
+from domain.services.target_parameters import sanitize_target_parameters
 
 class TrackAppService:
     def __init__(self, session: Session):
@@ -42,16 +41,11 @@ class TrackAppService:
         year_status: str = "all",
         lyrics_status: str = "all",
         lyrics: Optional[str] = None,
-        vibe_prompt: Optional[str] = None,
+        target_params: Optional[Dict[str, Any]] = None,
         limit: int = 100, 
         offset: int = 0
     ) -> List[Track]:
         
-        target_params = None
-        if vibe_prompt:
-            model_name = get_setting_value(self.session, "llm_model") or "llama3.2"
-            target_params = generate_vibe_parameters(vibe_prompt, model_name=model_name, session=self.session)
-            
         return self.repository.search_tracks(
             status=status,
             q=q,
@@ -76,7 +70,7 @@ class TrackAppService:
             year_status=year_status,
             lyrics_status=lyrics_status,
             lyrics=lyrics,
-            target_params=target_params,
+            target_params=sanitize_target_parameters(target_params),
             limit=limit,
             offset=offset
         )
@@ -106,14 +100,9 @@ class TrackAppService:
         year_status: str = "all",
         lyrics_status: str = "all",
         lyrics: Optional[str] = None,
-        vibe_prompt: Optional[str] = None
+        target_params: Optional[Dict[str, Any]] = None
     ) -> List[int]:
         
-        target_params = None
-        if vibe_prompt:
-            model_name = get_setting_value(self.session, "llm_model") or "llama3.2"
-            target_params = generate_vibe_parameters(vibe_prompt, model_name=model_name, session=self.session)
-            
         return self.repository.search_track_ids(
             status=status,
             q=q,
@@ -138,5 +127,5 @@ class TrackAppService:
             year_status=year_status,
             lyrics_status=lyrics_status,
             lyrics=lyrics,
-            target_params=target_params
+            target_params=sanitize_target_parameters(target_params)
         )

@@ -14,15 +14,13 @@ export interface DashboardStats {
   recent_setlists: Setlist[];
   config: {
     has_root_path: boolean;
-    llm_model: string;
-    llm_configured: boolean;
   };
 }
 
 export interface SystemHealth {
   status: string;
   duckdb_version: string;
-  ollama_status: string;
+  ai_runtime: "mcp-client";
 }
 
 export const systemService = {

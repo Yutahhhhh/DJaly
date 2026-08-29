@@ -18,5 +18,4 @@ export interface FilterState {
   maxBrightness: number;
   minYear: number | null;
   maxYear: number | null;
-  vibePrompt: string | null;
 }

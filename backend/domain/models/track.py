@@ -1,9 +1,11 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from sqlmodel import Field, SQLModel
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, LargeBinary
 from pydantic import ConfigDict
 import json
+
+from utils.array_codec import pack_f32, pack_u8_waveform, unpack_f32, unpack_u8_waveform
 
 class Track(SQLModel, table=True):
     __tablename__ = "tracks"
@@ -53,8 +55,12 @@ class Track(SQLModel, table=True):
 class TrackAnalysis(SQLModel, table=True):
     __tablename__ = "track_analyses"
     track_id: int = Field(primary_key=True, foreign_key="tracks.id")
-    beat_positions: List[float] = Field(default=[], sa_column=Column(JSON))
-    waveform_peaks: List[float] = Field(default=[], sa_column=Column(JSON))
+    # v4: 波形/ビートは JSON テキストではなくコンパクトな BLOB で保持する。
+    #   - waveform_u8 : 0..1 振幅を 500 点 uint8 にダウンサンプルした生バイト
+    #   - beats_f32   : ビート位置(秒) の float32 生バイト
+    # 読み書きは waveform_peaks / beat_positions プロパティ (List[float]) 経由で行う。
+    beats_f32: Optional[bytes] = Field(default=None, sa_column=Column("beats_f32", LargeBinary))
+    waveform_u8: Optional[bytes] = Field(default=None, sa_column=Column("waveform_u8", LargeBinary))
     features_extra_json: str = Field(default="{}")
 
     @property
@@ -63,6 +69,22 @@ class TrackAnalysis(SQLModel, table=True):
             return json.loads(self.features_extra_json)
         except:
             return {}
+
+    @property
+    def waveform_peaks(self) -> List[float]:
+        return unpack_u8_waveform(self.waveform_u8)
+
+    @waveform_peaks.setter
+    def waveform_peaks(self, values: Optional[List[float]]) -> None:
+        self.waveform_u8 = pack_u8_waveform(values)
+
+    @property
+    def beat_positions(self) -> List[float]:
+        return unpack_f32(self.beats_f32)
+
+    @beat_positions.setter
+    def beat_positions(self, values: Optional[List[float]]) -> None:
+        self.beats_f32 = pack_f32(values)
 
 class TrackEmbedding(SQLModel, table=True):
     __tablename__ = "track_embeddings"

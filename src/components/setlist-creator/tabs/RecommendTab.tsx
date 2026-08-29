@@ -5,7 +5,6 @@ import {
   Sparkles,
   Music2,
 } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Track } from "@/types";
 import { setlistsService } from "@/services/setlists";
@@ -25,7 +24,6 @@ export function RecommendTab({
 }: RecommendTabProps) {
   const [recTracks, setRecTracks] = useState<Track[]>([]);
   const [isRecLoading, setIsRecLoading] = useState(false);
-  const [recVibe, setRecVibe] = useState("");
   const [recGenres, setRecGenres] = useState<string[]>([]);
   const [recSubgenres, setRecSubgenres] = useState<string[]>([]);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
@@ -41,7 +39,7 @@ export function RecommendTab({
     if (referenceTrack) {
       fetchRecommendations();
     }
-  }, [referenceTrack, recVibe, recGenres, recSubgenres]);
+  }, [referenceTrack, recGenres, recSubgenres]);
 
   const fetchRecommendations = async () => {
     if (!referenceTrack) return;
@@ -49,7 +47,6 @@ export function RecommendTab({
     try {
       const data = await setlistsService.recommendNext(
         referenceTrack.id,
-        recVibe.trim() || undefined,
         recGenres.length > 0 ? recGenres : undefined,
         recSubgenres.length > 0 ? recSubgenres : undefined
       );
@@ -72,18 +69,6 @@ export function RecommendTab({
               <div className="font-bold truncate bg-background p-2 rounded border shadow-sm">
                 {referenceTrack.title}
               </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground">
-                Vibe (任意)
-              </label>
-              <Input
-                placeholder="例: ピークタイムのハイエナジー（空ならベクトル推薦）"
-                className="h-8 text-xs bg-background"
-                value={recVibe}
-                onChange={(e) => setRecVibe(e.target.value)}
-              />
             </div>
 
             <div className="space-y-1">

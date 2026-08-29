@@ -71,49 +71,9 @@ jobs:
         shell: bash
         run: |
           cd backend
-          pyinstaller --clean --noconfirm --onefile --name djaly-server \
-              --collect-all uvicorn \
-              --collect-all starlette \
-              --collect-all fastapi \
-              --collect-all h11 \
-              --hidden-import="uvicorn" \
-              --hidden-import="uvicorn.main" \
-              --hidden-import="uvicorn.config" \
-              --hidden-import="uvicorn.logging" \
-              --hidden-import="uvicorn.loops" \
-              --hidden-import="uvicorn.loops.auto" \
-              --hidden-import="uvicorn.loops.asyncio" \
-              --hidden-import="uvicorn.protocols" \
-              --hidden-import="uvicorn.protocols.http" \
-              --hidden-import="uvicorn.protocols.http.auto" \
-              --hidden-import="uvicorn.protocols.http.h11_impl" \
-              --hidden-import="uvicorn.protocols.http.httptools_impl" \
-              --hidden-import="uvicorn.protocols.websockets" \
-              --hidden-import="uvicorn.protocols.websockets.auto" \
-              --hidden-import="uvicorn.protocols.websockets.wsproto_impl" \
-              --hidden-import="uvicorn.protocols.websockets.websockets_impl" \
-              --hidden-import="uvicorn.lifespan" \
-              --hidden-import="uvicorn.lifespan.on" \
-              --hidden-import="uvicorn.lifespan.off" \
-              --hidden-import="uvicorn.server" \
-              --hidden-import="starlette" \
-              --hidden-import="starlette.routing" \
-              --hidden-import="starlette.middleware" \
-              --hidden-import="starlette.applications" \
-              --hidden-import="fastapi" \
-              --hidden-import="fastapi.applications" \
-              --hidden-import="sqlmodel" \
-              --hidden-import="platformdirs" \
-              --hidden-import="sklearn.utils._typedefs" \
-              --hidden-import="sklearn.neighbors._partition_nodes" \
-              --hidden-import="scipy.special.cython_special" \
-              --hidden-import="h11" \
-              --hidden-import="h11._connection" \
-              --hidden-import="h11._state" \
-              --hidden-import="anyio" \
-              --hidden-import="anyio._backends" \
-              --hidden-import="anyio._backends._asyncio" \
-              server.py
+          # Keep CI packaging identical to local releases. The spec includes
+          # Essentia/MusiCNN assets and all MCP server dependencies.
+          pyinstaller --clean --noconfirm djaly-server.spec
           
           mkdir -p ../src-tauri/bin
           
@@ -148,7 +108,7 @@ jobs:
         if: matrix.platform == 'macos-latest'
         uses: softprops/action-gh-release@v1
         with:
-          draft: true
+          draft: false
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
@@ -159,7 +119,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         uses: softprops/action-gh-release@v1
         with:
-          draft: true
+          draft: false
           files: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
@@ -170,7 +130,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         uses: softprops/action-gh-release@v1
         with:
-          draft: true
+          draft: false
           files: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe

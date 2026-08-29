@@ -34,6 +34,7 @@ async def get_status() -> dict[str, Any]:
     db_path = None
     track_count = 0
     playlist_count = 0
+    db_error = None
 
     try:
         conn = get_connection()
@@ -46,8 +47,10 @@ async def get_status() -> dict[str, Any]:
             track_count = len(tracks)
             playlists = repo.get_playlists()
             playlist_count = len(playlists)
-    except Exception:
-        pass
+    except Exception as e:
+        # Surface read failures instead of silently reporting 0 counts as if
+        # the library were empty (see RekordboxConnection.recover_from_error).
+        db_error = str(e)
 
     rekordbox_running = False
     try:
@@ -76,6 +79,7 @@ async def get_status() -> dict[str, Any]:
         rekordbox_running=rekordbox_running,
         track_count=track_count,
         playlist_count=playlist_count,
+        db_error=db_error,
         backup_usage=backup_usage,
         last_backup=last_backup,
     )
@@ -90,14 +94,15 @@ async def get_status() -> dict[str, Any]:
 async def get_mode() -> dict[str, Any]:
     """Get the current operation mode."""
     settings = get_settings_instance()
+    current_mode = OperationMode(settings.mode).value
     return {
         "success": True,
-        "mode": settings.mode.value,
+        "mode": current_mode,
         "description": {
             "readonly": "Read-only access to tracks, cues, playlists",
             "xml": "Export cues to Rekordbox collection XML (Automark-for-Rekordbox compatible)",
             "masterdb": "Direct database writes (requires Rekordbox to be closed)",
-        }.get(settings.mode.value, "Unknown mode"),
+        }.get(current_mode, "Unknown mode"),
     }
 
 
@@ -113,7 +118,7 @@ async def set_mode(body: SetModeRequest) -> dict[str, Any]:
         )
 
     settings = get_settings_instance()
-    old_mode = settings.mode
+    old_mode = OperationMode(settings.mode)
 
     if new_mode == old_mode:
         return {

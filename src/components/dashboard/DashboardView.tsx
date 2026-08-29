@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { systemService, DashboardStats, SystemHealth } from "@/services/system";
+import { systemService, DashboardStats } from "@/services/system";
 import { StatCards } from "./StatCards";
 import { GenreBarChart } from "./GenreBarChart";
 import { RecentSetlists } from "./RecentSetlists";
@@ -15,7 +15,6 @@ interface DashboardViewProps {
 
 export function DashboardView({ onNavigate }: DashboardViewProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [health, setHealth] = useState<SystemHealth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,12 +28,8 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const [statsData, healthData] = await Promise.all([
-        systemService.getDashboardStats(),
-        systemService.getHealth(),
-      ]);
+      const statsData = await systemService.getDashboardStats();
       setStats(statsData);
-      setHealth(healthData);
     } catch (e: any) {
       console.error("Failed to load dashboard data", e);
       setError(e.message || "Failed to load dashboard data");
@@ -84,13 +79,6 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {health?.ollama_status &&
-            !health.ollama_status.includes("Connected") &&
-            !health.ollama_status.includes("Configured") && (
-              <span className="text-xs text-red-500 font-medium px-2 py-1 bg-red-50 rounded border border-red-100">
-                LLM Connection Error
-              </span>
-            )}
           <Button
             variant="outline"
             size="sm"
@@ -130,7 +118,6 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
       {/* KPI Cards */}
       <StatCards
         stats={stats}
-        health={health} // ★ Added: 実際の接続状態を渡す
         onNavigate={onNavigate}
         onAnalyze={() => setIsAnalysisModalOpen(true)}
       />
@@ -151,8 +138,8 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
         <div className="border rounded-xl bg-card p-6 flex flex-col justify-center items-center text-center space-y-4 shadow-sm">
           <h3 className="font-semibold text-lg">Ready to Create?</h3>
           <p className="text-sm text-muted-foreground max-w-xs">
-            Start building your next setlist using AI-powered recommendations
-            and vibe matching.
+            Start building your next setlist with audio-feature recommendations,
+            or ask your connected MCP client for a natural-language workflow.
           </p>
           <Button
             onClick={() => onNavigate("setlists")}

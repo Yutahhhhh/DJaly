@@ -14,6 +14,7 @@ from rekordbox_mcp.mcp.server import (
     get_repository,
     get_settings_instance,
     ensure_initial_backup_if_needed,
+    require_db,
 )
 
 mcp: FastMCP = get_mcp()
@@ -40,6 +41,7 @@ def _check_write_mode() -> OperationMode:
     tags={"playlist", "read"},
     annotations={"readOnlyHint": True},
 )
+@require_db
 async def list_playlists() -> dict[str, Any]:
     """List all playlists and folders."""
     manager = get_playlist_manager()
@@ -56,6 +58,7 @@ async def list_playlists() -> dict[str, Any]:
     tags={"playlist", "read"},
     annotations={"readOnlyHint": True},
 )
+@require_db
 async def get_playlist_tracks(playlist_id: str) -> dict[str, Any]:
     """Get track IDs in a playlist in order."""
     manager = get_playlist_manager()
@@ -75,6 +78,7 @@ async def get_playlist_tracks(playlist_id: str) -> dict[str, Any]:
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def create_playlist(name: str, parent_id: str = "root") -> dict[str, Any]:
     """Create a new regular playlist."""
     _check_write_mode()
@@ -90,6 +94,7 @@ async def create_playlist(name: str, parent_id: str = "root") -> dict[str, Any]:
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def create_folder(name: str, parent_id: str = "root") -> dict[str, Any]:
     """Create a new folder."""
     _check_write_mode()
@@ -105,6 +110,7 @@ async def create_folder(name: str, parent_id: str = "root") -> dict[str, Any]:
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def rename_playlist(playlist_id: str, new_name: str) -> dict[str, Any]:
     """Rename a playlist or folder."""
     _check_write_mode()
@@ -122,6 +128,7 @@ async def rename_playlist(playlist_id: str, new_name: str) -> dict[str, Any]:
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def move_playlist(playlist_id: str, new_parent_id: str, seq: int | None = None) -> dict[str, Any]:
     """Move a playlist or folder to a different parent."""
     _check_write_mode()
@@ -142,6 +149,7 @@ async def move_playlist(playlist_id: str, new_parent_id: str, seq: int | None = 
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def delete_playlist(playlist_id: str, recursive: bool = False) -> dict[str, Any]:
     """Delete a playlist or folder. If recursive, also delete children."""
     _check_write_mode()
@@ -160,6 +168,7 @@ async def delete_playlist(playlist_id: str, recursive: bool = False) -> dict[str
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def add_tracks_to_playlist(playlist_id: str, track_ids: list[int], position: int | None = None) -> dict[str, Any]:
     """Add tracks to a playlist."""
     _check_write_mode()
@@ -177,6 +186,7 @@ async def add_tracks_to_playlist(playlist_id: str, track_ids: list[int], positio
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": True},
 )
+@require_db
 async def remove_track_from_playlist(playlist_id: str, track_id: int) -> dict[str, Any]:
     """Remove a track from a playlist (first occurrence)."""
     _check_write_mode()
@@ -194,6 +204,7 @@ async def remove_track_from_playlist(playlist_id: str, track_id: int) -> dict[st
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def move_track_in_playlist(playlist_id: str, from_index: int, to_index: int) -> dict[str, Any]:
     """Move a track within a playlist."""
     _check_write_mode()
@@ -211,6 +222,7 @@ async def move_track_in_playlist(playlist_id: str, from_index: int, to_index: in
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def copy_track_in_playlist(playlist_id: str, track_id: int, position: int | None = None) -> dict[str, Any]:
     """Copy a track to a position in a playlist (adds duplicate)."""
     _check_write_mode()
@@ -228,6 +240,7 @@ async def copy_track_in_playlist(playlist_id: str, track_id: int, position: int 
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def reorder_playlist(playlist_id: str, track_ids: list[int]) -> dict[str, Any]:
     """Reorder tracks to match the given order (must contain all current tracks)."""
     _check_write_mode()
@@ -248,6 +261,7 @@ async def reorder_playlist(playlist_id: str, track_ids: list[int]) -> dict[str, 
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def replace_playlist_tracks(playlist_id: str, track_ids: list[int]) -> dict[str, Any]:
     """Replace all tracks in a playlist."""
     _check_write_mode()
@@ -265,6 +279,7 @@ async def replace_playlist_tracks(playlist_id: str, track_ids: list[int]) -> dic
     tags={"playlist", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def dedupe_playlist(playlist_id: str, keep: Literal["first", "last"] = "first") -> dict[str, Any]:
     """Remove duplicate tracks from a playlist."""
     _check_write_mode()
@@ -282,6 +297,7 @@ async def dedupe_playlist(playlist_id: str, keep: Literal["first", "last"] = "fi
     tags={"playlist", "cue", "write"},
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
+@require_db
 async def process_playlist_cues(playlist_id: str, mode: Literal["replace", "merge", "preserve"] = "replace") -> dict[str, Any]:
     """Generate cues for all tracks in a playlist using the cue strategy."""
     _check_write_mode()

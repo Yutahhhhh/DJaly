@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 from mcp_server.instance import mcp, db_session, serialize, track_list_payload
 from app.services.track_app_service import TrackAppService
 from app.services.recommendation_app_service import RecommendationAppService
-from utils.llm import generate_vibe_parameters
 
 
 @mcp.tool()
@@ -36,7 +35,8 @@ def search_tracks(
 ) -> Dict[str, Any]:
     """ライブラリの楽曲を条件で検索する。q はタイトル/アーティスト横断のフリーテキスト検索。
     genres/subgenres は完全一致リスト。status='verified'|'unverified'|'all' でジャンル検証状態を絞れる。
-    自然言語の「雰囲気」で検索したい場合は vibe_search を使うこと。"""
+    自然言語の雰囲気は、このツールを呼ぶMCPクライアント自身がBPMや特徴量の
+    範囲へ解釈して指定すること。Djaly内ではLLM推論を行わない。"""
     with db_session() as session:
         service = TrackAppService(session)
         tracks = service.get_tracks(
@@ -51,30 +51,6 @@ def search_tracks(
             limit=limit, offset=offset,
         )
         return track_list_payload(tracks)
-
-
-@mcp.tool()
-def vibe_search(
-    prompt: str,
-    genres: Optional[List[str]] = None,
-    subgenres: Optional[List[str]] = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> Dict[str, Any]:
-    """自然言語の「雰囲気」（例: '夜のドライブ用チルR&B', 'peak time techno'）をAIでBPM/エナジー/
-    ダンサビリティ等の特徴量に変換し、それに近い楽曲を検索する。結果には解釈されたパラメータ
-    (resolved_params) も含まれるので、意図通りか確認できる。"""
-    with db_session() as session:
-        service = TrackAppService(session)
-        tracks = service.get_tracks(
-            vibe_prompt=prompt, genres=genres, subgenres=subgenres,
-            limit=limit, offset=offset,
-        )
-        resolved_params = generate_vibe_parameters(prompt, session=session)
-        payload = track_list_payload(tracks)
-        payload["resolved_params"] = resolved_params
-        return payload
-
 
 @mcp.tool()
 def get_track_similar(track_id: int, limit: int = 20) -> Dict[str, Any]:

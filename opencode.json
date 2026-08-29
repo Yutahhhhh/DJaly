@@ -5,6 +5,14 @@
       "type": "remote",
       "url": "http://127.0.0.1:8001/mcp",
       "enabled": true
+    },
+    "rekordbox": {
+      "type": "local",
+      "command": ["rekordbox-mcp", "--mode", "readonly"],
+      "enabled": true,
+      "environment": {
+        "REKORDBOX_DB_PATH": "/Users/horiyuuta/Library/Pioneer/rekordbox/master.db"
+      }
     }
   }
 }

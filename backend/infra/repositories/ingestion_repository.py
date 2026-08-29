@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
 from domain.models.lyrics import Lyrics
+from utils.array_codec import pack_f32, pack_u8_waveform
 import infra.database.connection as db_connection
 
 class IngestionRepository:
@@ -57,18 +58,43 @@ class IngestionRepository:
                 session.flush()
                 track_id = new_track.id
 
+            # DuckDB は UPDATE で空き領域を OS に返さないため、値が実際に変わった時だけ
+            # 行を書き換える (再解析/一括処理での無駄な UPDATE によるファイル肥大化を防ぐ)。
             extras = result.get("features_extra", {})
-            existing_analysis = session.get(TrackAnalysis, track_id) or TrackAnalysis(track_id=track_id)
-            if extras: existing_analysis.features_extra_json = json.dumps(extras)
-            if extras.get("beat_positions"): existing_analysis.beat_positions = extras["beat_positions"]
-            if extras.get("waveform_peaks"): existing_analysis.waveform_peaks = extras["waveform_peaks"]
-            session.add(existing_analysis)
-            
+            analysis = session.get(TrackAnalysis, track_id)
+            analysis_changed = analysis is None
+            if analysis is None:
+                analysis = TrackAnalysis(track_id=track_id)
+
+            if extras:
+                new_fx = json.dumps(extras)
+                if new_fx != (analysis.features_extra_json or "{}"):
+                    analysis.features_extra_json = new_fx
+                    analysis_changed = True
+            if extras.get("waveform_peaks"):
+                new_wave = pack_u8_waveform(extras["waveform_peaks"])
+                if new_wave != analysis.waveform_u8:
+                    analysis.waveform_u8 = new_wave
+                    analysis_changed = True
+            if extras.get("beat_positions"):
+                new_beats = pack_f32(extras["beat_positions"])
+                if new_beats != analysis.beats_f32:
+                    analysis.beats_f32 = new_beats
+                    analysis_changed = True
+            if analysis_changed:
+                session.add(analysis)
+
             if "embedding" in result and result["embedding"]:
-                emb = session.get(TrackEmbedding, track_id) or TrackEmbedding(track_id=track_id)
-                emb.embedding_json = json.dumps(result["embedding"])
-                emb.updated_at = datetime.now()
-                session.add(emb)
+                emb = session.get(TrackEmbedding, track_id)
+                new_emb_json = json.dumps(result["embedding"])
+                if emb is None:
+                    emb = TrackEmbedding(track_id=track_id, embedding_json=new_emb_json)
+                    emb.updated_at = datetime.now()
+                    session.add(emb)
+                elif emb.embedding_json != new_emb_json:
+                    emb.embedding_json = new_emb_json
+                    emb.updated_at = datetime.now()
+                    session.add(emb)
 
             if "lyrics" in result and result["lyrics"]:
                 ly = session.get(Lyrics, track_id) or Lyrics(track_id=track_id)

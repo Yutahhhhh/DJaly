@@ -7,67 +7,45 @@ from sqlmodel import Session
 
 from models import Track
 from domain.models.track import TrackEmbedding
-from utils.llm import sanitize_vibe_params, clear_vibe_cache
+from domain.services.target_parameters import sanitize_target_parameters
 
 
 # --- BUG-04: vibe パラメータの検証 ---
 
-class TestSanitizeVibeParams:
+class TestSanitizeTargetParameters:
     def test_valid_params_passthrough(self):
-        params = sanitize_vibe_params({"bpm": 128, "energy": 0.8, "year_min": 1990, "year_max": 1999})
+        params = sanitize_target_parameters({"bpm": 128, "energy": 0.8, "year_min": 1990, "year_max": 1999})
         assert params["bpm"] == 128
         assert params["energy"] == 0.8
         assert params["year_min"] == 1990
         assert params["year_max"] == 1999
 
     def test_string_numbers_are_coerced(self):
-        params = sanitize_vibe_params({"bpm": "120", "energy": "0.9"})
+        params = sanitize_target_parameters({"bpm": "120", "energy": "0.9"})
         assert params["bpm"] == 120.0
         assert params["energy"] == 0.9
 
     def test_invalid_values_are_dropped(self):
-        params = sanitize_vibe_params({"bpm": "fast", "energy": None, "danceability": 0.5})
+        params = sanitize_target_parameters({"bpm": "fast", "energy": None, "danceability": 0.5})
         assert "bpm" not in params
         assert "energy" not in params
         assert params["danceability"] == 0.5
 
-    def test_scale_normalization(self):
-        # 1-10 / 0-100 スケールの正規化
-        assert sanitize_vibe_params({"energy": 8})["energy"] == 0.8
-        assert sanitize_vibe_params({"energy": 85})["energy"] == 0.85
+    def test_feature_clamping(self):
+        assert sanitize_target_parameters({"energy": 8})["energy"] == 1.0
 
     def test_clamping(self):
-        params = sanitize_vibe_params({"bpm": 999, "year_min": 1500})
-        assert params["bpm"] == 200.0
-        assert "year_min" not in params
+        params = sanitize_target_parameters({"bpm": 999, "year_min": 1500})
+        assert params["bpm"] == 300.0
+        assert params["year_min"] == 1900
 
     def test_year_swap(self):
-        params = sanitize_vibe_params({"year_min": 2010, "year_max": 1990})
+        params = sanitize_target_parameters({"year_min": 2010, "year_max": 1990})
         assert params["year_min"] == 1990
         assert params["year_max"] == 2010
 
     def test_non_dict_input(self):
-        assert sanitize_vibe_params(None) == {}
-        assert sanitize_vibe_params("not a dict") == {}
-
-
-# --- AI-07: vibe キャッシュ ---
-
-def test_vibe_params_cached(session: Session, mocker):
-    clear_vibe_cache()
-    mock_gen = mocker.patch(
-        "utils.llm.generate_text",
-        return_value='{"bpm": 100, "energy": 0.5}'
-    )
-    from utils.llm import generate_vibe_parameters
-
-    p1 = generate_vibe_parameters("test vibe prompt", session=session)
-    p2 = generate_vibe_parameters("test vibe prompt", session=session)
-
-    assert p1 == p2
-    assert p1["bpm"] == 100
-    assert mock_gen.call_count == 1  # 2回目はキャッシュ
-    clear_vibe_cache()
+        assert sanitize_target_parameters(None) == {}
 
 
 # --- BUG-02: wordplay の null 削除 ---
@@ -164,7 +142,7 @@ def test_fetch_candidates_pool_robust_params(session: Session):
 
 # --- BUG-10: Unknown は verified にしない ---
 
-def test_unknown_genre_not_verified(session: Session, mocker):
+def test_unknown_genre_not_verified(session: Session):
     from app.services.genre_app_service import GenreAppService
     from api.schemas.genres import AnalysisMode
 
@@ -173,13 +151,12 @@ def test_unknown_genre_not_verified(session: Session, mocker):
     session.commit()
     session.refresh(track)
 
-    mocker.patch(
-        "app.services.genre_app_service.generate_text",
-        return_value=f"{track.id}|Unknown"
-    )
-
     service = GenreAppService(session)
-    service.analyze_tracks_batch_with_llm([track.id], mode=AnalysisMode.GENRE)
+    service.apply_genre_analysis(
+        track.id,
+        {"genre": "Unknown", "confidence": "Low", "reason": "Insufficient evidence"},
+        mode=AnalysisMode.GENRE,
+    )
 
     session.refresh(track)
     assert track.is_genre_verified is False  # 再解析の導線が残る

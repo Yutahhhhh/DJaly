@@ -93,14 +93,14 @@ class RecommendationRepository:
 
     def fetch_candidates_pool(
         self,
-        vibe_params: Dict[str, Any],
+        target_params: Dict[str, Any],
         genres: Optional[List[str]] = None,
         subgenres: Optional[List[str]] = None,
         limit: int = 200,
         exclude_ids: List[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        指定されたVibeとジャンルに基づき、歌詞情報とリリース年を含めて候補を取得
+        指定された構造化ターゲットとジャンルに基づき、歌詞情報とリリース年を含めて候補を取得
         """
         query_str = """
             SELECT
@@ -130,14 +130,14 @@ class RecommendationRepository:
         if genre_conditions:
             query_str += " AND (" + " OR ".join(genre_conditions) + ")"
 
-        target_bpm = self._to_float(vibe_params.get("bpm"))
+        target_bpm = self._to_float(target_params.get("bpm"))
         if target_bpm is not None and target_bpm > 0:
             query_str += " AND (t.bpm BETWEEN :min_bpm AND :max_bpm OR t.bpm = 0 OR t.bpm IS NULL)"
             params["min_bpm"] = target_bpm * 0.6
             params["max_bpm"] = target_bpm * 1.4
 
         order_clauses = []
-        target_energy = self._to_float(vibe_params.get("energy"))
+        target_energy = self._to_float(target_params.get("energy"))
         if target_energy is not None:
             query_str += " AND t.energy BETWEEN :min_energy AND :max_energy"
             params["min_energy"] = max(0.0, target_energy - 0.4)
@@ -145,7 +145,7 @@ class RecommendationRepository:
             order_clauses.append("ABS(t.energy - :order_energy)")
             params["order_energy"] = target_energy
 
-        target_danceability = self._to_float(vibe_params.get("danceability"))
+        target_danceability = self._to_float(target_params.get("danceability"))
         if target_danceability is not None:
             order_clauses.append("ABS(t.danceability - :order_danceability)")
             params["order_danceability"] = target_danceability

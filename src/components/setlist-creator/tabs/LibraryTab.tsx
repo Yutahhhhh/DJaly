@@ -1,9 +1,8 @@
 import {  useRef, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Loader2, Sparkles, Filter, X } from "lucide-react";
+import { Search, Loader2, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Track } from "@/types";
 import { TrackRow } from "../TrackRow";
 import {
@@ -69,7 +68,7 @@ export function LibraryTab({
           </div>
           <Button
             variant={
-              filters.vibePrompt || activeFilterCount > 0
+              activeFilterCount > 0
                 ? "default"
                 : "outline"
             }
@@ -77,13 +76,9 @@ export function LibraryTab({
             className="h-9 w-9 shrink-0"
             onClick={() => setIsFilterOpen(true)}
           >
-            {filters.vibePrompt ? (
-              <Sparkles className="h-4 w-4" />
-            ) : (
-              <Filter className="h-4 w-4" />
-            )}
+            <Filter className="h-4 w-4" />
           </Button>
-          {(filters.vibePrompt || activeFilterCount > 0) && (
+          {activeFilterCount > 0 && (
              <Button
                 variant="ghost"
                 size="icon"
@@ -95,14 +90,6 @@ export function LibraryTab({
           )}
         </div>
         
-        {filters.vibePrompt && (
-            <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px] truncate max-w-full">
-                    <Sparkles className="h-3 w-3 mr-1 text-purple-500" />
-                    {filters.vibePrompt}
-                </Badge>
-            </div>
-        )}
       </div>
 
       <ScrollArea className="flex-1">

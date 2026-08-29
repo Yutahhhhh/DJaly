@@ -16,7 +16,6 @@ if [ -f "../.env" ]; then
 fi
 
 # 環境変数の設定
-export OLLAMA_HOST=${OLLAMA_HOST:-http://localhost:11434}
 export DB_PATH="$(pwd)/../db_data/djaly.duckdb"
 export MUSIC_DIR="$(pwd)/../music_data"
 

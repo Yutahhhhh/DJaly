@@ -2,7 +2,7 @@ import pytest
 import json
 import os
 from sqlmodel import Session
-from utils import audio_math, filesystem, llm, metadata, logger
+from utils import audio_math, filesystem, metadata, logger
 from models import Track
 
 def test_audio_math_normalize_key():
@@ -26,30 +26,6 @@ def test_filesystem_resolve_path(tmp_path):
     f.touch()
     assert filesystem.resolve_path(str(f)) is not None
     assert filesystem.resolve_path("/non/existent") is None
-
-def test_llm_generate_text_providers(session, mocker):
-    from utils.llm import (
-        generate_text,
-        PROVIDER_CODEX,
-        PROVIDER_OPENAI,
-    )
-    
-    # Mock settings
-    mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_OPENAI, "model", "key", "host"))
-    mock_exec = mocker.patch("utils.llm._execute_request", return_value="AI Result")
-    
-    res = generate_text(session, "hello")
-    assert res == "AI Result"
-
-    mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_CODEX, "codex-model", "", "host"))
-    mock_codex = mocker.patch("utils.llm._call_codex_cli", return_value="Codex Result")
-    res = generate_text(session, "hello")
-    assert res == "Codex Result"
-    mock_codex.assert_called_once()
-    
-    # Test error cases
-    mocker.patch("utils.llm.get_llm_config", return_value=(PROVIDER_OPENAI, "model", "", "host"))
-    assert "CONFIG_ERROR: API Key" in generate_text(session, "hello")
 
 def test_metadata_smart_fallback(tmp_path, mocker):
     path = str(tmp_path / "song.mp3")

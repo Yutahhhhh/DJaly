@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from infra.database.connection import init_db, close_db
+from infra.database.connection import init_db, close_db, checkpoint_db
 from api.routers import (
     filesystem,
     genres,
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
     mcp_app_holder.refresh()
     async with mcp_server.session_manager.run():
         yield
+    checkpoint_db()  # WAL を本体へ畳み込む (肥大抑制の補助)
     close_db() # 終了時にDB接続を閉じる
 
 app = FastAPI(title="Djaly Backend API", lifespan=lifespan)
