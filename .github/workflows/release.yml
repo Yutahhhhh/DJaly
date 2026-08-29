@@ -92,14 +92,14 @@ jobs:
       - name: build tauri app (ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" pnpm tauri build ${{ matrix.args }}
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" pnpm exec tauri build ${{ matrix.args }}
         env:
           CI: true
           TAURI_SKIP_SIDECAR: true
 
       - name: build tauri app (non-ubuntu)
         if: matrix.platform != 'ubuntu-22.04'
-        run: pnpm tauri build ${{ matrix.args }}
+        run: pnpm exec tauri build ${{ matrix.args }}
         env:
           CI: true
           TAURI_SKIP_SIDECAR: true
