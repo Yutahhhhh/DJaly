@@ -4,6 +4,11 @@ import uvicorn
 import multiprocessing
 import platformdirs
 
+# Bound native pools before importing the audio stack; analysis jobs control concurrency.
+for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                       "TF_NUM_INTRAOP_THREADS", "TF_NUM_INTEROP_THREADS"):
+    os.environ.setdefault(thread_setting, "1")
+
 # PyInstaller for multiprocessing support (Windows/macOS)
 multiprocessing.freeze_support()
 

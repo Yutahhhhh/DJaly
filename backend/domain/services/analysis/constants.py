@@ -4,6 +4,16 @@
 # Audio Loading
 # Keep 44.1kHz to preserve high-frequency content (air, brilliance) for high-quality timbre analysis.
 SAMPLE_RATE = 44100
+EMBEDDING_SAMPLE_RATE = 16000
+EMBEDDING_PIPELINE_VERSION = "musicnn-16khz-v1"
+EMBEDDING_MODEL = "msd-musicnn-1:musicnn-16khz-v1"
+COMPONENT_VERSIONS = {
+    "embedding": EMBEDDING_PIPELINE_VERSION,
+    "rhythm": "rhythm-v2",
+    "key": "key-v1",
+    "timbre": "timbre-v1",
+    "waveform": "waveform-v1",
+}
 
 # Analysis Parameters
 # Increase Frame Size to 2048 for better frequency resolution (better for bass/key).

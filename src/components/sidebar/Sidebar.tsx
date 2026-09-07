@@ -7,6 +7,8 @@ import {
   Tags,
   LayoutDashboard,
   Bot,
+  MessageSquareQuote,
+  Disc3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -55,6 +57,13 @@ export function Sidebar({
           isOpen={isOpen}
         />
         <NavButton
+          icon={<Disc3 className="h-5 w-5" />}
+          label="Performance"
+          isActive={activeView === "performance"}
+          onClick={() => onNavigate("performance")}
+          isOpen={isOpen}
+        />
+        <NavButton
           icon={<List className="h-5 w-5" />}
           label="Setlists"
           isActive={activeView === "setlists"}
@@ -80,6 +89,13 @@ export function Sidebar({
           label="MCP"
           isActive={activeView === "mcp"}
           onClick={() => onNavigate("mcp")}
+          isOpen={isOpen}
+        />
+        <NavButton
+          icon={<MessageSquareQuote className="h-5 w-5" />}
+          label="Wordplay"
+          isActive={activeView === "wordplay"}
+          onClick={() => onNavigate("wordplay")}
           isOpen={isOpen}
         />
         <NavButton

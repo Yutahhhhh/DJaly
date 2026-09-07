@@ -1,0 +1,5 @@
+/upstream/
+/build*/
+/logs/
+/smoke-artifacts/
+/stage/

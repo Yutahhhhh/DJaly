@@ -9,14 +9,16 @@ import numpy as np
 from domain.models.setlist import Setlist, SetlistTrack
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
+from domain.models.wordplay import WordplayPair
 from infra.repositories.setlist_repository import SetlistRepository
 from infra.repositories.track_repository import TrackRepository
 from infra.repositories.recommendation_repository import RecommendationRepository
-from domain.services.setlist_builder import SetlistBuilder
+from domain.services.setlist_builder import SetlistBuilder, APPROVED_WORDPLAY_BONUS
 from infra.database.connection import get_setting_value
 
 from domain.services.target_parameters import sanitize_target_parameters
 from utils.audio_math import calculate_mixability_score
+from utils.embedding import cosine_similarity
 
 class SetlistAppService:
     def __init__(self, session: Session):
@@ -25,6 +27,68 @@ class SetlistAppService:
         self.track_repository = TrackRepository(session)
         self.recommendation_repository = RecommendationRepository(session)
         self.setlist_builder = SetlistBuilder()
+
+    def _approved_wordplay(self, from_track_id=None):
+        """Only human-approved, directed relationships influence generation."""
+        stmt = select(WordplayPair).where(WordplayPair.status == "approved")
+        if from_track_id is not None:
+            stmt = stmt.where(WordplayPair.from_track_id == from_track_id)
+        pairs = self.session.exec(stmt).all()
+        # Prefer a tested relationship if several words connect the same versions.
+        pairs = sorted(pairs, key=lambda p: (p.verification_status != "tested", p.id))
+        edges = {}
+        for pair in pairs:
+            edges.setdefault((pair.from_track_id, pair.to_track_id), pair)
+        return edges
+
+    def _include_wordplay_candidates(self, pool, edges, targets, genres, subgenres, exclude_ids):
+        """Include approved targets beyond the normal pool cap, with identical filters."""
+        missing_ids = sorted({target for _, target in edges} - {c["id"] for c in pool})
+        if missing_ids:
+            additional = self.recommendation_repository.fetch_candidates_pool(
+                targets, genres=genres, subgenres=subgenres,
+                limit=len(missing_ids), exclude_ids=exclude_ids, candidate_ids=missing_ids,
+            )
+            for candidate in additional:
+                # A target added solely because of an approved edge is eligible
+                # only after that edge's source, not as an unrelated new candidate.
+                candidate["wordplay_only_from_ids"] = {
+                    source for source, target in edges if target == candidate["id"]
+                }
+            pool = pool + additional
+        return pool
+
+    @staticmethod
+    def _wordplay_payload(pair):
+        return {
+            "pair_id": pair.id,
+            "from_track_id": pair.from_track_id,
+            "to_track_id": pair.to_track_id,
+            "keyword": pair.keyword,
+            "source_phrase": pair.source_phrase,
+            "target_phrase": pair.target_phrase,
+            "source_cue_mode": pair.source_cue_mode,
+            "from_timestamp": pair.from_timestamp,
+            "source_cue_end_timestamp": pair.source_cue_end_timestamp,
+            "to_timestamp": pair.to_timestamp,
+            "target_intro_timestamp": pair.target_intro_timestamp,
+            "target_landing_timestamp": (
+                pair.target_landing_timestamp
+                if pair.target_landing_timestamp is not None
+                else pair.to_timestamp
+            ),
+            "transition_notes": pair.transition_notes,
+            "source_url": pair.source_url,
+            "evidence_type": pair.evidence_type,
+            "verification_status": pair.verification_status,
+        }
+
+    def _annotate_wordplay(self, tracks, edges):
+        for previous, current in zip(tracks, tracks[1:]):
+            pair = edges.get((previous["id"], current["id"]))
+            if pair:
+                current["wordplay_json"] = json.dumps(self._wordplay_payload(pair), ensure_ascii=False)
+        return tracks
 
     def get_setlists(self) -> List[Setlist]:
         return self.repository.find_all()
@@ -163,6 +227,10 @@ class SetlistAppService:
             limit=200,
             exclude_ids=[track_id]
         )
+        wordplay = self._approved_wordplay(track_id)
+        pool = self._include_wordplay_candidates(
+            pool, wordplay, validated_targets, genres, subgenres, [track_id]
+        )
 
         target_vec = None
         target_emb = self.session.get(TrackEmbedding, track_id)
@@ -173,11 +241,8 @@ class SetlistAppService:
 
         scored_candidates = []
         for cand in pool:
-            vec_sim = 0.0
-            if target_vec is not None and cand["vector"] is not None:
-                dot = np.dot(target_vec, cand["vector"])
-                nA, nB = np.linalg.norm(target_vec), np.linalg.norm(cand["vector"])
-                if nA and nB: vec_sim = dot / (nA * nB)
+            vec_sim = cosine_similarity(target_vec, cand["vector"],
+                                        target_emb.model_name if target_emb else None, cand.get("embedding_model"))
             
             score = calculate_mixability_score(
                 target_bpm=target_track.bpm,
@@ -190,6 +255,10 @@ class SetlistAppService:
             track_dict = cand["track"].model_dump()
             # リポジトリの pool 取得時に計算された has_lyrics を注入
             track_dict["has_lyrics"] = cand.get("has_lyrics", False)
+            pair = wordplay.get((track_id, cand["id"]))
+            if pair:
+                score += APPROVED_WORDPLAY_BONUS
+                track_dict["wordplay_json"] = json.dumps(self._wordplay_payload(pair), ensure_ascii=False)
             scored_candidates.append((track_dict, score))
         
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -225,7 +294,12 @@ class SetlistAppService:
         seeds = []
         if seed_track_ids:
             seed_objs = self.session.exec(select(Track).where(Track.id.in_(seed_track_ids))).all()
-            for t in seed_objs:
+            seeds_by_id = {t.id: t for t in seed_objs}
+            # SQL IN does not preserve the order supplied by the DJ.
+            for tid in dict.fromkeys(seed_track_ids):
+                t = seeds_by_id.get(tid)
+                if t is None:
+                    continue
                 emb = self.session.get(TrackEmbedding, t.id)
                 vec = self.recommendation_repository._parse_embedding(emb.embedding_json) if emb else None
                 # シード曲についても歌詞情報を取得
@@ -234,6 +308,7 @@ class SetlistAppService:
                     "id": t.id, 
                     "track": t, 
                     "vector": vec,
+                    "embedding_model": emb.model_name if emb else None,
                     "has_lyrics": bool(ly and ly.content.strip())
                 })
 
@@ -247,7 +322,13 @@ class SetlistAppService:
         )
 
         # pool と seeds から Track オブジェクトのリストを取得
-        result_tracks = self.setlist_builder.build_chain(pool, seeds, target_length, validated_targets)
+        wordplay = self._approved_wordplay()
+        pool = self._include_wordplay_candidates(
+            pool, wordplay, validated_targets, genres, subgenres, exclude_ids
+        )
+        result_tracks = self.setlist_builder.build_chain(
+            pool, seeds, target_length, validated_targets, approved_wordplay_edges=wordplay.keys()
+        )
         
         enriched_result = []
         for t_obj in result_tracks:
@@ -260,7 +341,7 @@ class SetlistAppService:
             t_dict["has_lyrics"] = matching_cand.get("has_lyrics", False) if matching_cand else False
             enriched_result.append(t_dict)
         
-        return enriched_result
+        return self._annotate_wordplay(enriched_result, wordplay)
 
     def generate_path_setlist(
         self,
@@ -283,6 +364,7 @@ class SetlistAppService:
                 "id": t.id, 
                 "track": t, 
                 "vector": vec,
+                "embedding_model": emb.model_name if emb else None,
                 "has_lyrics": bool(ly and ly.content.strip())
             }
         
@@ -297,7 +379,14 @@ class SetlistAppService:
             exclude_ids=[start_track_id, end_track_id]
         )
         
-        result_tracks = self.setlist_builder.build_path(pool, start_node, end_node, length)
+        wordplay = self._approved_wordplay()
+        pool = self._include_wordplay_candidates(
+            pool, wordplay, {"bpm": ((start_track.bpm or 0) + (end_track.bpm or 0)) / 2},
+            genres, subgenres, [start_track_id, end_track_id],
+        )
+        result_tracks = self.setlist_builder.build_path(
+            pool, start_node, end_node, length, approved_wordplay_edges=wordplay.keys()
+        )
         
         enriched_result = []
         for t_obj in result_tracks:
@@ -315,4 +404,4 @@ class SetlistAppService:
                 
             enriched_result.append(t_dict)
             
-        return enriched_result
+        return self._annotate_wordplay(enriched_result, wordplay)

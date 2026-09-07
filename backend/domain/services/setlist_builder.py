@@ -1,11 +1,13 @@
 from typing import List, Dict, Any
-import random
 import numpy as np
 from domain.models.track import Track
-from utils.audio_math import calculate_mixability_score
+from utils.audio_math import bpm_distance, calculate_mixability_score
+from utils.embedding import cosine_similarity
 
 # 同一アーティスト連続のペナルティ (単調なセットを防ぐ)
 SAME_ARTIST_PENALTY = 0.2
+# Human approval supplies a useful preference, not a guarantee of mixability.
+APPROVED_WORDPLAY_BONUS = 0.25
 
 class SetlistBuilder:
     """
@@ -17,28 +19,40 @@ class SetlistBuilder:
         pool: List[Dict[str, Any]],
         seeds: List[Dict[str, Any]],
         target_length: int,
-        target_params: Dict[str, Any]
+        target_params: Dict[str, Any],
+        approved_wordplay_edges=None,
     ) -> List[Track]:
         """Greedy Algorithm for Infinite Flow"""
-        if not pool and not seeds:
+        if target_length <= 0 or (not pool and not seeds):
             return []
 
         chain: List[Dict[str, Any]] = []
         used_ids = set()
 
         for s in seeds:
+            if s["id"] in used_ids:
+                continue
+            if len(chain) >= target_length:
+                break
             chain.append(s)
             used_ids.add(s["id"])
 
         if not chain:
             def start_score(node):
                 t = node["track"]
-                score = 0
-                if "energy" in target_params: score -= abs(t.energy - target_params["energy"])
+                score = 0.0
+                for feat in ("energy", "danceability", "brightness", "noisiness"):
+                    if feat in target_params:
+                        value = getattr(t, feat, None)
+                        score -= abs(value - target_params[feat]) if value is not None else 1.0
+                if "bpm" in target_params:
+                    score -= bpm_distance(target_params["bpm"], t.bpm)
                 return score
 
-            pool.sort(key=start_score, reverse=True)
-            start_node = random.choice(pool[:min(10, len(pool))])
+            starters = [node for node in pool if not node.get("wordplay_only_from_ids")]
+            if not starters:
+                return []
+            start_node = min(starters, key=lambda node: (-start_score(node), node["id"]))
             chain.append(start_node)
             used_ids.add(start_node["id"])
 
@@ -50,12 +64,15 @@ class SetlistBuilder:
             for candidate in pool:
                 if candidate["id"] in used_ids:
                     continue
+                only_from = candidate.get("wordplay_only_from_ids")
+                if only_from and current_node["id"] not in only_from:
+                    continue
 
                 mix_score = self._calculate_transition_score(current_node, candidate)
 
                 # Vibe 近接スコア: energy だけでなく danceability / brightness も評価
                 vibe_score = 0.0
-                for feat in ("energy", "danceability", "brightness"):
+                for feat in ("energy", "danceability", "brightness", "noisiness"):
                     if feat in target_params:
                         cand_val = getattr(candidate["track"], feat, None) or 0.0
                         vibe_score -= abs(cand_val - target_params[feat]) * 0.1
@@ -67,9 +84,14 @@ class SetlistBuilder:
                 if cur_artist and cur_artist == cand_artist:
                     artist_penalty = SAME_ARTIST_PENALTY
 
-                total_score = mix_score + vibe_score - artist_penalty
+                wordplay_bonus = APPROVED_WORDPLAY_BONUS if (
+                    current_node["id"], candidate["id"]
+                ) in (approved_wordplay_edges or ()) else 0.0
+                total_score = mix_score + vibe_score - artist_penalty + wordplay_bonus
 
-                if total_score > best_score:
+                if total_score > best_score or (
+                    total_score == best_score and best_next is not None and candidate["id"] < best_next["id"]
+                ):
                     best_score = total_score
                     best_next = candidate
             
@@ -86,7 +108,8 @@ class SetlistBuilder:
         pool: List[Dict[str, Any]],
         start_node: Dict[str, Any],
         end_node: Dict[str, Any],
-        steps: int
+        steps: int,
+        approved_wordplay_edges=None,
     ) -> List[Track]:
         """
         Pathfinding (Bridge Mode): StartとEndの間を滑らかに埋める
@@ -110,17 +133,16 @@ class SetlistBuilder:
             
             for candidate in pool:
                 if candidate["id"] in used_ids: continue
+                only_from = candidate.get("wordplay_only_from_ids")
+                if only_from and current_node["id"] not in only_from:
+                    continue
                 
                 # 1. Mixability from Current
                 mix_score = self._calculate_transition_score(current_node, candidate)
                 
                 # 2. Vector Similarity to End Node (Guide towards goal)
-                goal_sim = 0.0
-                if candidate["vector"] is not None and end_node["vector"] is not None:
-                     dot = np.dot(candidate["vector"], end_node["vector"])
-                     nA = np.linalg.norm(candidate["vector"])
-                     nB = np.linalg.norm(end_node["vector"])
-                     if nA and nB: goal_sim = dot / (nA * nB)
+                goal_sim = cosine_similarity(candidate["vector"], end_node["vector"],
+                                             candidate.get("embedding_model"), end_node.get("embedding_model"))
 
                 # 3. Param proximity to interpolation target
                 param_score = 0.0
@@ -130,6 +152,8 @@ class SetlistBuilder:
                 
                 # Weighted Sum
                 total_score = (mix_score * 1.5) + (goal_sim * 1.0) + (param_score * 0.5)
+                if (current_node["id"], candidate["id"]) in (approved_wordplay_edges or ()):
+                    total_score += APPROVED_WORDPLAY_BONUS
                 
                 if total_score > best_score:
                     best_score = total_score
@@ -147,12 +171,8 @@ class SetlistBuilder:
 
     def _calculate_transition_score(self, current: Dict[str, Any], candidate: Dict[str, Any]) -> float:
         """ラッパー: utilsの計算ロジックを呼び出す"""
-        vec_sim = 0.0
-        if current["vector"] is not None and candidate["vector"] is not None:
-            dot = np.dot(current["vector"], candidate["vector"])
-            nA = np.linalg.norm(current["vector"])
-            nB = np.linalg.norm(candidate["vector"])
-            if nA and nB: vec_sim = dot / (nA * nB)
+        vec_sim = cosine_similarity(current["vector"], candidate["vector"],
+                                    current.get("embedding_model"), candidate.get("embedding_model"))
             
         return calculate_mixability_score(
             target_bpm=current["track"].bpm,

@@ -8,7 +8,7 @@ import { WordTab } from "./tabs/WordTab";
 
 interface TrackSelectorProps {
   referenceTrack: Track | null;
-  onAddTrack: (track: Track) => void;
+  onAddTrack: (track: Track, wordplayData?: any) => void;
   onInjectTracks: (tracks: Track[], startId?: number, endId?: number) => void;
   currentSetlistTracks: Track[];
   bridgeState?: {

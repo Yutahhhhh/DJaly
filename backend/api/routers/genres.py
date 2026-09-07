@@ -10,6 +10,7 @@ from api.schemas.genres import (
     GenreCleanupGroup,
     GenreCleanupRequest,
     GenreApplyRequest,
+    GenreAnalysisApplyRequest,
     GenreBatchUpdateResponse,
     AnalysisMode
 )
@@ -91,6 +92,23 @@ def batch_update_genres(
         return service.batch_update_genres(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/api/genres/apply-analyses")
+def apply_genre_analyses(
+    request: GenreAnalysisApplyRequest,
+    session: Session = Depends(get_session)
+):
+    """
+    外部モデル(例: Gemini Gem)が判定したジャンル/サブジャンル結果を一括適用する。
+    各要素: track_id, genre, subgenre, confidence, reason。
+    """
+    service = GenreAppService(session)
+    results = service.apply_genre_analyses(
+        [item.model_dump() for item in request.analyses],
+        request.mode,
+        request.overwrite,
+    )
+    return {"results": [r.model_dump() for r in results]}
 
 @router.get("/api/genres/cleanup-suggestions", response_model=List[GenreCleanupGroup])
 def get_cleanup_suggestions(

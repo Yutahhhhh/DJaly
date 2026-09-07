@@ -91,11 +91,9 @@ class AudioAnalyzer:
 
             if self.embedding_algo:
                 try:
-                    audio_for_emb = self._extract_loudest_section(audio, 60)
-                    embeddings = self.embedding_algo(audio_for_emb)
-                    if embeddings.ndim == 2:
-                        result["embedding"] = np.mean(embeddings, axis=0).tolist()
-                        result["embedding_model"] = "msd-musicnn-1"
+                    embedding = self._extract_embedding(audio)
+                    result.update({k: v for k, v in embedding.items() if k != "features_extra"})
+                    result.setdefault("features_extra", {}).update(embedding["features_extra"])
                 except Exception as e:
                     logger.warning(f"Embedding failed: {e}")
 
@@ -103,6 +101,63 @@ class AudioAnalyzer:
         except Exception as e:
             print(f"ERROR processing {filepath}: {e}", flush=True)
             return None
+
+    def _extract_embedding(self, audio: np.ndarray) -> Dict[str, Any]:
+        if self.embedding_algo is None:
+            raise RuntimeError("MusiCNN model is unavailable")
+        section = self._extract_loudest_section(audio, 60)
+        section = es.Resample(inputSampleRate=constants.SAMPLE_RATE,
+                              outputSampleRate=constants.EMBEDDING_SAMPLE_RATE, quality=1)(section)
+        embeddings = self.embedding_algo(section)
+        if embeddings.ndim != 2 or not embeddings.size or not np.isfinite(embeddings).all():
+            raise ValueError("MusiCNN returned invalid embeddings")
+        return {
+            "embedding": np.mean(embeddings, axis=0).tolist(),
+            "embedding_model": constants.EMBEDDING_MODEL,
+            "features_extra": {
+                "embedding_sample_rate": constants.EMBEDDING_SAMPLE_RATE,
+                "embedding_pipeline_version": constants.EMBEDDING_PIPELINE_VERSION,
+            },
+        }
+
+    def analyze_selected(self, filepath: str, features: List[str]) -> Dict[str, Any]:
+        """Read audio once and compute only requested components; never read/write tags."""
+        if not features or set(features) - constants.COMPONENT_VERSIONS.keys():
+            raise ValueError("Unknown or empty analysis components")
+        audio = self._load_audio(filepath)
+        if audio is None or not len(audio):
+            raise ValueError("Audio could not be decoded")
+        result: Dict[str, Any] = {"features_extra": {}}
+        extra = result["features_extra"]
+        if "embedding" in features:
+            embedding = self._extract_embedding(audio)
+            extra.update(embedding.pop("features_extra"))
+            result.update(embedding)
+        if "rhythm" in features:
+            bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
+            result["bpm"] = round(float(bpm), 2)
+            extra.update(bpm_confidence=float(confidence), beat_positions=ticks.tolist())
+        if "key" in features:
+            key, scale, strength = self.key_extractor(audio)
+            result.update(key=f"{key} {scale}", scale=scale)
+            extra["key_strength"] = float(strength)
+        if "waveform" in features:
+            extra["waveform_peaks"] = self._compute_waveform_peaks(audio, 500)
+        if "timbre" in features:
+            raw = self._extract_timbre_features(audio)
+            def norm(value, bounds):
+                return round(float(np.clip((value - bounds[0]) / (bounds[1] - bounds[0]), 0, 1)), 2)
+            result.update(
+                energy=norm(raw["energy"], constants.NORM_ENERGY),
+                danceability=norm(raw["danceability"], constants.NORM_DANCEABILITY),
+                brightness=norm(raw["brightness"], constants.NORM_BRIGHTNESS),
+                noisiness=norm(raw["noisiness"], constants.NORM_NOISINESS),
+                contrast=round((norm(raw["flux"], constants.NORM_FLUX) + norm(raw["loudness_range"], constants.NORM_LOUDNESS_RANGE)) / 2, 2),
+                loudness=round(float(raw["loudness"]), 1), loudness_range=float(raw["loudness_range"]),
+                spectral_flux=float(raw["flux"]), spectral_rolloff=float(raw["rolloff"]),
+            )
+        extra["analysis_components"] = {f: constants.COMPONENT_VERSIONS[f] for f in features}
+        return result
 
     def _extract_loudest_section(self, audio: np.ndarray, duration_sec: int) -> np.ndarray:
         sr = constants.SAMPLE_RATE
@@ -135,6 +190,13 @@ class AudioAnalyzer:
     def _extract_features(self, audio: np.ndarray) -> Dict[str, Any]:
         bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
         key, scale, key_strength = self.key_extractor(audio)
+        return {
+            "bpm": bpm, "beat_positions": ticks, "bpm_confidence": confidence,
+            "key": key, "scale": scale, "key_strength": key_strength,
+            **self._extract_timbre_features(audio),
+        }
+
+    def _extract_timbre_features(self, audio: np.ndarray) -> Dict[str, Any]:
         loudness_algo = es.LoudnessEBUR128(sampleRate=constants.SAMPLE_RATE)
         loudness_out = loudness_algo(np.stack([audio, audio], axis=1))
         
@@ -146,8 +208,6 @@ class AudioAnalyzer:
                 flux_values.append(self.flux_algo(spec))
 
         return {
-            "bpm": bpm, "beat_positions": ticks, "bpm_confidence": confidence,
-            "key": key, "scale": scale, "key_strength": key_strength,
             "energy": np.mean(self.rms_algo(audio)),
             "danceability": self.danceability_algo(audio)[0],
             "brightness": self.centroid_algo(audio),
@@ -173,7 +233,7 @@ class AudioAnalyzer:
             "year": int(str(tag.year).strip()[:4]) if tag.year and str(tag.year).strip()[:4].isdigit() else None,
             "lyrics": lyrics_val,
             "duration": safe_s(tag.duration or 0.0),
-            "bpm": round(features['bpm'] * 2) / 2,
+            "bpm": round(float(features['bpm']), 2),
             "key": f"{features['key']} {features['scale']}",
             "scale": features['scale'],
             "energy": round(norm(features['energy'], *constants.NORM_ENERGY), 2),

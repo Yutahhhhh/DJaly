@@ -158,6 +158,48 @@ def _result_dict(result) -> dict:
     return json.loads(text)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["generate_auto_setlist", "recommend_next_track"])
+async def test_setlist_tools_apply_year_constraints(mcp_session, session, tool_name):
+    source = _add_track(session, "/year/source.mp3", "Source", year=2020)
+    expected = _add_track(session, "/year/1995.mp3", "1995", year=1995)
+    _add_track(session, "/year/2005.mp3", "2005", year=2005)
+    _add_track(session, "/year/unknown.mp3", "Unknown", year=None)
+    args = {"year_min": 1990, "year_max": 1999, "target_noisiness": 0.1}
+    if tool_name == "recommend_next_track":
+        args["track_id"] = source.id
+    else:
+        args["length"] = 3
+    data = _result_dict(await mcp_session.call_tool(tool_name, args))
+    assert [track["id"] for track in data["tracks"]] == [expected.id]
+
+
+@pytest.mark.asyncio
+async def test_selective_analysis_job_over_mcp(mcp_session, session, tmp_path, mocker):
+    from app.services.analysis_job_service import AnalysisJobService
+    from domain.services.analysis.constants import EMBEDDING_MODEL, EMBEDDING_PIPELINE_VERSION
+    track = _add_track(session, "/analysis/song.mp3", "Keep title", genre="House")
+    def analyze(path, features):
+        assert path == track.filepath and features == ["embedding"]
+        return {"embedding": [0.1] * 200, "embedding_model": EMBEDDING_MODEL,
+                "features_extra": {"embedding_pipeline_version": EMBEDDING_PIPELINE_VERSION}}, 0.01
+    service = AnalysisJobService(session.bind, str(tmp_path / "jobs.sqlite3"), analyze)
+    mocker.patch("mcp_server.tools.analysis.analysis_job_service", service)
+    plan = _result_dict(await mcp_session.call_tool("plan_track_analysis", {"track_ids": [track.id]}))
+    assert plan["selected_tracks"] == 1
+    started = _result_dict(await mcp_session.call_tool("start_track_analysis", {"track_ids": [track.id], "workers": 1}))
+    await asyncio.to_thread(service._thread.join, 5)
+    assert not service.is_running
+    status = _result_dict(await mcp_session.call_tool("get_track_analysis_status", {"job_id": started["id"]}))
+    assert status["status"] == "completed"
+    assert status["counts"]["completed"] == 1
+    session.rollback()
+    session.expire_all()
+    assert session.get(Track, track.id).title == "Keep title"
+    invalid = await mcp_session.call_tool("start_track_analysis", {"features": ["lyrics"]})
+    assert invalid.is_error and "features" in invalid.content[0].text
+
+
 # ---------------------------------------------------------------------------
 # プロトコル疎通
 # ---------------------------------------------------------------------------
@@ -177,7 +219,11 @@ async def test_list_tools_returns_all_tools(mcp_session):
     """list_tools で全ツールが返り、MCP-client reasoning toolsが含まれることを検証する。"""
     result = await mcp_session.list_tools()
     names = [t.name for t in result.tools]
-    assert len(names) == 34
+    assert len(names) == 45
+    assert {"list_wordplay_pairs", "propose_wordplay_pairs", "approve_wordplay_pair", "reject_wordplay_pair"}.issubset(names)
+    assert {"register_track_lyrics", "register_track_lyrics_batch"}.issubset(names)
+    assert {"plan_track_analysis", "start_track_analysis", "get_track_analysis_status",
+            "pause_track_analysis", "resume_track_analysis"}.issubset(names)
     for expected in [
         "search_tracks",
         "list_setlists",
@@ -747,3 +793,36 @@ async def test_e2e_search_to_setlist_export(mcp_session, session: Session):
     assert "/music/e1.mp3" in data["m3u8"]
     assert "/music/e2.mp3" in data["m3u8"]
     assert "/music/e3.mp3" not in data["m3u8"]
+
+
+@pytest.mark.asyncio
+async def test_wordplay_review_generate_save_and_reject_over_mcp(mcp_session, session):
+    source = _add_track(session, '/mcp-wordplay/source.mp3', 'Source')
+    target = _add_track(session, '/mcp-wordplay/target.mp3', 'Target')
+    proposal = {
+        'from_track_id': source.id, 'to_track_id': target.id,
+        'keyword': 'yeah', 'source_phrase': 'yeah', 'target_phrase': 'yeah',
+        'source_section_position': 'end', 'target_section_position': 'start',
+        'from_timestamp': 60.0, 'to_timestamp': 4.0,
+        'target_intro_timestamp': 0.5,
+    }
+    created = _result_dict(await mcp_session.call_tool('propose_wordplay_pairs', {'pairs': [proposal]}))
+    pair = created['items'][0]
+    assert pair['status'] == 'pending'
+    pending = _result_dict(await mcp_session.call_tool('list_wordplay_pairs', {'status': 'pending'}))
+    assert pending['total'] == 1
+    _result_dict(await mcp_session.call_tool('approve_wordplay_pair', {'pair_id': pair['id']}))
+    generated = _result_dict(await mcp_session.call_tool('generate_auto_setlist', {
+        'length': 2, 'seed_track_ids': [source.id],
+    }))
+    assert json.loads(generated['tracks'][1]['wordplay_json'])['from_track_id'] == source.id
+    saved = _result_dict(await mcp_session.call_tool('create_setlist', {'name': 'Wordplay MCP'}))
+    result = _result_dict(await mcp_session.call_tool('set_setlist_tracks', {
+        'setlist_id': saved['id'], 'track_data': generated['tracks'],
+    }))
+    assert json.loads(result['tracks'][1]['wordplay_json'])['pair_id'] == pair['id']
+    _result_dict(await mcp_session.call_tool('reject_wordplay_pair', {'pair_id': pair['id']}))
+    assert _result_dict(await mcp_session.call_tool('list_wordplay_pairs', {}))['total'] == 0
+    persisted = _result_dict(await mcp_session.call_tool('get_setlist_tracks', {'setlist_id': saved['id']}))
+    assert len(persisted['tracks']) == 2
+    assert persisted['tracks'][1]['wordplay_json'] is not None

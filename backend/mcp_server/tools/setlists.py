@@ -51,11 +51,31 @@ def get_setlist_tracks(setlist_id: int) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def set_setlist_tracks(setlist_id: int, track_ids: List[int]) -> Dict[str, Any]:
-    """セットリストの曲構成を指定した track_id の並び順に一括で置き換える（既存の曲構成は破棄される）。"""
+def set_setlist_tracks(
+    setlist_id: int,
+    track_ids: Optional[List[int]] = None,
+    track_data: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """曲構成を一括で置き換える。track_ids または track_data の一方を指定する。
+    生成結果の承認済みワードプレイを保存する場合は、返された tracks を
+    track_data に渡すと id と wordplay_json を保持する。既存の曲構成は置換される。
+    """
+    if (track_ids is None) == (track_data is None):
+        raise ValueError("Specify exactly one of track_ids or track_data")
+    entries: List[Any] = track_ids if track_ids is not None else []
+    if track_data is not None:
+        entries = []
+        for track in track_data:
+            if type(track.get("id")) is not int:
+                raise ValueError("Each track_data entry requires an integer id")
+            annotation = track.get("wordplay_json")
+            if annotation is not None:
+                if not isinstance(annotation, str) or not isinstance(json.loads(annotation), dict):
+                    raise ValueError("wordplay_json must be a JSON object encoded as a string")
+            entries.append({"id": track["id"], "wordplay_json": annotation})
     with db_session() as session:
         service = SetlistAppService(session)
-        ok = service.update_setlist_tracks(setlist_id, track_ids)
+        ok = service.update_setlist_tracks(setlist_id, entries)
         if not ok:
             raise ValueError(f"Setlist {setlist_id} not found")
         return track_list_payload(service.get_setlist_tracks(setlist_id))
@@ -99,10 +119,14 @@ def recommend_next_track(
     target_energy: Optional[float] = None,
     target_danceability: Optional[float] = None,
     target_brightness: Optional[float] = None,
+    target_noisiness: Optional[float] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """指定した曲の次に繋ぐのに適した楽曲を、BPM/キー/音響類似度からスコアリングして提案する。
     ユーザーの自然言語の方向性はMCPクライアント側で target_* 値へ解釈する。
     target未指定なら純粋にベクトル/BPM/キーのみで評価する。
+    year_min/year_max は候補曲のリリース年の範囲（両端を含む）。指定時は年不明の曲を除く。
     """
     with db_session() as session:
         service = SetlistAppService(session)
@@ -114,6 +138,9 @@ def recommend_next_track(
                 "energy": target_energy,
                 "danceability": target_danceability,
                 "brightness": target_brightness,
+                "noisiness": target_noisiness,
+                "year_min": year_min,
+                "year_max": year_max,
             },
             genres=genres,
             subgenres=subgenres,
@@ -133,6 +160,9 @@ def generate_auto_setlist(
     target_energy: Optional[float] = None,
     target_danceability: Optional[float] = None,
     target_brightness: Optional[float] = None,
+    target_noisiness: Optional[float] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """構造化された音響特徴量ターゲットに基づき、セットリスト候補を自動生成する
     （DBには保存しない、結果一覧を返すのみ。保存するには set_setlist_tracks を別途呼ぶこと）。
@@ -141,6 +171,8 @@ def generate_auto_setlist(
     曲数は length で指定、min_length/max_length を渡すとその範囲でランダムに決定する。
     length 未指定時は UI 設定のデフォルト曲数（setlist_default_length）を使用する。
     seed_track_ids を渡すとその曲群の流れを引き継いで生成する。
+    year_min/year_max は追加候補曲のリリース年の範囲（両端を含む）。指定時は年不明の曲を除く。
+    明示したシード曲は指定順で優先し、年代・ジャンルの候補条件からは除外する。
     """
     with db_session() as session:
         service = SetlistAppService(session)
@@ -150,6 +182,9 @@ def generate_auto_setlist(
                 "energy": target_energy,
                 "danceability": target_danceability,
                 "brightness": target_brightness,
+                "noisiness": target_noisiness,
+                "year_min": year_min,
+                "year_max": year_max,
             },
             limit=length,
             min_length=min_length,
@@ -205,10 +240,14 @@ def add_track_to_setlist_with_wordplay(
     keyword: Optional[str] = None,
     source_phrase: Optional[str] = None,
     target_phrase: Optional[str] = None,
+    source_cue_mode: Optional[str] = None,
     from_timestamp: Optional[float] = None,
+    source_cue_end_timestamp: Optional[float] = None,
     to_timestamp: Optional[float] = None,
+    target_intro_timestamp: Optional[float] = None,
+    target_landing_timestamp: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """セットリストに1曲をワードプレイ情報（繋ぎのキーワードとフレーズ）付きで追加する。"""
+    """セットリストに1曲をCue打ち・イントロ・着地位置付きで追加する。"""
     with db_session() as session:
         service = SetlistAppService(session)
         current = service.get_setlist_tracks(setlist_id)
@@ -224,10 +263,18 @@ def add_track_to_setlist_with_wordplay(
             wp["source_phrase"] = source_phrase
         if target_phrase is not None:
             wp["target_phrase"] = target_phrase
+        if source_cue_mode is not None:
+            wp["source_cue_mode"] = source_cue_mode
         if from_timestamp is not None:
             wp["from_timestamp"] = from_timestamp
+        if source_cue_end_timestamp is not None:
+            wp["source_cue_end_timestamp"] = source_cue_end_timestamp
         if to_timestamp is not None:
             wp["to_timestamp"] = to_timestamp
+        if target_intro_timestamp is not None:
+            wp["target_intro_timestamp"] = target_intro_timestamp
+        if target_landing_timestamp is not None:
+            wp["target_landing_timestamp"] = target_landing_timestamp
 
         entry: Dict[str, Any] = {"id": track_id}
         if wp:
@@ -244,7 +291,7 @@ def add_track_to_setlist_with_wordplay(
 
 @mcp.tool()
 def update_setlist_track_wordplay(setlist_track_id: int, wordplay: Dict[str, Any]) -> Dict[str, Any]:
-    """セットリスト内の曲にワードプレイ情報を設定する。wordplay は {keyword, source_phrase, target_phrase, from_timestamp, to_timestamp} 形式の dict。"""
+    """セットリスト内の曲にCue打ち・イントロ・着地を含むワードプレイ情報を設定する。"""
     from domain.models.setlist import SetlistTrack
 
     with db_session() as session:

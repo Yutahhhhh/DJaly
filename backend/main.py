@@ -12,12 +12,16 @@ from api.routers import (
     tracks,
     lyrics,
     metadata,
-    mcp_info
+    mcp_info,
+    wordplay,
+    performance_metadata,
 )
 from mcp_server.server import mcp_app_holder
 from mcp_server.instance import mcp as mcp_server
 
 from config import settings
+from app.services.analysis_job_service import analysis_job_service
+import asyncio
 import os
 
 # Lifespan event to handle startup/shutdown
@@ -30,6 +34,7 @@ async def lifespan(app: FastAPI):
     mcp_app_holder.refresh()
     async with mcp_server.session_manager.run():
         yield
+    await asyncio.to_thread(analysis_job_service.shutdown)
     checkpoint_db()  # WAL を本体へ畳み込む (肥大抑制の補助)
     close_db() # 終了時にDB接続を閉じる
 
@@ -69,6 +74,8 @@ app.include_router(tracks.router)
 app.include_router(lyrics.router)
 app.include_router(metadata.router)
 app.include_router(mcp_info.router)
+app.include_router(wordplay.router)
+app.include_router(performance_metadata.router)
 
 # MCP サーバーを /mcp にマウント (外部の MCP クライアントが Streamable HTTP で接続する)
 app.mount("/", mcp_app_holder)

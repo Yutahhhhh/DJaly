@@ -10,6 +10,9 @@ async def ingest_files(req: IngestRequest):
     Start ingestion background task.
     Returns immediately. Client should monitor progress via WebSocket.
     """
+    from app.services.analysis_job_service import analysis_job_service
+    if analysis_job_service.is_running:
+        return {"status": "error", "message": "Audio analysis is running; pause it before importing"}
     if ingestion_manager.is_running:
         return {"status": "error", "message": "Ingestion already running"}
     

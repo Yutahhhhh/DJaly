@@ -7,6 +7,7 @@ import re
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
 from domain.constants import EMBEDDING_DIM
+from utils.embedding import LEGACY_MODELS, embedding_space
 
 class TrackRepository:
     def __init__(self, session: Session):
@@ -94,6 +95,10 @@ class TrackRepository:
                 .order_by(similarity_order)
                 .limit(limit)
             )
+            if embedding_space(target_embedding.model_name) == "musicnn":
+                query = query.where(or_(TrackEmbedding.model_name.in_(LEGACY_MODELS), TrackEmbedding.model_name == None))
+            else:
+                query = query.where(TrackEmbedding.model_name == target_embedding.model_name)
             
             results = self.session.exec(query).all()
             

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { MusicLibrary } from "@/components/music-library";
 import { SettingsView } from "@/components/settings-view";
@@ -16,14 +16,21 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { Updater } from "@/components/Updater";
 import { Toaster } from "@/components/ui/toast";
 import { usePlayerStore } from "@/stores/playerStore";
+import { WordplayView } from "@/components/wordplay";
+import { PerformanceView } from "@/components/performance";
+import { djEngineClient } from "@/services/dj-engine/client";
 
 function App() {
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState(() =>
+    sessionStorage.getItem("djaly.activeView") ?? "dashboard"
+  );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isServerReady, setIsServerReady] = useState(false);
+  const previousView = useRef(activeView);
+  const [releasingPerformanceAudio, setReleasingPerformanceAudio] = useState(false);
 
   // Music Player State
-  const { currentTrack } = usePlayerStore();
+  const { currentTrack, pause } = usePlayerStore();
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
 
   // Server Health Check
@@ -45,6 +52,32 @@ function App() {
     };
     checkServer();
   }, []);
+
+  // Performance mode owns audio output. Stop the browser preview path before
+  // entering it so gain/EQ are never applied to two independent players.
+  useEffect(() => {
+    sessionStorage.setItem("djaly.activeView", activeView);
+    if (activeView === "performance") {
+      pause();
+      setReleasingPerformanceAudio(false);
+    }
+    if (previousView.current === "performance" && activeView !== "performance" && djEngineClient.getSessionId()) {
+      // Deliberate navigation away is an audio-safety boundary. A full webview
+      // reload still leaves the native process playing and reconnectable.
+      setReleasingPerformanceAudio(true);
+      void Promise.allSettled([djEngineClient.pause("A"), djEngineClient.pause("B")])
+        .then(async (outcomes) => {
+          if (outcomes.some((outcome) => outcome.status === "rejected")) {
+            await djEngineClient.stop();
+          }
+          setReleasingPerformanceAudio(false);
+        })
+        .catch((failure) => {
+          console.error("Native DJ audio could not be released; browser player remains disabled", failure);
+        });
+    }
+    previousView.current = activeView;
+  }, [activeView, pause]);
 
   if (!isServerReady) {
     return <LoadingScreen />;
@@ -70,6 +103,10 @@ function App() {
         return <TagManager />;
       case "mcp":
         return <McpView />;
+      case "wordplay":
+        return <WordplayView />;
+      case "performance":
+        return <PerformanceView />;
       case "settings":
         return <SettingsView />;
       default:
@@ -92,15 +129,15 @@ function App() {
           <div className="flex-1 overflow-hidden relative">{renderView()}</div>
 
           {/* Spacer for Music Player when active to prevent content overlap */}
-          {currentTrack && <div className="h-24 shrink-0" />}
+          {currentTrack && activeView !== "performance" && !releasingPerformanceAudio && <div className="h-24 shrink-0" />}
         </main>
 
         {/* Global Components */}
         <GlobalProgressIndicator />
 
-        <MusicPlayer
-          onLoadingChange={setIsPlayerLoading}
-        />
+        {activeView !== "performance" && !releasingPerformanceAudio && (
+          <MusicPlayer onLoadingChange={setIsPlayerLoading} />
+        )}
         <Toaster />
       </div>
       </MetadataProvider>

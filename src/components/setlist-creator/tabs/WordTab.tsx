@@ -12,11 +12,14 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlayerStore } from "@/stores/playerStore";
 import { PlayButton } from "@/components/ui/PlayButton";
 import { normalizeLyricsTimeTags } from "@/lib/utils";
+import { WordplayPair, wordplayService } from "@/services/wordplay";
+import { getErrorDetail } from "@/services/api-client";
 
 interface WordTabProps {
   sourceTrack: Track | null;
@@ -32,8 +35,57 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
   const [searching, setSearching] = useState(false);
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(true);
+  const [approvedPairs, setApprovedPairs] = useState<WordplayPair[]>([]);
+  const [loadingApproved, setLoadingApproved] = useState(false);
+  const [approvedError, setApprovedError] = useState<string | null>(null);
 
   const { currentTrack, isPlaying } = usePlayerStore();
+
+  useEffect(() => {
+    if (!sourceTrack) {
+      setApprovedPairs([]);
+      setApprovedError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setApprovedPairs([]);
+    setApprovedError(null);
+    const loadApproved = async (quiet = false) => {
+      if (!quiet) setLoadingApproved(true);
+      try {
+        const result = await wordplayService.list({
+          status: "approved",
+          from_track_id: sourceTrack.id,
+          limit: 100,
+          offset: 0,
+        });
+        if (!cancelled) {
+          setApprovedPairs(result.items);
+          setApprovedError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to load approved wordplay", error);
+          setApprovedError(getErrorDetail(error));
+        }
+      } finally {
+        if (!cancelled) setLoadingApproved(false);
+      }
+    };
+
+    loadApproved();
+    const timer = window.setInterval(() => loadApproved(true), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sourceTrack?.id]);
+
+  const visibleApprovedPairs = useMemo(
+    () => approvedPairs.filter((pair) => pair.from_track_id === sourceTrack?.id),
+    [approvedPairs, sourceTrack?.id]
+  );
 
   // 選択されたキーワードが最初に登場するタイムスタンプを特定
   const firstKeywordTimestamp = useMemo(() => {
@@ -112,6 +164,28 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
       target_phrase: matchedText,
       from_timestamp: firstKeywordTimestamp,
       to_timestamp: targetTs,
+    });
+  };
+
+  const handleAddApproved = (pair: WordplayPair) => {
+    if (!pair.to_track) return;
+    onAddTrack(pair.to_track, {
+      pair_id: pair.id,
+      from_track_id: pair.from_track_id,
+      to_track_id: pair.to_track_id,
+      keyword: pair.keyword,
+      source_phrase: pair.source_phrase,
+      target_phrase: pair.target_phrase,
+      from_timestamp: pair.from_timestamp,
+      to_timestamp: pair.to_timestamp,
+      source_cue_end_timestamp: pair.source_cue_end_timestamp,
+      target_intro_timestamp: pair.target_intro_timestamp,
+      target_landing_timestamp: pair.target_landing_timestamp,
+      source_cue_mode: pair.source_cue_mode,
+      transition_notes: pair.transition_notes,
+      source_url: pair.source_url,
+      evidence_type: pair.evidence_type,
+      verification_status: pair.verification_status,
     });
   };
 
@@ -221,6 +295,92 @@ export function WordTab({ sourceTrack, onAddTrack }: WordTabProps) {
           </Button>
         </div>
       </div>
+
+      {/* Approved registry connections are available even when lyrics are missing. */}
+      <section className="shrink-0 border-b bg-primary/[0.025]" aria-label="承認済みワードプレイ">
+        <div className="flex items-center justify-between px-4 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+              Approved Wordplay
+            </span>
+            {visibleApprovedPairs.length > 0 && (
+              <Badge variant="secondary" className="text-[10px]">{visibleApprovedPairs.length}</Badge>
+            )}
+          </div>
+          {loadingApproved && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        {approvedError ? (
+          <div className="flex items-start gap-1.5 px-4 pb-3 text-[10px] text-destructive" role="alert">
+            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>承認済みワードプレイを取得できませんでした: {approvedError}</span>
+          </div>
+        ) : visibleApprovedPairs.length > 0 ? (
+          <div className="max-h-48 space-y-2 overflow-y-auto px-3 pb-3">
+            {visibleApprovedPairs.map((pair) => (
+              <div key={pair.id} className="rounded-lg border bg-card p-3 shadow-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="max-w-28 truncate text-[9px]">
+                        {pair.keyword}
+                      </Badge>
+                      <span className="truncate text-xs font-bold" title={pair.to_track?.title}>
+                        {pair.to_track?.title || `削除済みの曲（ID: ${pair.to_track_id}）`}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-[10px] text-muted-foreground">
+                      {pair.to_track?.artist || "ライブラリにありません"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground">
+                      <span className="rounded bg-muted px-1.5 py-0.5">
+                        1 Cue “{pair.source_phrase || pair.keyword}”
+                      </span>
+                      <span aria-hidden="true">→</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5">
+                        2 次曲イントロ
+                      </span>
+                      <span aria-hidden="true">→</span>
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+                        3 着地 “{pair.target_phrase || pair.keyword}”
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {pair.to_track && (
+                      <PlayButton
+                        track={pair.to_track}
+                        timestamp={pair.target_intro_timestamp ?? pair.target_landing_timestamp ?? pair.to_timestamp}
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        iconClassName="h-3 w-3"
+                        showPauseWhenPlaying
+                      />
+                    )}
+                    <Button
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
+                      disabled={!pair.to_track}
+                      onClick={() => handleAddApproved(pair)}
+                    >
+                      <LinkIcon className="h-3 w-3" /> Connect
+                    </Button>
+                  </div>
+                </div>
+                {pair.transition_notes && (
+                  <p className="mt-2 line-clamp-2 border-t pt-2 text-[10px] text-muted-foreground">
+                    {pair.transition_notes}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : !loadingApproved ? (
+          <p className="px-4 pb-3 text-[10px] text-muted-foreground">
+            この曲から使える承認済みワードプレイはありません。
+          </p>
+        ) : null}
+      </section>
 
       {/* Lyrics Display */}
       <div

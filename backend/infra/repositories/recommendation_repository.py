@@ -2,8 +2,10 @@ from typing import List, Tuple, Optional, Dict, Any
 from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
+from utils.embedding import LEGACY_MODELS, embedding_space
 import numpy as np
 import json
+import math
 
 class RecommendationRepository:
     def __init__(self, session: Session):
@@ -13,13 +15,25 @@ class RecommendationRepository:
         if not embedding_json:
             return None
         try:
-            vec = np.array(json.loads(embedding_json))
-            return vec if vec.size > 0 else None
+            vec = np.array(json.loads(embedding_json), dtype=float)
+            return vec if vec.ndim == 1 and vec.size > 0 and np.isfinite(vec).all() else None
         except:
             return None
 
-    def get_candidate_vectors(self, mode: str = "genre") -> np.ndarray:
+    @staticmethod
+    def _model_condition(model_name):
+        if embedding_space(model_name) == "musicnn":
+            return TrackEmbedding.model_name.in_(LEGACY_MODELS) | (TrackEmbedding.model_name == None)
+        return TrackEmbedding.model_name == model_name
+
+    def get_embedding_model(self, track_id: int) -> str:
+        emb = self.session.get(TrackEmbedding, track_id)
+        return embedding_space(emb.model_name if emb else None)
+
+    def get_candidate_vectors(self, mode: str = "genre", model_name=None) -> np.ndarray:
         query = select(TrackEmbedding.embedding_json).join(Track)
+        if model_name is not None:
+            query = query.where(self._model_condition(model_name))
         if mode == "subgenre":
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
         else:
@@ -30,8 +44,10 @@ class RecommendationRepository:
         vectors = [v for v in vectors if v is not None]
         return np.array(vectors) if vectors else np.array([])
 
-    def get_candidates_with_ids(self, mode: str = "genre") -> Tuple[List[int], np.ndarray]:
+    def get_candidates_with_ids(self, mode: str = "genre", model_name=None) -> Tuple[List[int], np.ndarray]:
         query = select(Track.id, TrackEmbedding.embedding_json).join(TrackEmbedding)
+        if model_name is not None:
+            query = query.where(self._model_condition(model_name))
         if mode == "subgenre":
             query = query.where((Track.subgenre == None) | (Track.subgenre == ""))
         else:
@@ -48,17 +64,19 @@ class RecommendationRepository:
         return ids, np.array(vectors) if vectors else np.array([])
 
     def get_parent_vectors(self) -> List[Tuple[int, np.ndarray]]:
-        stmt = select(Track.id, TrackEmbedding.embedding_json).join(TrackEmbedding).where(Track.is_genre_verified == True)
+        stmt = select(Track.id, TrackEmbedding.embedding_json, TrackEmbedding.model_name).join(TrackEmbedding).where(Track.is_genre_verified == True)
         results = self.session.exec(stmt).all()
         parents = []
-        for tid, emb in results:
+        for tid, emb, model in results:
             vec = self._parse_embedding(emb)
             if vec is not None:
-                parents.append((tid, vec))
+                parents.append((tid, vec, embedding_space(model)))
         return parents
 
-    def get_verified_tracks_with_embeddings(self, exclude_track_id: int = None) -> List[Tuple[str, np.ndarray]]:
+    def get_verified_tracks_with_embeddings(self, exclude_track_id: int = None, model_name=None) -> List[Tuple[str, np.ndarray]]:
         query = select(Track.genre, TrackEmbedding.embedding_json).join(TrackEmbedding).where(Track.is_genre_verified == True)
+        if model_name is not None:
+            query = query.where(self._model_condition(model_name))
         if exclude_track_id:
             query = query.where(Track.id != exclude_track_id)
         
@@ -87,7 +105,8 @@ class RecommendationRepository:
         if isinstance(value, bool):
             return None
         try:
-            return float(value)
+            number = float(value)
+            return number if math.isfinite(number) else None
         except (TypeError, ValueError):
             return None
 
@@ -97,7 +116,8 @@ class RecommendationRepository:
         genres: Optional[List[str]] = None,
         subgenres: Optional[List[str]] = None,
         limit: int = 200,
-        exclude_ids: List[int] = None
+        exclude_ids: List[int] = None,
+        candidate_ids: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         """
         指定された構造化ターゲットとジャンルに基づき、歌詞情報とリリース年を含めて候補を取得
@@ -107,7 +127,7 @@ class RecommendationRepository:
                 t.id, t.title, t.artist, t.bpm, t.key, t.genre, t.subgenre,
                 t.duration, t.album, t.filepath, t.year,
                 t.energy, t.danceability, t.brightness, t.loudness, t.contrast, t.noisiness,
-                te.embedding_json,
+                te.embedding_json, te.model_name,
                 (l.content IS NOT NULL AND length(trim(l.content)) > 0) as db_has_lyrics
             FROM tracks t
             LEFT JOIN track_embeddings te ON t.id = te.track_id
@@ -115,6 +135,13 @@ class RecommendationRepository:
             WHERE 1=1
         """
         params = {}
+        order_clauses = []
+
+        if candidate_ids is not None:
+            if not candidate_ids:
+                return []
+            query_str += " AND t.id IN :candidate_ids"
+            params["candidate_ids"] = tuple(candidate_ids)
 
         if exclude_ids:
             query_str += " AND t.id NOT IN :exclude_ids"
@@ -132,11 +159,23 @@ class RecommendationRepository:
 
         target_bpm = self._to_float(target_params.get("bpm"))
         if target_bpm is not None and target_bpm > 0:
-            query_str += " AND (t.bpm BETWEEN :min_bpm AND :max_bpm OR t.bpm = 0 OR t.bpm IS NULL)"
-            params["min_bpm"] = target_bpm * 0.6
-            params["max_bpm"] = target_bpm * 1.4
+            # Use the same half/double-time interpretations as the transition scorer.
+            tempo_distance = """CASE WHEN t.bpm > 0 AND isfinite(t.bpm) THEN LEAST(
+                ABS(LOG2(t.bpm / :target_bpm)),
+                ABS(LOG2(t.bpm / :target_bpm) - 1),
+                ABS(LOG2(t.bpm / :target_bpm) + 1)
+            ) ELSE 1000 END"""
+            params["target_bpm"] = target_bpm
+            params["max_tempo_distance"] = math.log2(1.4)
+            query_str += f" AND (({tempo_distance}) <= :max_tempo_distance OR t.bpm = 0 OR t.bpm IS NULL)"
+            order_clauses.append(tempo_distance)
 
-        order_clauses = []
+        for name, operator in (("year_min", ">="), ("year_max", "<=")):
+            year = self._to_float(target_params.get(name))
+            if year is not None:
+                query_str += f" AND t.year {operator} :{name}"
+                params[name] = int(year)
+
         target_energy = self._to_float(target_params.get("energy"))
         if target_energy is not None:
             query_str += " AND t.energy BETWEEN :min_energy AND :max_energy"
@@ -145,15 +184,16 @@ class RecommendationRepository:
             order_clauses.append("ABS(t.energy - :order_energy)")
             params["order_energy"] = target_energy
 
-        target_danceability = self._to_float(target_params.get("danceability"))
-        if target_danceability is not None:
-            order_clauses.append("ABS(t.danceability - :order_danceability)")
-            params["order_danceability"] = target_danceability
+        for feature in ("danceability", "brightness", "noisiness"):
+            target = self._to_float(target_params.get(feature))
+            if target is not None:
+                order_clauses.append(f"COALESCE(ABS(t.{feature} - :order_{feature}), 1.0)")
+                params[f"order_{feature}"] = target
 
         if order_clauses:
-            query_str += " ORDER BY (" + " + ".join(order_clauses) + ") ASC"
+            query_str += " ORDER BY (" + " + ".join(order_clauses) + ") ASC, t.id ASC"
         else:
-            query_str += " ORDER BY t.created_at DESC"
+            query_str += " ORDER BY t.created_at DESC, t.id ASC"
 
         query_str += " LIMIT :pool_limit"
         params["pool_limit"] = int(limit)
@@ -178,6 +218,7 @@ class RecommendationRepository:
                 "id": row.id,
                 "track": track_obj,
                 "vector": vec,
+                "embedding_model": row.model_name,
                 "has_lyrics": has_ly # 辞書側にもセット（サービス層での利用を確実に）
             })
             

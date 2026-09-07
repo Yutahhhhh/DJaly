@@ -1,0 +1,22 @@
+[package]
+name = "dj-engine-host"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "Djaly ネイティブ DJ エンジンホスト（Phase 0: プロトコル契約とシミュレータ）"
+publish = false
+
+[lib]
+name = "dj_engine_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dj-engine-sim"
+path = "src/bin/dj-engine-sim.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2

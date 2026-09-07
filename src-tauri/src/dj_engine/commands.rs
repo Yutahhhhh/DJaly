@@ -1,0 +1,72 @@
+//! webview へ公開する型付きコマンド。
+//!
+//! ここでは **バイナリのパスを引数に取らない**。実行対象はスーパーバイザが
+//! 環境変数か開発時のビルド出力からのみ決める（任意コマンド実行の経路を作らない）。
+//! ブロッキング処理は `spawn_blocking` に逃がし、UI スレッドを止めない。
+
+use std::sync::Arc;
+
+use serde_json::Value;
+use tauri::{AppHandle, State};
+
+use super::supervisor::{EngineConnection, EngineReply, EngineStatus, EngineSupervisor};
+
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(task).await {
+        Ok(result) => result,
+        Err(error) => Err(format!("エンジン処理タスクが失敗しました: {error}")),
+    }
+}
+
+/// エンジンが使えるかどうかを常に返す。未インストールでもエラーにしない。
+#[tauri::command]
+pub async fn dj_engine_status(
+    state: State<'_, Arc<EngineSupervisor>>,
+) -> Result<EngineStatus, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || Ok(supervisor.status())).await
+}
+
+/// 明示的なオプトイン起動。既に動いていれば現状を返す。
+#[tauri::command]
+pub async fn dj_engine_start(
+    app: AppHandle,
+    state: State<'_, Arc<EngineSupervisor>>,
+    output_device: Option<String>,
+) -> Result<EngineStatus, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || supervisor.start(&app, output_device)).await
+}
+
+#[tauri::command]
+pub async fn dj_engine_stop(
+    state: State<'_, Arc<EngineSupervisor>>,
+) -> Result<EngineStatus, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || supervisor.stop()).await
+}
+
+/// webview の再読み込み後に呼ぶ。セッションを張り直してスナップショットを返す。
+#[tauri::command]
+pub async fn dj_engine_connect(
+    state: State<'_, Arc<EngineSupervisor>>,
+) -> Result<EngineConnection, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || supervisor.connect()).await
+}
+
+/// 1 コマンドを送る。`session_id` は connect が返したものに限る。
+#[tauri::command]
+pub async fn dj_engine_send(
+    state: State<'_, Arc<EngineSupervisor>>,
+    session_id: String,
+    op: String,
+    params: Option<Value>,
+) -> Result<EngineReply, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || supervisor.send(&session_id, &op, params.unwrap_or(Value::Null))).await
+}

@@ -1,6 +1,6 @@
 [package]
 name = "djaly"
-version = "0.4.0"
+version = "0.4.7"
 description = "Djaly Music Library"
 authors = ["you"]
 edition = "2021"

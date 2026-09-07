@@ -1,7 +1,7 @@
 {
   "name": "djaly",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.7",
   "type": "module",
   "scripts": {
     "docker:start": "colima start djaly --cpu 5 --memory 8",
@@ -15,6 +15,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "concurrently -k -n backend,tauri \"pnpm backend:dev\" \"TAURI_SKIP_SIDECAR=1 pnpm exec tauri dev\"",
+    "dj-engine:build": "bash native/mixxx-engine-host/scripts/build-macos.sh",
+    "dj-engine:stage": "bash native/mixxx-engine-host/scripts/stage-macos.sh",
+    "tauri:build:performance": "test -x native/mixxx-engine-host/stage/DJalyMixxxHost.app/Contents/MacOS/djaly-mixxx-engine-host && pnpm exec tauri build --config src-tauri/tauri.mixxx.conf.json && bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh",
     "release": "./scripts/release.sh",
     "pre-release": "./scripts/verify-release.sh",
     "restore:db": "cp db_data/djaly.duckdb \"$HOME/Library/Application Support/Djaly/djaly.duckdb\"",

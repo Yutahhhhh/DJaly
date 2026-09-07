@@ -1,5 +1,7 @@
 from typing import Any, Dict, Optional
 
+from app.services.lyrics_app_service import LyricsRegistration, register_lyrics
+
 from mcp_server.instance import mcp, db_session, serialize
 
 
@@ -49,3 +51,33 @@ def find_wordplay_links(track_id: int, keywords: list[str], limit: int = 20) -> 
                     "timestamp": r["timestamp"],
                 })
         return {"track_id": track_id, "keywords": normalized_keywords, "links": links}
+
+
+
+@mcp.tool()
+def register_track_lyrics(
+    track_id: int,
+    content: str,
+    source: str = "user",
+    language: Optional[str] = None,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """1曲の歌詞本文（LRC可）・出典・言語をDBに登録する。音源ファイルは変更しない。
+    既存歌詞は標準でスキップ。意図して置換する場合のみ overwrite=true。
+    空の本文は不可。search_tracks で対象IDを確認してから使用する。
+    """
+    item = LyricsRegistration(track_id=track_id, content=content, source=source, language=language)
+    with db_session() as session:
+        return register_lyrics(session, [item], overwrite)["results"][0]
+
+
+@mcp.tool()
+def register_track_lyrics_batch(
+    items: list[LyricsRegistration], overwrite: bool = False,
+) -> Dict[str, Any]:
+    """歌詞を1〜100曲まとめてDBに登録する。各項目は track_id, content, source, language。
+    既存歌詞は標準でスキップし、音源は変更しない。曲ごとの処理結果を返す。
+    不正な入力・重複ID・存在しない曲があればバッチ全体を登録しない。
+    """
+    with db_session() as session:
+        return register_lyrics(session, items, overwrite)

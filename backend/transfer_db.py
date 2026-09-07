@@ -45,6 +45,7 @@ def migrate_data(from_db_path: str, to_db_path: str):
             "presets",
             "setlists",
             "setlist_tracks",
+            "wordplay_pairs",
             "settings"
         ]
 
@@ -77,7 +78,8 @@ def migrate_data(from_db_path: str, to_db_path: str):
             "seq_prompts_id": "prompts",
             "seq_presets_id": "presets",
             "seq_setlists_id": "setlists",
-            "seq_setlist_tracks_id": "setlist_tracks"
+            "seq_setlist_tracks_id": "setlist_tracks",
+            "seq_wordplay_pairs_id": "wordplay_pairs"
         }
 
         print("Synchronizing sequences using nextval pumping...")

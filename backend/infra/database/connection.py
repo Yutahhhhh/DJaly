@@ -1,5 +1,6 @@
 from sqlmodel import create_engine, Session, text, select
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
+from sqlalchemy import event
 import os
 import threading
 from config import settings
@@ -14,11 +15,31 @@ DATABASE_URL = f"duckdb:///{DB_PATH}"
 
 # エンジン初期化 (設定を固定)
 connect_args = {'config': {'worker_threads': 4, 'access_mode': 'READ_WRITE'}}
-engine = create_engine(
-    DATABASE_URL, 
-    poolclass=NullPool,
-    connect_args=connect_args
-)
+def create_library_engine(database_url):
+    # DuckDB connections must not race while opening/closing the same file.
+    # Keep bounded persistent connections instead of closing on every request.
+    # Multiple leases keep a slow metadata request from blocking all searches.
+    db_engine = create_engine(
+        database_url,
+        poolclass=QueuePool,
+        pool_size=8,
+        max_overflow=0,
+        pool_timeout=120,
+        connect_args=connect_args,
+    )
+    open_lock = threading.Lock()
+
+    @event.listens_for(db_engine, "do_connect")
+    def serialized_connect(dialect, record, args, kwargs):
+        # QueuePool can create its initial connections from several threads.
+        # Serialize that lifecycle step, not SQL execution or audio inference.
+        with open_lock:
+            return dialect.connect(*args, **kwargs)
+
+    return db_engine
+
+
+engine = create_library_engine(DATABASE_URL)
 
 db_lock = threading.RLock()
 

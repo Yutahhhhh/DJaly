@@ -27,6 +27,7 @@ db_data/
 backend/.venv
 backend/**/__pycache__/
 backend/venv
+**/__pycache__/
 
 # Backend build artifacts
 backend/build/

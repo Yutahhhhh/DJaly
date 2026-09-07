@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "platform": "macos",
+  "audio_devices": [
+    {
+      "object_id": 42,
+      "uid": "fixture-ddj-1000",
+      "name": "Pioneer DJ DDJ-1000",
+      "family": "ddj_1000",
+      "input_channels": 10,
+      "output_channels": 10,
+      "nominal_sample_rate_hz": 44100.0,
+      "available_sample_rates": [{ "min_hz": 44100.0, "max_hz": 48000.0 }]
+    },
+    {
+      "object_id": 43,
+      "uid": "fixture-srt",
+      "name": "DDJ-1000SRT",
+      "family": "ddj_1000_srt",
+      "input_channels": 10,
+      "output_channels": 10,
+      "nominal_sample_rate_hz": 48000.0,
+      "available_sample_rates": [{ "min_hz": 48000.0, "max_hz": 48000.0 }]
+    }
+  ],
+  "midi_sources": [
+    {
+      "endpoint_ref": 91,
+      "unique_id": 1001,
+      "name": "DDJ-1000 MIDI",
+      "family": "ddj_1000",
+      "direction": "source"
+    }
+  ],
+  "midi_destinations": []
+}

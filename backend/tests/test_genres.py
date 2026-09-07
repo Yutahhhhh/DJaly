@@ -247,3 +247,38 @@ def test_get_all_subgenres(client: TestClient, session: Session):
     assert "Deep House" in subgenres
     assert len(subgenres) == 2
     assert "" not in subgenres
+
+
+def test_apply_analyses_endpoint_updates_tracks(client: TestClient, session: Session):
+    session.exec(delete(Track))
+    session.commit()
+
+    t1 = Track(filepath="/aa1.mp3", title="Mamushi", artist="Megan Thee Stallion",
+               genre="Unknown", bpm=81, duration=100)
+    t2 = Track(filepath="/aa2.mp3", title="Track Two", artist="B",
+               genre="", bpm=126, duration=100)
+    session.add(t1)
+    session.add(t2)
+    session.commit()
+    t1_id, t2_id = t1.id, t2.id
+
+    response = client.post("/api/genres/apply-analyses", json={
+        "analyses": [
+            {"track_id": t1_id, "genre": "Hip Hop", "subgenre": "Trap",
+             "confidence": "High", "reason": "catalog + bpm 81"},
+            {"track_id": t2_id, "genre": "House", "subgenre": "Tech House",
+             "confidence": "Medium", "reason": "126 four-on-floor"},
+        ],
+        "mode": "both",
+        "overwrite": False,
+    })
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+
+    session.refresh(t1)
+    session.refresh(t2)
+    assert t1.genre == "Hip-Hop"  # service normalizes "Hip Hop" via GENRE_ALIASES
+    assert t1.subgenre == "Trap"
+    assert t1.is_genre_verified is True
+    assert t2.genre == "House"
+    assert t2.subgenre == "Tech House"

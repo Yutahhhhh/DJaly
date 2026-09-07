@@ -65,3 +65,15 @@ class GenreCleanupGroup(BaseModel):
 
 class GenreApplyRequest(BaseModel):
     track_ids: List[int]
+
+class GenreAnalysisApplyItem(BaseModel):
+    track_id: int
+    genre: Optional[str] = None
+    subgenre: Optional[str] = None
+    confidence: str = "Medium"
+    reason: str = ""
+
+class GenreAnalysisApplyRequest(BaseModel):
+    analyses: List[GenreAnalysisApplyItem]
+    mode: AnalysisMode = AnalysisMode.BOTH
+    overwrite: bool = False

@@ -16,10 +16,14 @@ SEQUENCES = {
     "seq_tracks_id": "tracks",
     "seq_setlists_id": "setlists",
     "seq_setlist_tracks_id": "setlist_tracks",
+    "seq_wordplay_pairs_id": "wordplay_pairs",
 }
 
 # 再構築時にそのままコピーできる (変換不要の) テーブル
-PLAIN_TABLES = ["tracks", "lyrics", "setlists", "setlist_tracks", "settings", "schema_info"]
+PLAIN_TABLES = [
+    "tracks", "lyrics", "setlists", "setlist_tracks", "wordplay_pairs",
+    "track_performance_metadata", "settings", "schema_info"
+]
 # 再構築時に行単位の変換が必要なテーブル
 CONVERTED_TABLES = ["track_analyses", "track_embeddings"]
 ALL_TABLES = PLAIN_TABLES + CONVERTED_TABLES
@@ -38,6 +42,20 @@ MIGRATIONS = {
         "DROP TABLE IF EXISTS prompts",
     ],
 }
+
+# Additive fields that must also reach databases already marked schema v4. These
+# do not require the file rebuild associated with a schema-version migration.
+COMPATIBILITY_STATEMENTS = [
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS "
+    "source_section_position VARCHAR DEFAULT 'unknown'",
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS "
+    "target_section_position VARCHAR DEFAULT 'unknown'",
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS "
+    "source_cue_mode VARCHAR DEFAULT 'section_end'",
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS source_cue_end_timestamp DOUBLE",
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS target_intro_timestamp DOUBLE",
+    "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS target_landing_timestamp DOUBLE",
+]
 
 
 def get_table_ddl() -> Dict[str, str]:
@@ -131,6 +149,45 @@ def get_table_ddl() -> Dict[str, str]:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "wordplay_pairs": """
+            CREATE TABLE IF NOT EXISTS wordplay_pairs (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_wordplay_pairs_id'),
+                from_track_id INTEGER NOT NULL,
+                to_track_id INTEGER NOT NULL,
+                keyword VARCHAR NOT NULL,
+                normalized_keyword VARCHAR NOT NULL,
+                source_phrase VARCHAR NOT NULL,
+                target_phrase VARCHAR NOT NULL,
+                source_section_position VARCHAR NOT NULL DEFAULT 'unknown',
+                target_section_position VARCHAR NOT NULL DEFAULT 'unknown',
+                source_cue_mode VARCHAR NOT NULL DEFAULT 'section_end',
+                from_timestamp DOUBLE,
+                source_cue_end_timestamp DOUBLE,
+                to_timestamp DOUBLE,
+                target_intro_timestamp DOUBLE,
+                target_landing_timestamp DOUBLE,
+                transition_notes VARCHAR NOT NULL DEFAULT '',
+                source_url VARCHAR NOT NULL DEFAULT '',
+                evidence_type VARCHAR NOT NULL DEFAULT 'hypothesis',
+                verification_status VARCHAR NOT NULL DEFAULT 'unverified',
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_wordplay_pair_direction_keyword
+                    UNIQUE (from_track_id, to_track_id, normalized_keyword)
+            )
+        """,
+        "track_performance_metadata": """
+            CREATE TABLE IF NOT EXISTS track_performance_metadata (
+                track_id INTEGER PRIMARY KEY,
+                cue_points_json VARCHAR NOT NULL DEFAULT '[]',
+                loops_json VARCHAR NOT NULL DEFAULT '[]',
+                beat_grid_json VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "settings": """
             CREATE TABLE IF NOT EXISTS settings (
                 key VARCHAR PRIMARY KEY,
@@ -183,6 +240,8 @@ def init_raw_db(conn_engine: Engine):
     try:
         with conn_engine.begin() as conn:
             for stmt in get_schema_statements():
+                conn.execute(text(stmt))
+            for stmt in COMPATIBILITY_STATEMENTS:
                 conn.execute(text(stmt))
 
             current_version = get_current_schema_version(conn)

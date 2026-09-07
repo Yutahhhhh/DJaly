@@ -1,5 +1,6 @@
 import json
 import asyncio
+import math
 from typing import List, Dict, Any
 from datetime import datetime
 from sqlmodel import Session, select, text
@@ -38,11 +39,20 @@ class IngestionRepository:
                 track_id = existing_track.id
                 if update_metadata:
                     for k, v in track_update_data.items():
+                        # Partial metadata updates must not erase absent audio features.
+                        if k not in result:
+                            continue
                         if isinstance(v, str) and v and v.lower() != "unknown":
                             setattr(existing_track, k, v)
-                        elif k in ["bpm", "energy", "danceability"] and isinstance(v, (int, float)) and v > 0:
-                            setattr(existing_track, k, v)
                         elif k == "year" and isinstance(v, int) and v > 0:
+                            setattr(existing_track, k, v)
+                        elif k in {
+                            "bpm", "duration", "energy", "danceability", "brightness",
+                            "contrast", "noisiness", "loudness", "loudness_range",
+                            "spectral_flux", "spectral_rolloff",
+                        } and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                            if k in {"bpm", "duration"} and v <= 0:
+                                continue
                             setattr(existing_track, k, v)
             else:
                 final_data = {}
@@ -87,12 +97,14 @@ class IngestionRepository:
             if "embedding" in result and result["embedding"]:
                 emb = session.get(TrackEmbedding, track_id)
                 new_emb_json = json.dumps(result["embedding"])
+                new_model = result.get("embedding_model") or (emb.model_name if emb else "musicnn")
                 if emb is None:
-                    emb = TrackEmbedding(track_id=track_id, embedding_json=new_emb_json)
+                    emb = TrackEmbedding(track_id=track_id, embedding_json=new_emb_json, model_name=new_model)
                     emb.updated_at = datetime.now()
                     session.add(emb)
-                elif emb.embedding_json != new_emb_json:
+                elif emb.embedding_json != new_emb_json or emb.model_name != new_model:
                     emb.embedding_json = new_emb_json
+                    emb.model_name = new_model
                     emb.updated_at = datetime.now()
                     session.add(emb)
 

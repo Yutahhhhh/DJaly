@@ -76,7 +76,8 @@ def update_track_genre(track_id: int, genre: str) -> Dict[str, Any]:
         service = TrackAppService(session)
         track = service.update_genre(track_id, genre)
         if not track:
-            raise ValueError(f"Track {track_id} not found")
+            from mcp.server.mcpserver.exceptions import ToolError
+            raise ToolError(f"Track {track_id} not found")
         return serialize(track)
 
 

@@ -43,25 +43,43 @@ KEY_TO_CAMELOT = {
     "A Major": "11B", "A Minor": "8A",
     "A# Major": "6B", "Bb Major": "6B", "A# Minor": "3A", "Bb Minor": "3A",
     "B Major": "1B", "B Minor": "10A",
+    "Db Minor": "12A", "Gb Minor": "11A", "Ab Minor": "1A",
+    "Cb Major": "1B", "Cb Minor": "10A",
+    "E# Major": "7B", "E# Minor": "4A", "Fb Major": "12B", "Fb Minor": "9A",
+    "B# Major": "8B", "B# Minor": "5A",
 }
 
 def normalize_key(key_str: Optional[str]) -> Optional[str]:
     """Normalize key string to Camelot format (e.g. '8A')."""
-    if not key_str:
+    if not isinstance(key_str, str) or not key_str.strip():
         return None
-    key_str = key_str.strip()
-    
-    if re.match(r"^\d{1,2}[AB]$", key_str):
-        return key_str
-    
-    if key_str in KEY_TO_CAMELOT:
-        return KEY_TO_CAMELOT[key_str]
-    
-    for k, v in KEY_TO_CAMELOT.items():
-        if k.lower() in key_str.lower():
-            return v
-            
-    return None
+    key_str = key_str.strip().replace("♯", "#").replace("♭", "b")
+    camelot = key_str.upper()
+    if camelot in CAMELOT_ADJACENCY:
+        return camelot
+
+    # Match the entire key: substring matching confuses 'Db minor' with 'B Minor'.
+    match = re.fullmatch(r"([A-Ga-g])([#b]?)\s*(major|minor|maj|min|m)?", key_str, re.IGNORECASE)
+    if not match:
+        return None
+    note, accidental, scale = match.groups()
+    mode = "Minor" if scale and scale != "M" and scale.lower() in ("minor", "min", "m") else "Major"
+    return KEY_TO_CAMELOT.get(f"{note.upper()}{accidental.lower()} {mode}")
+
+
+def bpm_distance(target_bpm: float, candidate_bpm: float) -> float:
+    """Symmetric tempo distance, allowing one half/double-time interpretation.
+
+    Unknown tempo has no evidence of compatibility; never substitute 120 BPM.
+    """
+    try:
+        target, candidate = float(target_bpm), float(candidate_bpm)
+    except (TypeError, ValueError):
+        return math.inf
+    if not math.isfinite(target) or not math.isfinite(candidate) or min(target, candidate) <= 0:
+        return math.inf
+    ratio = math.log2(candidate) - math.log2(target)
+    return min(abs(ratio + shift) for shift in (-1, 0, 1))
 
 def calculate_mixability_score(
     target_bpm: float, 
@@ -77,15 +95,9 @@ def calculate_mixability_score(
     w = weights or {"bpm": 0.35, "key": 0.25, "vector": 0.4}
     
     # 1. BPM Score
-    if target_bpm <= 0: target_bpm = 120
-    if candidate_bpm <= 0: candidate_bpm = 120
-    
-    bpm_ratio = candidate_bpm / target_bpm
-    if bpm_ratio < 0.6: bpm_ratio *= 2
-    elif bpm_ratio > 1.8: bpm_ratio /= 2
-    
-    # Gaussian decay based on BPM difference
-    bpm_score = math.exp(-pow(bpm_ratio - 1, 2) / (2 * pow(0.08, 2))) 
+    # Log ratios make A -> B and B -> A equally compatible.
+    distance = bpm_distance(target_bpm, candidate_bpm)
+    bpm_score = math.exp(-0.5 * (distance / math.log2(1.08)) ** 2)
     
     # 2. Key Score
     norm_t = normalize_key(target_key)

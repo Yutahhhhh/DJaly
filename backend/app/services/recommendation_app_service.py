@@ -15,7 +15,8 @@ class RecommendationAppService:
         if target_vec is None:
             return {"suggested_genre": None, "reason": "no_embedding"}
             
-        candidates = self.repository.get_verified_tracks_with_embeddings(exclude_track_id=track_id)
+        candidates = self.repository.get_verified_tracks_with_embeddings(
+            exclude_track_id=track_id, model_name=self.repository.get_embedding_model(track_id))
         
         if not candidates:
             return {"suggested_genre": None, "reason": "no_verified_tracks"}
@@ -69,28 +70,18 @@ class RecommendationAppService:
         if not parents:
             return []
 
-        candidate_matrix = self.repository.get_candidate_vectors(mode=mode)
-        
-        if candidate_matrix.size == 0:
-            parents.sort(key=lambda x: x[0])
-            sliced_parents = parents[offset : offset + limit]
-            parent_ids = [p[0] for p in sliced_parents]
-            track_map = self.repository.get_tracks_by_ids(parent_ids)
-            
-            return [GroupedSuggestionSummary(
-                parent_track=track_map.get(pid),
-                suggestion_count=0,
-                suggestions=[]
-            ) for pid, _ in sliced_parents if pid in track_map]
-
-        candidate_norms = np.linalg.norm(candidate_matrix, axis=1)
-        candidate_norms[candidate_norms == 0] = 1e-10
-        
+        matrices = {}
         parent_stats = [] 
         
-        for pid, p_vec in parents:
+        for pid, p_vec, model in parents:
+            if model not in matrices:
+                matrix = self.repository.get_candidate_vectors(mode=mode, model_name=model)
+                norms = np.linalg.norm(matrix, axis=1) if matrix.size else np.array([])
+                norms[norms == 0] = 1e-10
+                matrices[model] = (matrix, norms)
+            candidate_matrix, candidate_norms = matrices[model]
             parent_norm = np.linalg.norm(p_vec)
-            if parent_norm == 0:
+            if parent_norm == 0 or not candidate_matrix.size:
                 parent_stats.append((pid, 0))
                 continue
                 
@@ -124,7 +115,8 @@ class RecommendationAppService:
         if parent_vec is None:
             return []
 
-        candidate_ids, candidate_matrix = self.repository.get_candidates_with_ids()
+        candidate_ids, candidate_matrix = self.repository.get_candidates_with_ids(
+            model_name=self.repository.get_embedding_model(track_id))
         if candidate_matrix.size == 0:
             return []
 
