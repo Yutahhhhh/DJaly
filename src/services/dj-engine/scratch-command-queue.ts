@@ -2,24 +2,25 @@ import type { ScratchCommand } from "../../types/dj-engine.ts";
 
 type Pending = {
   command: ScratchCommand;
+  direction: number;
   promise: Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
 
 const MAX_ACCEPTED_GESTURES = 4;
-type AcceptedGesture = { endPromise: Promise<void> | null };
+type AcceptedGesture = { endPromise: Promise<void> | null; lastPosition: number };
 
 function pending(command: ScratchCommand): Pending {
   let resolve!: () => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
-  return { command, promise, resolve, reject };
+  return { command, direction: 0, promise, resolve, reject };
 }
 
 /**
  * Serializes scratch phases without building a pointer-event-sized backlog.
- * Moves share one replaceable slot; begin/end are ordered barriers and cannot
+ * Same-direction moves share a slot; reversals and begin/end are barriers and cannot
  * be overwritten by later motion.
  */
 export class ScratchCommandQueue {
@@ -37,7 +38,7 @@ export class ScratchCommandQueue {
       if (this.accepted.size >= MAX_ACCEPTED_GESTURES) {
         return Promise.reject(new Error("scratch gesture backlog is full"));
       }
-      this.accepted.set(command.gestureId, { endPromise: null });
+      this.accepted.set(command.gestureId, { endPromise: null, lastPosition: command.positionMs });
     } else if (!lifecycle) {
       return Promise.resolve();
     } else if (command.phase === "end" && lifecycle.endPromise) {
@@ -45,13 +46,27 @@ export class ScratchCommandQueue {
     } else if (command.phase === "move" && lifecycle.endPromise) {
       return Promise.resolve();
     }
+    const gesture = this.accepted.get(command.gestureId)!;
+    const direction = Math.sign(command.positionMs - gesture.lastPosition);
     const latest = this.waiting[this.waiting.length - 1];
     if (command.phase === "move" && latest?.command.phase === "move"
-      && latest.command.gestureId === command.gestureId) {
+      && latest.command.gestureId === command.gestureId && latest.direction === direction) {
+      gesture.lastPosition = command.positionMs;
       latest.command = command;
       return latest.promise;
     }
+    // Reserve capacity for every accepted gesture's release. Never erase an
+    // extremum to hide a stalled transport; finish safely and report overload.
+    if (command.phase === "move" && this.waiting.length >= 224) {
+      const finish = pending({ ...command, phase: "end", positionMs: gesture.lastPosition });
+      gesture.endPromise = finish.promise;
+      this.waiting.push(finish);
+      void finish.promise.catch(() => {});
+      return Promise.reject(new Error("scratch trajectory backlog is full; gesture released"));
+    }
     const item = pending(command);
+    item.direction = direction;
+    gesture.lastPosition = command.positionMs;
     if (command.phase === "end") this.accepted.get(command.gestureId)!.endPromise = item.promise;
     if (!this.active) this.start(item);
     else this.waiting.push(item);

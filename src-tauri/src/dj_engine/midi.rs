@@ -34,6 +34,7 @@ pub struct MidiStatus {
     pub received: u64,
     pub sent: u64,
     pub error: Option<String>,
+    pub native_performance: super::performance_transport::Observation,
     pub display: super::jog_display::DisplayStatus,
 }
 #[derive(Clone, Serialize)]
@@ -41,8 +42,15 @@ pub struct MidiStatus {
 pub struct MidiEvent {
     pub generation: u64,
     pub messages: Vec<Vec<u8>>,
+    pub captured_us: Vec<u64>,
+    pub driver_timestamps_us: Vec<u64>,
+    pub sequences: Vec<u64>,
+    pub native_performance: bool,
 }
+// Bounded storage in the CoreMIDI callback; Vec allocation happens on the worker.
+struct CapturedPacket {generation:u64,captured_us:u64,driver_us:u64,sequence:u64,length:usize,at:Instant,bytes:[u8;1024]}
 enum Request {
+    Performance(super::performance_transport::Config),
     Lease(bool),
     Send(u64, Vec<Vec<u8>>),
 }
@@ -101,12 +109,15 @@ impl MidiController {
             let mut input: Option<MidiInputConnection<()>> = None;
             let mut output: Option<MidiOutputConnection> = None;
             let mut opened_ports = None;
-            let (incoming_tx, incoming) = mpsc::sync_channel::<(u64, Vec<u8>)>(4096);
+            let (incoming_tx, incoming) = mpsc::sync_channel::<CapturedPacket>(4096);
             let overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut lease = Instant::now();
             let mut scan = Instant::now() - Duration::from_secs(2);
             let mut enabled = false;
             let mut generation = 0;
+            let mut performance_config:Option<super::performance_transport::Config>=None;
+            let mut native:Option<super::performance_transport::Transport>=None;
+            let mut next_native_attempt=Instant::now();
             loop {
                 process_device_changes();
                 let request = match rx.recv_timeout(Duration::from_millis(4)) {
@@ -121,6 +132,7 @@ impl MidiController {
                 };
                 if let Some(request) = request {
                     match request {
+                        Request::Performance(config)=>{if performance_config.as_ref()!=Some(&config){native=None;performance_config=Some(config);next_native_attempt=Instant::now();}},
                         Request::Lease(value) => {
                             enabled = value;
                             lease = Instant::now();
@@ -201,22 +213,19 @@ impl MidiController {
                             }
                             let send = incoming_tx.clone();
                             let full = overflow.clone();
+                            let capture_origin = Instant::now();
+                            let mut input_sequence = 0u64;
                             input = Some(
                                 midi_in
                                     .connect(
                                         &ins[0],
                                         "DDJ-1000 input",
-                                        move |_, bytes, _| {
-                                            if bytes.len() <= 1024
-                                                && send
-                                                    .try_send((generation, bytes.to_vec()))
-                                                    .is_err()
-                                            {
-                                                full.store(
-                                                    true,
-                                                    std::sync::atomic::Ordering::Relaxed,
-                                                );
-                                            }
+                                        move |driver_us, bytes, _| {
+                                            if bytes.len() > 1024 {full.store(true,std::sync::atomic::Ordering::Relaxed);return;}
+                                            input_sequence += 1;
+                                            let mut packet=CapturedPacket{generation,captured_us:capture_origin.elapsed().as_micros() as u64,driver_us,sequence:input_sequence,length:bytes.len(),at:Instant::now(),bytes:[0;1024]};
+                                            packet.bytes[..bytes.len()].copy_from_slice(bytes);
+                                            if send.try_send(packet).is_err(){full.store(true,std::sync::atomic::Ordering::Relaxed);}
                                         },
                                         (),
                                     )
@@ -241,10 +250,23 @@ impl MidiController {
                     s.generation = generation;
                     s.device = connected.then(|| "DDJ-1000".into());
                 }
+                if !connected || !enabled {native=None;}
+                else {
+                    if let Some(transport)=native.as_mut(){if transport.poll().is_err(){native=None;next_native_attempt=Instant::now()+Duration::from_secs(1);}}
+                    if native.is_none()&&Instant::now()>=next_native_attempt {
+                        if let Some(config)=&performance_config {native=super::performance_transport::Transport::connect(config).ok();}
+                        next_native_attempt=Instant::now()+Duration::from_secs(1);
+                    }
+                }
+                state.lock().unwrap().native_performance=native.as_ref().map(|n|n.observation.clone()).unwrap_or_default();
+                let native_performance=native.is_some();
                 let mut messages = Vec::new();
-                while let Ok((epoch, message)) = incoming.try_recv() {
-                    if connected && enabled && epoch == generation {
-                        messages.push(message);
+                let mut captured_us=Vec::new();let mut driver_timestamps_us=Vec::new();let mut sequences=Vec::new();
+                while let Ok(packet) = incoming.try_recv() {
+                    if connected && enabled && packet.generation == generation {
+                        if let Some(transport)=native.as_mut(){if transport.send(&packet.bytes[..packet.length],packet.at).is_err(){native=None;next_native_attempt=Instant::now()+Duration::from_secs(1);}}
+                        messages.push(packet.bytes[..packet.length].to_vec());
+                        captured_us.push(packet.captured_us);driver_timestamps_us.push(packet.driver_us);sequences.push(packet.sequence);
                     }
                     if messages.len() >= 128 {
                         break;
@@ -254,13 +276,14 @@ impl MidiController {
                     state.lock().unwrap().received += messages.len() as u64;
                     sink(MidiEvent {
                         generation,
-                        messages,
+                        messages, captured_us, driver_timestamps_us, sequences, native_performance,
                     });
                 }
             }
         });
         Self { tx, status, inbox: None }
     }
+    pub fn performance(&self,config:super::performance_transport::Config)->Result<(),String>{self.tx.try_send(Request::Performance(config)).map_err(|e|e.to_string())}
     pub fn lease(&self, enabled: bool) -> Result<MidiStatus, String> {
         self.tx
             .try_send(Request::Lease(enabled))
@@ -346,7 +369,7 @@ mod tests {
             overflow: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         for i in 0..20 {
-            sender.try_send(MidiEvent { generation: 7, messages: vec![vec![0x90, 0x36, if i % 2 == 0 {127} else {0}]] }).unwrap();
+            sender.try_send(MidiEvent { native_performance:false, captured_us: vec![], driver_timestamps_us: vec![], sequences: vec![], generation: 7, messages: vec![vec![0x90, 0x36, if i % 2 == 0 {127} else {0}]] }).unwrap();
         }
         let first = inbox.read().unwrap();
         assert_eq!(first.len(), 16);
@@ -364,8 +387,8 @@ mod tests {
             receiver: Mutex::new(receiver),
             overflow: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
-        sender.try_send(MidiEvent { generation: 1, messages: vec![vec![0x90, 0x36, 127]] }).unwrap();
-        assert!(sender.try_send(MidiEvent { generation: 1, messages: vec![vec![0x90, 0x36, 0]] }).is_err());
+        sender.try_send(MidiEvent { native_performance:false, captured_us: vec![], driver_timestamps_us: vec![], sequences: vec![], generation: 1, messages: vec![vec![0x90, 0x36, 127]] }).unwrap();
+        assert!(sender.try_send(MidiEvent { native_performance:false, captured_us: vec![], driver_timestamps_us: vec![], sequences: vec![], generation: 1, messages: vec![vec![0x90, 0x36, 0]] }).is_err());
         inbox.overflow.store(true, std::sync::atomic::Ordering::SeqCst);
         assert!(inbox.read().is_err());
         assert!(inbox.read().unwrap().is_empty());
@@ -466,4 +489,13 @@ MIDIClientDispose(client)
         assert!(controller.send(0, vec![vec![0x90, 11, 255]]).is_err());
         assert!(controller.send(0, vec![vec![0x90, 11, 0]; 257]).is_err());
     }
+}
+
+#[tauri::command]
+pub async fn dj_midi_performance_config(controller:State<'_,MidiController>,engine:State<'_,Arc<super::EngineSupervisor>>,session_id:String,sensitivity:f64,ranges:[f64;4],cues:[f64;4])->Result<(),String>{
+    let engine=engine.inner().clone();
+    let reply=tauri::async_runtime::spawn_blocking(move||engine.send(&session_id,"performance.endpoint",serde_json::json!({}))).await.map_err(|e|e.to_string())??;
+    let value=reply.data.ok_or("Native input unavailable")?;
+    let config=super::performance_transport::Config{path:value["path"].as_str().ok_or("No input endpoint")?.into(),token:value["token"].as_str().ok_or("No input token")?.into(),sensitivity,ranges,cues};
+    controller.performance(config)
 }

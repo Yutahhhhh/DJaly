@@ -141,3 +141,10 @@
   .dj-workspace--vertical { --d-controls: 128px; }
   .dj-workspace--vertical.dj-workspace--four { --d-controls: 92px; }
 }
+
+/* Preserve readable detail lanes; pair expansion is an explicit user choice. */
+.dj-workspace { --d-lane: 96px; }
+.dj-workspace--compact, .dj-workspace--four { --d-lane: 48px; }
+.dj-workspace--wave-expanded .dj-scrolling-waves { display: flex; flex-direction: column; height: auto; }
+.dj-workspace--wave-expanded .dj-scrolling-waves .dj-lane--expanded { flex: 0 0 96px; }
+.dj-workspace--wave-expanded .dj-scrolling-waves .dj-lane--summary { flex: 0 0 24px; }

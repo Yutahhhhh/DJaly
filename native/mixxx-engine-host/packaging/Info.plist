@@ -8,6 +8,7 @@
   <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSBackgroundOnly</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>Junctionで参加者のMacと接続し、演奏音声と引き継ぎに必要な音源を送受信するために使用します。</string>
   <key>NSMicrophoneUsageDescription</key><string>DJプレイにマイクの音声をミックスし、出力・録音するために使用します。</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
 </dict></plist>

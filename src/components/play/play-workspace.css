@@ -359,3 +359,17 @@
 .dj-midi-popover { position: absolute; right: 0; top: 26px; z-index: 40; width: 290px; padding: 12px; display: flex; flex-direction: column; gap: 10px; border: 1px solid #43556a; border-radius: 5px; background: #111820; color: #dce6f1; font-size: 11px; box-shadow: 0 8px 24px #0008; }
 .dj-midi-popover label { display: flex; align-items: center; gap: 6px; }
 .dj-midi-popover { max-height: min(620px, 80vh); overflow-y: auto; }
+
+.dj-waveform canvas { filter: contrast(var(--wave-contrast, 1)) grayscale(var(--wave-grayscale, 0)); }
+.dj-wave-label { font-size: 12px; line-height: 20px; }
+.dj-wave-zoom { height: 24px; font-size: 11px; }
+.dj-wave-expand { position: absolute; top: 0; left: 22px; z-index: 2; min-height: 24px; padding: 2px 5px; font-size: 10px; background: #13191ddd; color: #c4d1df; }
+.dj-wave-settings { position: relative; font-size: 12px; }
+.dj-wave-settings summary { cursor: pointer; padding: 6px; }
+.dj-wave-settings > div { position: absolute; top: 100%; right: 0; z-index: 30; width: 230px; padding: 12px; background: #171d25; border: 1px solid #63758a; }
+.dj-wave-settings label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.dj-waveform:focus-within, .dj-wave-expand:focus-visible, .dj-wave-zoom:focus-visible { outline: 2px solid #dbeaff; outline-offset: -2px; }
+
+.dj-wave-grip { position: absolute; left: calc(50% + 6px); top: 35%; font-size: 14px; color: white; pointer-events: none; }
+
+.dj-wave-retry { position: absolute; bottom: 2px; right: 3px; z-index: 2; padding: 4px 8px; color: #ffd19e; background: #332419; font-size: 11px; }

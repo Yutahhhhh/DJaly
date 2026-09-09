@@ -1,3 +1,4 @@
+#include "deck_telemetry.h"
 #include "host.h"
 #include <QDir>
 #include <QJsonArray>
@@ -114,8 +115,28 @@ int deckIndex(const QString& name) {
 }
 
 Host::Host(std::unique_ptr<PlaybackBackend> backend) : backend_(std::move(backend)), engineId_(QUuid::createUuid().toString(QUuid::WithoutBraces)) {
+    junction_ = std::make_unique<junction::Runtime>(backend_.get(), this);
+    backend_->attachJunction(junction_.get());
+    performanceInput_=std::make_unique<PerformanceInput>(backend_.get(),[this](int i){return slots_[i].state;},[this]{return backend_->available()&&!junction_->active()&&!sessionId_.isEmpty();},this);
     clock_.start();
     for (int index = 0; index < 4; ++index) resetDeck(index);
+    backend_->junctionTrackPresentation = [this](int index) {
+        const auto& descriptor=slots_[index].descriptor;
+        return QJsonObject{{"title",descriptor["title"]},{"artist",descriptor["artist"]}};
+    };
+    backend_->graphDeckRestoring = [this](int index,quint64 generation,QJsonObject graph) {
+        if(index<0||index>=4)return;
+        auto& slot=slots_[index];resetDeck(index);
+        slot.generation=generation;generation_=std::max(generation_,generation);
+        slot.descriptor={};
+        if(!graph["path"].toString().isEmpty()){
+            slot.descriptor={{"path",graph["path"]},{"trackId",QString(QStringLiteral("asset:")+graph["assetId"].toString())},{"assetId",graph["assetId"]},{"localTrackId",QJsonValue::Null},
+                {"title",graph["title"].toString(QStringLiteral("Shared track"))},{"artist",graph["artist"]},
+                {"sampleRateHz",graph["sourceSampleRateHz"]},{"hotCues",graph["performance"].toObject()["hotCues"]}};
+            slot.state["status"]="loading";slot.state["loadId"]=static_cast<qint64>(generation);
+        }
+        ++rev_;event("deck.state",slot.state);
+    };
     backend_->loaded = [this](int index, quint64 generation, QJsonObject metadata, QString error) {
         // Even immediate decoder failures are delivered after the accepted reply.
         QTimer::singleShot(0, this, [this, index, generation, metadata, error] { completed(index, generation, metadata, error); });
@@ -132,6 +153,7 @@ void Host::resetDeck(int index) {
     slots_[index].state = emptyDeck(); slots_[index].state["deck"] = deckNames[index];
     slots_[index].state["scratching"] = false;
     slots_[index].transportTouched = false;
+    slots_[index].state["loadGeneration"] = double(slots_[index].generation);
     slots_[index].state["available"] = backend_->implementation() == "mixxx";
 }
 /** Mirror the engine's sync leader onto every deck, and announce the decks that
@@ -162,7 +184,7 @@ QJsonObject Host::info() const {
     QJsonArray capabilities;
     if (backend_->available()) capabilities = {"sampler", "mixer.beatfx", "mixer.colorfx", "deck.key", "deck.slip", "deck.reverse", "deck.load.async", "deck.transport", "deck.scratch", "deck.pitchbend", "deck.tempo", "deck.keylock", "deck.sync", "deck.beatgrid", "deck.hotcue", "deck.loop", "deck.beatjump", "deck.quantize", "mixer.eq", "mixer.filter", "mixer.trim", "mixer.fx", "mixer.gain", "mixer.crossfader", "recording", "audio.microphone", "audio.microphone.ducking"};
     if (backend_->audio()["pflApplied"].toBool()) capabilities.append("mixer.pfl");
-    if (backend_->available()) capabilities.append("mixer.beatfx.release");
+    if (backend_->available()) { capabilities.append("mixer.beatfx.release"); capabilities.append("deck.clock.v2"); capabilities.append("performance.midi.v2"); capabilities.append("waveform.tiles.v2"); }
     return {{"name", backend_->implementation() == "mixxx" ? "djaly-mixxx-engine-host" : "djaly-mixxx-host-unavailable"}, {"version", "0.3.0"}, {"implementation", backend_->implementation()}, {"simulated", false}, {"deterministic", false}, {"audioAvailable", backend_->available()}, {"audioProblem", backend_->problem()}, {"decks", QJsonArray{"A", "B", "C", "D"}}, {"capabilities", capabilities}, {"upstreamCommit", "3ebac449e7e5fe2a0186596657696e87ce8b0e56"}};
 }
 QJsonObject Host::envelope(const QString& kind) const {
@@ -172,7 +194,9 @@ void Host::send(QJsonObject message) const {
     const QByteArray bytes = QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n';
     if (std::fwrite(bytes.constData(), 1, bytes.size(), stdout) != static_cast<size_t>(bytes.size()) || std::fflush(stdout) != 0) std::exit(1);
 }
+Host::~Host() { backend_.reset(); junction_.reset(); }
 void Host::result(const QJsonObject& cmd, const QJsonObject& data) {
+    if (junction_ && !cmd["op"].toString().startsWith("junction.")) junction_->applied(cmd["op"].toString(), cmd["params"].toObject());
     auto message = envelope("result");
     message.insert("id", cmd["id"]); message.insert("op", cmd["op"]); message.insert("sessionId", sessionId_); message.insert("data", data); send(message);
 }
@@ -194,17 +218,22 @@ void Host::line(const QByteArray& bytes) {
     QJsonParseError parse;
     auto document = QJsonDocument::fromJson(bytes, &parse);
     if (parse.error != QJsonParseError::NoError || !document.isObject()) { malformed("Expected one JSON command object"); return; }
-    const auto cmd = document.object();
+    auto cmd = document.object();
     const auto op = cmd["op"].toString();
-    if (!integer(cmd["id"]) || !cmd["op"].isString() || (!cmd["kind"].isUndefined() && cmd["kind"] != "command")) { error(cmd, "malformed_message", "Invalid command envelope or unsafe integer id"); return; }
-    if (!cmd["protocol"].isUndefined() && cmd["protocol"] != 1) { error(cmd, "protocol_version_unsupported", "Only protocol 1 is supported"); return; }
+    if (!integer(cmd["id"]) || !cmd["op"].isString() || (!cmd.value("kind").isUndefined() && cmd.value("kind") != "command")) { error(cmd, "malformed_message", "Invalid command envelope or unsafe integer id"); return; }
+    if (!cmd.value("protocol").isUndefined() && cmd.value("protocol") != 1) { error(cmd, "protocol_version_unsupported", "Only protocol 1 is supported"); return; }
     const auto id = static_cast<quint64>(cmd["id"].toDouble());
     if (op == "session.hello") {
+        if (junction_->active() && !sessionId_.isEmpty()) {
+            lastId_ = id;
+            auto hello = envelope("hello"); hello.insert("id",cmd["id"]); hello.insert("sessionId",sessionId_); hello.insert("engine",info()); hello.insert("protocolVersions",QJsonObject{{"min",1},{"max",1}}); send(hello); return;
+        }
         for (int index = 0; index < 4; ++index) { releaseScratch(index, false); if(backend_->available()) backend_->performanceControl(index,"reverseroll",0); ++slots_[index].reverseGesture; }
         // A new renderer cannot still own a held pad from the old connection.
         const bool effectsReleased = backend_->resetFx();
         if (backend_->available()) backend_->samplerCommand("sampler.stopAll", {});
         if (effectsReleased) ++rev_;
+        performanceInput_->reset();
         const auto previous = sessionId_;
         sessionId_ = QUuid::createUuid().toString(QUuid::WithoutBraces); lastId_ = id;
         auto hello = envelope("hello"); hello.insert("id", cmd["id"]); hello.insert("sessionId", sessionId_); hello.insert("engine", info()); hello.insert("protocolVersions", QJsonObject{{"min", 1}, {"max", 1}}); send(hello);
@@ -218,6 +247,27 @@ void Host::line(const QByteArray& bytes) {
     if (cmd["sessionId"] != sessionId_) { error(cmd, "session_mismatch", "Expired or missing session"); return; }
     if (id <= lastId_) { error(cmd, "stale_command_id", "Command id must increase"); return; }
     lastId_ = id;
+    if (op.startsWith("junction.")) {
+        QString failure; const auto data = junction_->command(op.mid(9), cmd["params"].toObject(), &failure);
+        if (!failure.isEmpty()) error(cmd,"junction_rejected",failure); else result(cmd,data);
+        return;
+    }
+    if (junction_->active()) {
+        auto params = cmd["params"].toObject();
+        const auto failure = junction_->authorize(op,params);
+        if (!failure.isEmpty()) { error(cmd,"junction_rejected",failure); return; }
+        params.remove("_junction"); cmd["params"] = params;
+    }
+    if (op.startsWith("waveform.")) { result(cmd, backend_->waveformCommand(op, cmd["params"].toObject())); return; }
+    if (op == "performance.endpoint") { result(cmd,performanceInput_->endpoint());return; }
+    if (op == "engine.audioHealth") {
+        QJsonArray durations;double value;while(deckclock::callbackDurations.pop(value))durations.append(value);
+        result(cmd,{{"callbackDurationsUs",durations},{"lateCallbacks",int(deckclock::lateCallbacks.load())},{"xruns",int(deckclock::xruns.load())},{"dropped",int(deckclock::callbackDurations.dropped())}});return;
+    }
+    if (op == "engine.clock.probe") {
+        const auto received=deckclock::monotonicUs();
+        result(cmd, {{"engineEpoch",engineId_},{"receivedNativeUs",received},{"sentNativeUs",deckclock::monotonicUs()}}); return;
+    }
     if (op == "engine.ping") { result(cmd, {{"pong", true}}); return; }
     if (op == "state.snapshot") { result(cmd, snapshot()); return; }
     if (!samplerOps.contains(op) && !known.contains(op) && !deckControls.contains(op) && !mixerOps.contains(op) && op != "deck.scratch" && op != "deck.pitchbend" && op != "deck.timing.trace") { error(cmd, "unknown_op", "Unknown operation"); return; }
@@ -458,6 +508,11 @@ void Host::line(const QByteArray& bytes) {
                 std::abs(position.toDouble()) > 60000 || (phase == "begin" && position.toDouble() != 0)) {
             error(cmd, "invalid_params", "scratch requires phase begin/move/end, gestureId 1..128 characters, and finite relative positionMs within +/-60000 (begin must be zero)"); return;
         }
+        const double captured=params.value("capturedNativeUs").toDouble();
+        const bool keepalive=params.value("keepalive").toBool();
+        if(params.contains("capturedNativeUs") && (!std::isfinite(captured) || captured <= 0 || captured > deckclock::monotonicUs()+10000 || deckclock::monotonicUs()-captured>500000)) {
+            error(cmd,"invalid_params","Scratch capture clock is stale or invalid");return;
+        }
         // Input may be serviced before a delayed Qt timer. Expired moves must
         // not revive a gesture already released by the audio-clock watchdog.
         if (!slot.scratchGesture.isEmpty() && clock_.elapsed() - slot.scratchLastInputMs >= 1500) releaseScratch(index);
@@ -466,14 +521,14 @@ void Host::line(const QByteArray& bytes) {
                 // The audio mailbox generation replaces the previous gesture.
                 slot.scratchGesture = gesture;
                 slot.scratchLastPositionMs = 0;
-                backend_->scratch(index, phase, 0);
+                backend_->scratch(index, phase, 0, captured);
             }
             slot.scratchLastInputMs = clock_.elapsed();
         } else if (slot.scratchGesture == gesture) {
             slot.scratchLastInputMs = clock_.elapsed();
             slot.scratchLastPositionMs = position.toDouble();
             if (phase == "end") releaseScratch(index);
-            else backend_->scratch(index, phase, position.toDouble());
+            else backend_->scratch(index, phase, position.toDouble(), captured, keepalive);
         } else {
             // A delayed move/end must never grab or release a newer gesture.
             result(cmd, {{"deck", name}, {"accepted", false}, {"scratching", backend_->scratching(index)}}); return;
@@ -565,7 +620,7 @@ void Host::line(const QByteArray& bytes) {
 void Host::completed(int index, quint64 generation, QJsonObject metadata, QString failure) {
     auto& slot = slots_[index]; auto& deck_ = slot.state; auto& descriptor_ = slot.descriptor;
     if (generation != slot.generation || deck_["status"] != "loading") return;
-    ++rev_; deck_["loadId"] = QJsonValue::Null;
+    ++rev_; deck_["loadId"] = QJsonValue::Null; deck_["loadGeneration"] = double(generation);
     if (!failure.isEmpty()) {
         deck_["status"] = "error"; deck_["lastError"] = failure;
         event("deck.load.failed", {{"deck", deckNames[index]}, {"loadId", static_cast<qint64>(generation)}, {"trackId", descriptor_["trackId"]}, {"error", QJsonObject{{"code", "load_failed"}, {"message", failure}}}});
@@ -593,6 +648,15 @@ void Host::completed(int index, quint64 generation, QJsonObject metadata, QStrin
             track["beatTimesMs"] = times;
             if (track.contains("beatNumbers")) track["beatNumbers"] = numbers;
         }
+        if(metadata["junctionRestore"].toBool()){
+            // The backend restores graph semantics at a single paused boundary.
+            // Host mirrors metadata only; ordinary load defaults would overwrite
+            // authoritative cues, key, loop, tempo, and variable beat markers.
+            track.remove("junctionRestore");
+            deck_["track"]=track;deck_["status"]="ready";
+            event("deck.loaded",{{"deck",deckNames[index]},{"loadId",static_cast<qint64>(generation)},{"track",track}});
+            event("deck.state",deck_);return;
+        }
         const auto beatTimes = descriptorBeatTimes(track, duration);
         const bool hasConstantGrid = !hasBeatTimes && validGrid(track.value("bpm"), track.value("beatgridOffsetMs"), track.value("beatsPerBar"), duration);
         // Saved grid metadata must reach Mixxx on load, not only the waveform.
@@ -619,12 +683,21 @@ void Host::completed(int index, quint64 generation, QJsonObject metadata, QStrin
     event("deck.state", deck_);
 }
 void Host::sample() {
-    QJsonObject positions;
+    QJsonObject positions; QJsonArray clockPoints; unsigned dropped = 0;
     for (int index = 0; index < 4; ++index) {
         if (!slots_[index].scratchGesture.isEmpty() && clock_.elapsed() - slots_[index].scratchLastInputMs >= 1500) releaseScratch(index);
+        const auto batch = backend_->clockPoints(index);
+        dropped += batch["dropped"].toInt();
+        for (const auto& value : batch["points"].toArray()) {
+            auto point = value.toObject();
+            if (point["loadGeneration"].toDouble() != double(slots_[index].generation) || !slots_[index].state["track"].isObject()) continue;
+            point["deck"] = deckNames[index]; point["engineEpoch"] = engineId_;
+            clockPoints.append(point);
+        }
         const auto position = sampleDeck(index);
         if (!position.isEmpty()) positions.insert(deckNames[index], position);
     }
+    if (!clockPoints.isEmpty()) event("deck.clock.v2", {{"points", clockPoints}, {"dropped", int(dropped)}});
     if (!positions.isEmpty()) event("deck.position", {{"decks", positions}});
 }
 QJsonObject Host::sampleDeck(int index) {

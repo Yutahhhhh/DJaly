@@ -348,6 +348,7 @@ function parseDeckState(data: unknown): DeckState | null {
     ![8, 16].includes(data.hotCues.length) ||
     !data.hotCues.every((cue) => cue === null || isFiniteNumber(cue)) ||
     !isNullableString(data.lastError) ||
+    !(data.loadGeneration === undefined || Number.isSafeInteger(data.loadGeneration) && (data.loadGeneration as number) >= 0) ||
     !(data.loadId === null || Number.isSafeInteger(data.loadId))
   ) return null;
   if (data.track !== null) {

@@ -1,0 +1,23 @@
+# Run coturn on a host with public UDP reachability. Replace every placeholder.
+listening-port=3478
+tls-listening-port=5349
+realm=turn.example.invalid
+server-name=turn.example.invalid
+fingerprint
+use-auth-secret
+static-auth-secret=REPLACE_WITH_THE_SAME_RANDOM_TURN_SECRET
+# Set external-ip=PUBLIC_IP/PRIVATE_IP when behind NAT.
+min-port=49160
+max-port=49200
+cert=/etc/coturn/tls/fullchain.pem
+pkey=/etc/coturn/tls/privkey.pem
+no-cli
+no-multicast-peers
+deny-peer-ip=10.0.0.0-10.255.255.255
+deny-peer-ip=172.16.0.0-172.31.255.255
+deny-peer-ip=192.168.0.0-192.168.255.255
+deny-peer-ip=169.254.0.0-169.254.255.255
+user-quota=12
+total-quota=1024
+max-bps=1000000
+no-software-attribute

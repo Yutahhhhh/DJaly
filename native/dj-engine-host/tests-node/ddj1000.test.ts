@@ -6,7 +6,7 @@ import { Ddj1000Runtime } from "../../../src/services/midi/ddj1000-runtime.ts";
 import type { DjEngineClient } from "../../../src/services/dj-engine/client.ts";
 import type { EngineSnapshot } from "../../../src/types/dj-engine.ts";
 
-const official = JSON.parse(readFileSync(new URL("../../../docs/ddj1000-midi-map.json", import.meta.url), "utf8")) as {
+const official = JSON.parse(readFileSync(new URL("./fixtures/ddj1000-midi-map.json", import.meta.url), "utf8")) as {
   group: string; control: string; shift: string; condition: string; type: string; status_in: string; data1_in: string;
 }[];
 test("official table excludes the four phantom deck notes on all decks", () => {

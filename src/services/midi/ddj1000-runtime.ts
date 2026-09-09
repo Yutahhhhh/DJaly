@@ -1,3 +1,4 @@
+import { junctionLeaseKey, junctionState } from '../junction/state.ts';
 import { padPreset, BEAT_LOOP_PAGES, BEAT_JUMP_PAGES, keyPad } from "./pad-presets.ts";
 import { getPadSelection, selectPads, subscribePads } from "./pad-state.ts";
 import { BEAT_FX, beatFxMaxBeats } from "./beat-fx.ts";
@@ -53,6 +54,9 @@ export class Ddj1000Runtime {
   private nativeFxMixQueued = false;
   private nativeFxMixLatest: number | null = null;
   private epoch = 0;
+  private junctionKey = junctionLeaseKey();
+  private unsubscribeJunction: () => void;
+  private pickup = new Map<string, {previous?: number; acquired: boolean}>();
   private alive = true;
   private heartbeat: ReturnType<typeof setInterval>;
   private unsubscribePads: () => void;
@@ -62,6 +66,15 @@ export class Ddj1000Runtime {
   private actions: () => ControllerActions;
   constructor(client: DjEngineClient, actions: () => ControllerActions) {
     this.client = client; this.actions = actions;
+    this.unsubscribeJunction = junctionState.subscribe(() => {
+      const next = junctionLeaseKey();
+      if (next === this.junctionKey) return;
+      this.junctionKey = next; this.epoch++; this.pickup.clear();
+      this.releaseFxHeld = false; this.fxMixLatest = null; this.nativeFxMixLatest = null;
+      this.padPresses.clear(); this.cuePreview.clear(); this.heldReverse.clear(); this.heldFx.clear();
+      for (const jog of this.jogs.values()) if (jog.releaseTimer) clearTimeout(jog.releaseTimer);
+      this.jogs.clear(); for (const bend of this.bends.values()) clearTimeout(bend.timer); this.bends.clear();
+    });
     const selections = DECKS.map(getPadSelection);
     this.unsubscribePads=subscribePads(()=>{
       DECKS.forEach((deck,index)=>{
@@ -86,14 +99,14 @@ export class Ddj1000Runtime {
         // position during motion is interpreted as a stopped hand and damps
         // the velocity estimator, producing a dip every heartbeat interval.
         if (performance.now() - jog.last < 200) continue;
-        this.perform(() => this.client.scratch(deck, "move", jog.displacement, jog.id));
+        this.perform(() => this.client.scratch(deck, "move", jog.displacement, jog.id, performance.now(), true));
       }
     }, 200);
   }
   setTempoRange(deck: DeckId, percent: number) { if ([6, 10, 16, 75].includes(percent)) this.ranges.set(deck, percent / 100); }
   private trackToken(deck: DeckId) {
     const track = this.client.getState().snapshot?.decks[deck].track?.trackId;
-    return `${track ?? ""}:${this.client.getDeckGeneration(deck)}`;
+    return `${track ?? ""}:${this.client.getDeckGeneration(deck)}:${junctionLeaseKey()}`;
   }
   private valid(deck: DeckId, session: string | null, track: string) {
     return this.client.getSessionId() === session && this.trackToken(deck) === track;
@@ -109,8 +122,31 @@ export class Ddj1000Runtime {
     map.delete(deck);
     return undefined;
   }
+  private softTakeover(action: MidiAction): boolean {
+    if (!junctionState.active()) return true;
+    const {control,deck,value} = action;
+    const snapshot = this.client.getState().snapshot;
+    if (!snapshot) return false;
+    const targetDeck = /^filter[A-D]$/.test(control) ? control.slice(-1) as DeckId : deck;
+    const channel = targetDeck ? snapshot.mixer.channels[targetDeck] : undefined;
+    let target: number | undefined;
+    if (control === 'crossfader') target = (snapshot.mixer.crossfader + 1) / 2;
+    else if (control === 'gain' && channel) target = channel.gain;
+    else if (control === 'trim' && channel) target = (channel.trim ?? 1) / 2;
+    else if (control.startsWith('eq') && channel) { const gain = ({eqLow:channel.eqLow,eqMid:channel.eqMid,eqHigh:channel.eqHigh} as Record<string,number>)[control]; if (gain !== undefined) target = gain <= 1 ? gain / 2 : .5 + (gain - 1) / 6; }
+    else if ((control === 'filter' || /^filter[A-D]$/.test(control)) && channel) target = ((channel.filter ?? 0) + 1) / 2;
+    else if (control === 'tempo' && deck) target = .5 + (snapshot.decks[deck].rate - 1) / (2 * (this.ranges.get(deck) ?? .16));
+    else if (control === 'fxMix') target = snapshot.mixer.beatFx?.mix ?? .5;
+    if (target === undefined || !Number.isFinite(target)) return true;
+    const key = `${deck ?? 'master'}:${control}`;
+    const pickup = this.pickup.get(key) ?? {acquired:false};
+    if (!pickup.acquired) pickup.acquired = Math.abs(value-target) < .025 || (pickup.previous !== undefined && (pickup.previous-target)*(value-target)<=0);
+    pickup.previous=value;this.pickup.set(key,pickup);
+    if (!pickup.acquired) this.actions().error('値を合わせると操作できます');
+    return pickup.acquired;
+  }
   dispatch(action: MidiAction) {
-    if (!this.alive) return;
+    if (!this.alive || !this.softTakeover(action)) return;
     if (action.deck && action.slot !== undefined && action.mode !== undefined) {
       const key = `${action.deck}:${action.mode}:${action.slot}:${Boolean(action.shift)}`;
       if (action.pressed === false) {
@@ -506,11 +542,12 @@ export class Ddj1000Runtime {
     if (restore && this.valid(deck, bend.session, bend.track)) this.perform(() => this.client.setTempo(deck, bend.rate));
   }
   reset() {
+    this.pickup.clear();
     if (this.releaseFxHeld) {
       this.releaseFxHeld=false;
-      const session=this.client.getSessionId();
+      const session=this.client.getSessionId(), leaseKey = junctionLeaseKey();
       const release=(this.queues.get("nativeFx")??Promise.resolve()).then(()=>{
-        if(session===this.client.getSessionId()) return this.client.send("mixer.beatfx.set",{release:false});
+        if(session===this.client.getSessionId() && leaseKey === junctionLeaseKey()) return this.client.send("mixer.beatfx.set",{release:false});
       }).catch(e=>this.actions().error(String(e)));
       this.queues.set("nativeFx",release);
     }
@@ -533,5 +570,5 @@ export class Ddj1000Runtime {
     }
     this.seekPreview.clear(); this.loopIn.clear(); this.loopAdjust.clear(); this.keyPages.clear(); this.keyboardCues.clear(); this.choosingKeyboardCue.clear(); this.jumps.clear(); this.vinyl.clear();
   }
-  dispose() { this.unsubscribePads(); this.reset(); this.alive = false; clearInterval(this.heartbeat); }
+  dispose() { this.unsubscribeJunction(); this.unsubscribePads(); this.reset(); this.alive = false; clearInterval(this.heartbeat); }
 }

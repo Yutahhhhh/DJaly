@@ -1,6 +1,8 @@
 #pragma once
 
 #include "backend.h"
+#include "performance_input.h"
+#include "junction/runtime.h"
 #include <QElapsedTimer>
 #include <QJsonObject>
 #include <QObject>
@@ -10,6 +12,7 @@
 class Host final : public QObject {
 public:
     explicit Host(std::unique_ptr<PlaybackBackend> backend);
+    ~Host();
     void line(const QByteArray& line);
     void malformed(const QString& message);
 private:
@@ -29,6 +32,8 @@ private:
     QJsonObject sampleDeck(int index);
     void completed(int index, quint64 generation, QJsonObject metadata, QString error);
     std::unique_ptr<PlaybackBackend> backend_;
+    std::unique_ptr<junction::Runtime> junction_;
+    std::unique_ptr<PerformanceInput> performanceInput_;
     QElapsedTimer clock_;
     QTimer timer_;
     QString engineId_, sessionId_;

@@ -1,0 +1,13 @@
+# Junction signaling
+
+Node 22+: `npm ci && npm test && npm start` in this directory. Listens on `127.0.0.1:8787`; `/healthz` and `/readyz` expose health, `/` and `/ws` accept WebSockets. This service carries admission and SDP/ICE only. No media is stored or mixed.
+
+Configuration is validated by `src/config.ts`: `HOST`, `PORT`, `ROOM_TTL_SECONDS` (21600), `MAX_PEERS_PER_ROOM` (8, includes host and pending guests), `MAX_FRAME_BYTES` (65536 maximum), `MAX_CONNECTIONS` (1024), `MAX_ROOMS` (1024), `MAX_BUFFERED_BYTES` (262144), `FRAME_RATE_PER_SECOND`, `RELAY_RATE_PER_SECOND`, `JOIN_ATTEMPTS_PER_MINUTE`, `ALLOWED_ORIGINS` (comma separated; unset permits native clients), `TRUST_PROXY` (false), `LOG_LEVEL`. Enable proxy trust only behind a trusted proxy inaccessible to clients directly.
+
+All JSON frames use `{v:1,type:...}`; exact schemas are in `src/protocol.ts`. Initial and recovery `host.register` require an OS-random `recoverySecret` (base64url, at least 128 random bits), invite SHA256, fingerprint, and expiry in Unix milliseconds. Keep the secret locally; never put it in invitations. A reconnect proves the secret and invalidates the previous connection. The server assigns 24-hex peer IDs; clients use IDs from registration/admission for relay. `signal.deliver.fromPeerId` is derived from admitted connection identity. Claimed public fingerprints must additionally be checked against the actual WebRTC/DTLS peer identity by clients.
+
+`signaling.unavailable` means discovery/admission is unavailable; clients must preserve established P2P playback. Only explicit `room.close` emits `room.closed`. After a service restart, hosts register again. The host peer ID stays stable for the same room and native DTLS identity; new guest admissions receive new service peer IDs. Clients must separately retain native session identity.
+
+Admitted members request `{v:1,type:"turn.credentials"}` over their authenticated WSS connection. Response contains `iceServers` and `expiresAt` (Unix milliseconds). Set `TURN_URLS`, `TURN_SECRET` (32+ random characters, shared with coturn), `TURN_TTL_SECONDS` (600, maximum 3600). Without TURN configuration the list is empty. Refresh credentials before a fresh allocation after expiry.
+
+For WSS, set real `SIGNAL_DOMAIN`, `TURN_URLS`, `TURN_SECRET` and run `docker compose -f deploy/compose.yaml up --build -d`. Configure a separate coturn host using `deploy/turnserver.conf.example`; open 3478 TCP/UDP, 5349 TCP and 49160–49200 UDP, provide real certificates and public-IP mapping. `example.invalid` is a placeholder. No production endpoint is supplied. Verify direct ICE and forced TURN from separate networks before claiming remote audio works; these tests verify signaling only.

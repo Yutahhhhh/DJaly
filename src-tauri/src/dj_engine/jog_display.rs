@@ -1,5 +1,5 @@
 //! DDJ-1000 display interoperability. Protocol observations are documented in
-//! docs/ddj1000-jog-display-research.md. No captured USB streams are replayed.
+//! the DDJ-1000 section in README.md. No captured USB streams are replayed.
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},

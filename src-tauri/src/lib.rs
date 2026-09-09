@@ -1,7 +1,18 @@
+mod waveform;
 use std::env;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
+use std::sync::Mutex;
+#[derive(Default)]
+struct JunctionInvite(Mutex<Option<String>>);
+fn valid_junction_invite(value: &str) -> bool {
+    value.len() <= 8192 && value.starts_with("djaly-junction://join?") && !value.chars().any(char::is_control)
+}
+#[tauri::command]
+fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String> {
+    state.0.lock().ok()?.take()
+}
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -55,6 +66,14 @@ pub fn run() {
 
             Ok(menu)
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
+                    api.prevent_close();
+                    let _ = window.emit("junction://close-blocked", ());
+                }
+            }
+        })
         .on_menu_event(|app, event| {
             if event.id() == "toggle_devtools" {
                 if let Some(window) = app.get_webview_window("main") {
@@ -68,9 +87,11 @@ pub fn run() {
         })
         .manage(Arc::new(dj_engine::EngineSupervisor::new()))
         // Assist mode only reads; both of these are passive state holders.
+        .manage(JunctionInvite::default())
         .manage(assist::AssistState::default())
         .manage(assist::commands::WindowBounds::default())
         .invoke_handler(tauri::generate_handler![
+            junction_pending_invite,
             assist::commands::assist_snapshot,
             assist::commands::assist_request_accessibility,
             assist::commands::assist_open_accessibility_settings,
@@ -80,14 +101,20 @@ pub fn run() {
             dj_engine::midi::dj_midi_status,
             dj_engine::midi::dj_midi_send,
             dj_engine::midi::dj_midi_read,
+            dj_engine::midi::dj_midi_performance_config,
             dj_engine::midi::dj_jog_display_update,
             dj_engine::commands::dj_engine_status,
             dj_engine::commands::dj_engine_start,
             dj_engine::commands::dj_engine_stop,
             dj_engine::commands::dj_engine_connect,
             dj_engine::commands::dj_engine_send,
+            waveform::dj_waveform_tile,
+            waveform::dj_waveform_pcm,
+            waveform::dj_waveform_manifest,
+            dj_engine::commands::junction_command,
         ])
         .setup(|app| {
+            for arg in env::args().skip(1) { if valid_junction_invite(&arg) { if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(arg); } } }
             app.manage(dj_engine::midi::controller(app.handle().clone()));
             app.manage(dj_engine::jog_display::JogDisplay::new());
             // ネイティブ DJ エンジン（Phase 0 シミュレータ）はオプトイン起動。
@@ -154,8 +181,23 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
+                if app.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
+                    api.prevent_exit(); let _ = app.emit("junction://close-blocked", ());
+                }
+            }
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls { let value = url.to_string(); if valid_junction_invite(&value) {
+                    if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(value.clone()); }
+                    let _ = app.emit("junction://invite", value);
+                    if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
+                }}
+            }
+        });
 }
 
 fn env_flag(name: &str) -> bool {

@@ -1,5 +1,5 @@
 """
-refactor/ ドキュメント (BUG-01, BUG-02, BUG-03, BUG-04, BUG-10, AI-07) の改修に対するテスト
+ライブラリ検索・解析・メタデータ修正の回帰テスト
 """
 import json
 import pytest

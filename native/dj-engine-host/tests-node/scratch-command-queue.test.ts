@@ -99,3 +99,13 @@ test("stalled IPC bounds rapid gesture backlog while accepted ends remain reliab
     "g3:begin", "g3:move", "g3:end",
   ]);
 });
+
+test("queued direction reversals survive an ACK stall", async () => {
+  const sent:ScratchCommand[]=[];const replies:(()=>void)[]=[];
+  const queue=new ScratchCommandQueue(value=>{sent.push(value);return new Promise<void>(resolve=>replies.push(resolve));});
+  const promises=[queue.enqueue(command('turn','begin',0))];await tick();
+  for(const position of [10,20,-10,-20,30])promises.push(queue.enqueue(command('turn','move',position)));
+  promises.push(queue.enqueue(command('turn','end',30)));
+  while(sent.length<5||replies.length){replies.shift()?.();await tick();}
+  await Promise.all(promises);assert.deepEqual(sent.map(p=>p.positionMs),[0,20,-20,30,30]);
+});

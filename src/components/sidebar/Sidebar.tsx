@@ -1,5 +1,6 @@
 import {
   Music,
+  BookOpen,
   Settings,
   Menu,
   Folder,
@@ -35,7 +36,7 @@ export function Sidebar({
     >
       <div className="p-4 flex items-center justify-between h-16 border-b">
         {isOpen && <span className="font-bold text-xl">Djaly</span>}
-        <Button variant="ghost" size="icon" onClick={toggleSidebar}>
+        <Button variant="ghost" size="icon" aria-label="サイドバーを開閉" onClick={toggleSidebar}>
           <Menu className="h-5 w-5" />
         </Button>
       </div>
@@ -88,6 +89,13 @@ export function Sidebar({
           label="Wordplay"
           isActive={activeView === "wordplay"}
           onClick={() => onNavigate("wordplay")}
+          isOpen={isOpen}
+        />
+        <NavButton
+          icon={<BookOpen className="h-5 w-5" />}
+          label="Docs"
+          isActive={activeView === "docs"}
+          onClick={() => onNavigate("docs")}
           isOpen={isOpen}
         />
         <NavButton

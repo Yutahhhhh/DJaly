@@ -1,3 +1,5 @@
+import { deckRealtimeStore } from "@/services/dj-engine/deck-realtime-store";
+import { createWaveformRenderLoop } from "./waveform-render-loop";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 
@@ -43,21 +45,26 @@ export function TempoPlatter(props: Props) {
   const canSetTempo = !disabled && trackBpm !== null && trackBpm > 0;
   const [drag, setDrag] = useState(false);
 
-  // 再生位置から回転角を出す。停止中は止めたままにする。
-  const [angle, setAngle] = useState(0);
+  const ring = useRef<SVGGElement>(null);
   const spin = useRef({ positionMs: props.positionMs, at: performance.now() });
-  useEffect(() => { spin.current = { positionMs: props.positionMs, at: performance.now() }; }, [props.positionMs]);
+  const state = useRef(props);
+  const invalidate = useRef(() => {});
+  state.current = props;
   useEffect(() => {
-    if (!props.playing) { setAngle((props.positionMs / REVOLUTION_MS * 360) % 360); return; }
-    let frame = 0;
-    const tick = () => {
-      const elapsed = (performance.now() - spin.current.at) * rate;
-      setAngle(((spin.current.positionMs + elapsed) / REVOLUTION_MS * 360) % 360);
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [props.playing, props.positionMs, rate]);
+    spin.current = { positionMs: props.positionMs, at: performance.now() };
+    invalidate.current();
+  }, [props.positionMs, props.playing, rate]);
+  useEffect(() => {
+    const loop = createWaveformRenderLoop(() => {
+      const elapsed = state.current.playing ? Math.min(200, Math.max(0, performance.now() - spin.current.at)) * state.current.rate : 0;
+      const angle = (deckRealtimeStore.position(state.current.deckId, performance.now())?.positionMs ?? (spin.current.positionMs + elapsed)) / REVOLUTION_MS * 360 % 360;
+      ring.current?.setAttribute("transform", `rotate(${angle} 50 50)`);
+    }, () => state.current.playing && !document.hidden);
+    invalidate.current = loop.invalidate;
+    document.addEventListener("visibilitychange", loop.invalidate);
+    loop.invalidate();
+    return () => { loop.dispose(); document.removeEventListener("visibilitychange", loop.invalidate); };
+  }, []);
 
   const applyPercent = (next: number) => {
     const clamped = Math.max(-range, Math.min(range, next));
@@ -93,7 +100,7 @@ export function TempoPlatter(props: Props) {
     role="group" aria-label={`Deck ${props.deckId} テンポ`}>
     <svg className="dj-platter-ring" viewBox="0 0 100 100" aria-hidden>
       {/* 切れ目のある白いリングと赤マーカーをまとめて回す。 */}
-      <g transform={`rotate(${angle} 50 50)`}>
+      <g ref={ring}>
         <circle className="dj-platter-ring-track" cx="50" cy="50" r="45"
           strokeDasharray="272 11" strokeDashoffset="6" />
         <rect className="dj-platter-index" x="47" y="90" width="6" height="6" rx="1" />

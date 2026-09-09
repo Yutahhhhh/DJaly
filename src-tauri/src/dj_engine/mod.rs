@@ -12,3 +12,5 @@ pub use supervisor::EngineSupervisor;
 
 pub mod midi;
 pub mod jog_display;
+
+pub mod performance_transport;

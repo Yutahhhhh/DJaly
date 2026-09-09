@@ -1,122 +1,166 @@
 # Djaly
 
-Djalyは、ローカルファーストの音楽ライブラリ管理およびDJツールです。Essentia / MusiCNNによる音響解析と、MCPクライアントと連携した楽曲管理機能を提供します。
+ローカルの音楽ライブラリを整理し、選曲・DJプレイ・rekordboxの選曲補助に使うデスクトップアプリです。Tauri / React、FastAPI / DuckDB、Essentia / MusiCNN、Mixxx音声エンジンで構成しています。
 
-## 主な機能
+Djaly自身はLLMを呼び出しません。自然言語の解釈やジャンル分類の判断は、接続したMCPクライアントが行います。
 
-- **高度な楽曲解析**: EssentiaでBPM・Key・Energy等を、MusiCNNで音響特徴をローカル解析します。
-- **MCPジャンル分類**: 接続したMCPクライアントのLLMで分類し、構造化結果をDjalyに適用します。
-- **自然言語検索**: MCPクライアントが自然言語を特徴量に変換し、Djalyが決定的に検索します。
-- **セットリスト作成支援**: 類似楽曲の提案と、MCPから指定された条件によるセットリスト自動生成。
-- **Rekordbox連携**: 作成したセットリストをM3U8形式でエクスポート可能。
+## 操作ガイド
 
-## インストール方法
+アプリの「解析」モードで、サイドバーの **Docs** を開いてください。機能別の日本語ガイド、説明用データによる画面キャプチャ、検索、画像の拡大表示を用意しています。
 
-### 1. アプリのダウンロード
-[Releasesページ](https://github.com/Yutahhhhh/Djaly/releases) から、お使いのOSに合わせたインストーラーをダウンロードしてください。
+| 画面 | 主な用途 |
+| --- | --- |
+| Dashboard / Explorer | ライブラリの状況確認、音源の取り込み・解析 |
+| Library / Tags | 曲の検索・試聴、曲情報・歌詞・ジャンルの編集 |
+| Setlists / Wordplay | 曲順の作成、候補の確認、M3U8書き出し |
+| プレイ | 2・4デッキ、波形、EQ、CUE、ループ、FX、サンプラー、録音 |
+| アシスト | rekordboxのデッキを基準に次曲を探し、元音源をドラッグ |
+| Junction（JCT） | リモートDJの参加承認、演奏状態の引き継ぎ、ホストからの配信 |
+| Settings / MCP | 音楽フォルダ、録音、CSV入出力、外部MCPクライアント接続 |
 
-- **macOS**: `.dmg` ファイル (Apple Silicon用: `aarch64`, Intel用: `x86_64`)
-- **Windows**: `.exe` または `.msi` ファイル
+![プレイ画面の例](public/docs/play.png)
 
-### 2. アプリの起動
-ダウンロードしたインストーラーを実行し、アプリをインストール・起動してください。
+CSVとM3U8には音源ファイル自体は含まれません。音源の移動・バックアップは別に行います。Tagsのファイル反映は元の音源タグを更新します。
 
-#### ⚠️ macOSをお使いの方へ（重要）
-現在、アプリへの署名（Appleによる公証）を行っていないため、インストール後に**「"Djaly"は壊れているため開けません」**というエラーが表示される場合があります。
-その場合は、以下の手順で起動してください。
+## ローカル開発
 
-1. アプリを `Applications` （アプリケーション）フォルダに移動します。
-2. `ターミナル.app` を開きます（Launchpad > その他 > ターミナル）。
-3. 以下のコマンドをコピー＆ペーストして実行（Enterキー）してください。
-   ```bash
-   xattr -cr /Applications/Djaly.app
-   ```
-4. 再度アプリをクリックして起動してください。
+フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。MixxxホストとJCTの実音声経路はmacOS / Apple Silicon向けです。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
 
-## 使い方 (User Guide)
+```bash
+pnpm install
+cd backend
+./setup.sh
+cd ..
+pnpm tauri
+```
 
-### 1. 初期設定 (Settings)
-![Settings](docs/images/settings.png)
-アプリを起動したら、まずは `Settings` 画面で以下の設定を行います。
+個別に起動する場合は `pnpm backend:dev` と `pnpm dev` を使います。開発時のバックエンドは通常 `127.0.0.1:8001`、フロントエンドは `127.0.0.1:1420` です。APIの参照先は `src/services/api-client.ts` と環境変数に集約しています。
 
-- **Music Directory**: 楽曲ファイルが保存されているルートディレクトリを指定します。
-- **AI Runtime**: Djaly自体にLLMプロバイダーやAPIキーは設定しません。ジャンル分類や自然言語の解釈には、Djaly MCPを接続したクライアントのLLMが使われます。
-- **Data Management**:
-  - **Library Data**: ライブラリ全体のバックアップや復元（インポート/エクスポート）が可能です。
-  - **Metadata**: 楽曲のメタデータのみをJSON形式でエクスポート/インポートできます。
+```bash
+pnpm build
+pnpm test:backend
+node --experimental-strip-types --test native/dj-engine-host/tests-node/*.test.ts
+cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+```
 
-### 2. 楽曲の取り込み (File Explorer)
-![File Explorer](docs/images/exploser.png)
-`File Explorer` 画面から楽曲の解析を開始します。
+音源・DB・モデル・ビルド成果物・認証情報はGitへ含めません。永続的な操作説明と開発上の前提はREADME、アプリの使い方はDocsへ置きます。一時的な調査報告、設計メモ、検証出力、サンプルのM3U8やキャプチャはリポジトリ外に保存します。実行可能な回帰テストと、そのテストが必要とするフィクスチャは保持します。
 
-- 指定したディレクトリ内の楽曲をスキャンし、データベースに取り込みます。
-- **解析エンジン**: EssentiaとMusiCNNで音響特徴量を抽出します。この処理にLLMは使いません。
-- **バックグラウンド処理**: 数千曲単位の解析もバックグラウンドで実行されます。
-- **変更検知**: ファイルパスが変更された場合や新しいファイルが追加された場合、再解析を行うことで検知・更新されます。
+## Mixxx音声ホスト
 
-### 3. タグ管理 (Tag Manager)
-楽曲のメタデータやジャンル情報を包括的に管理します。
+`native/mixxx-engine-host` が音声エンジンです。固定したMixxxのソースへアダプターを組み込みます。依存ソースの変更はビルド時に生成するヘッダー等へ限定し、取得した上流チェックアウトを直接編集しません。
 
-#### メタデータ・ジャンル編集
-![Tag Manager Info](docs/images/tag-info.png)
+```bash
+pnpm dj-engine:build
+pnpm dj-engine:stage
+pnpm exec tauri build --bundles app --no-sign --config src-tauri/tauri.mixxx.conf.json
+bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh
+```
 
-- **Track Info**: リリース年などの基本情報を編集。「Auto-Fill Dates」機能でWebから情報を自動取得・補完可能。
-- **Classification (Genre / Subgenre)**:
-  - **ジャンル解析**: MCPで楽曲情報を取得し、接続先LLMの判定結果をDjalyに適用。
-  - **表記揺れの統一**: "Hip-Hop", "Hip Hop" などの表記揺れを決定的なクリーンアップ機能で統一。
-  - **類似楽曲判定**: 解析済みの特徴量から類似楽曲を見つけ、ジャンルを推測・補完。
-- **Sync to Files**: データベース上の変更（ジャンル、歌詞、メタデータ）を、実際の楽曲ファイル（ID3タグ等）に一括書き込み。
+Apple Siliconでは `/opt/homebrew` のARM64ツールチェーンを使用します。依存バージョンは `native/mixxx-engine-host/dependency-versions.json`、固定リビジョンと取得処理はビルドスクリプトにあります。Mixxxホストを含む配布では、同梱ライブラリ・署名・対応ソースの確認も必要です。
 
-#### 歌詞管理
-![Tag Manager Lyrics](docs/images/tag-lyric.png)
+```bash
+bash native/mixxx-engine-host/scripts/package-corresponding-source.sh
+```
 
-- **Lyrics**: 歌詞情報の管理。「Auto-Fill Lyrics」機能での自動取得、手動編集に対応。
+このスクリプトは固定されたMixxx、GSL、libdatachannelとサブモジュール、Opus、libnice、SoundTouch、RubberBand、libsamplerateのソースとDjaly側のアダプター・ビルド手順をまとめます。実行には依存ソースの取得とネットワーク接続が必要です。
 
-### 4. ライブラリ管理 (Music Library)
-![Music Library](docs/images/library.png)
-取り込んだ楽曲は `Music Library` で確認・検索できます。
+### DDJ-1000・音声出力
 
-- **MCP自然言語検索**: MCPクライアントで "Chillな夕暮れ" のような条件をBPMやEnergy等に解釈し、Djalyを検索できます。
-- **範囲検索**: BPMやKey、Energyなどの特徴量パラメータを範囲指定して検索可能です。
-- **ジャンル検索**: 整理されたジャンルタグでフィルタリングできます。
+プレイ画面の「オーディオ」で出力を選択します。DDJ-1000はMASTERにUSB 1/2、ヘッドホンCUEにUSB 3/4を使います。本体のUSB A/B切替を接続先に合わせてください。MIDIの接続・ジョグ移動量・再接続はプレイ画面上部のDDJ-1000設定から行います。
 
-### 5. セットリスト作成 (Setlist Creator)
-![Setlist Creator](docs/images/setlist.png)
-DJプレイのためのセットリストを作成します。
+出力デバイスの変更では再生・録音を停止してデッキを解除します。マイクはMasterと録音へ入り、ダッキングはDJ音を下げます。録音の保存形式・保存先はSettingsで変更します。
 
-- **ライブラリから追加**: 検索結果からドラッグ＆ドロップで追加。
-- **類似楽曲提案**: 選択した楽曲に近い曲を音響ベクトル、BPM、Key等から提案します。
-- **Auto Generation**: 開始曲と終了曲（オプション）を指定すると、その間を繋ぐセットリストを自動生成します。
-- **エクスポート**: 完成したセットリストは **Rekordbox** 等で読み込めるプレイリスト形式（.m3u8）でエクスポート可能です。
+MIDIアドレスの照合データは `native/dj-engine-host/tests-node/fixtures/ddj1000-midi-map.json` に置いています。ジョグ表示の実装は `src-tauri/src/dj_engine/jog_display.rs` です。MIDI/HIDの送信数だけで実機の点灯や表示を確認したことにはしません。
 
-### 6. MCP連携
-DjalyのMCPサーバーを対応クライアントに接続すると、そのクライアントが選択しているLLMでジャンル判定、自然言語検索、セットリスト条件の解釈、歌詞ワードプレイ選定を行えます。Djalyは必要なコンテキストと決定的な検索・適用ツールだけを提供します。
+## Junction（JCT）
 
-### 7. ダッシュボード (Dashboard)
-![Dashboard](docs/images/dashboard.png)
-現在の楽曲解析状況（進捗率）、ライブラリの統計情報などを確認できます。
+JCTはホストとプレイ担当者を分けます。音声はWebRTC / Opusで送り、ホストの独立したProgram出力から遅延付きで配信します。ヘッドホンCUE・プライベート試聴はProgramへ混ぜません。共有デッキは現在のプレイ担当者が操作し、交代前の操作権を持つ入力は拒否します。
 
-### 8. ミュージックプレイヤー (Music Player)
-![Music Player](docs/images/music-player.png)
+引き継ぎでは音源をハッシュで照合し、4デッキ・64サンプラースロットとミキサーの状態を準備します。キー固定、遅延・変調系FX等は型付きのDSP状態も移送します。最終確認中は共有操作を制限し、音声照合を通過した場合に将来の時刻で操作権を切り替えます。
 
-再生中の楽曲のアートワークや歌詞を表示・編集できる高機能プレイヤーです。
+### 接続サービス
 
-- **波形表示 (Waveform)**: 楽曲の波形を可視化し、視覚的に再生位置を確認できます。
-- **アートワーク管理**:
-  - **Web取得**: 楽曲情報を元にWebからアートワークを検索・取得できます。
-- **歌詞管理 (Lyrics)**:
-  - **同期歌詞表示**: LRC形式の同期歌詞表示に対応しており、カラオケのように再生に合わせて歌詞が流れます。
-  - **編集・保存**: その場で歌詞を修正・保存できます。Webからの歌詞取得もサポートしています。
+本リポジトリは公開済みの接続先を提供しません。運用者が接続サービスと必要なTURNサーバーを用意し、アプリのJunction画面へ接続URLを入力します。
 
-### 9. アシストモード（macOS）
+```bash
+pnpm junction:signal:dev
+pnpm junction:test:contract
+pnpm junction:test:network
+```
 
-上部の「解析｜プレイ｜アシスト」から **アシスト** を選ぶと、rekordboxと並べて使う小型画面に切り替わります。
+開発用の `ws://127.0.0.1:8787` は同じMac内の確認用です。リモート接続はWSSを使います。設定・認証・TURN・Docker構成は [接続サービスのREADME](services/junction-signaling/README.md) を参照してください。音源と音声は接続サービスへ保存しません。
 
-- rekordboxのデッキにロードされた曲を、macOSのアクセシビリティから取得します。初回に案内が出た場合は、システム設定でDjalyのアクセシビリティを許可してください。OCRや画面録画は使いません。
-- 基準デッキと「グルーヴ」「展開」「ワードプレイ」を選び、候補をrekordboxのデッキの曲名部分へドラッグします。ドラッグは登録済みの元ファイルのパスを渡します。
-- 推薦はDjalyに登録された曲を対象とし、rekordbox未登録・ファイル不在の候補を除外します。ワードプレイは承認済みペアを使用し、承認と試聴確認は区別して表示します。
-- デッキへのロードを確認した曲は履歴に保存し、以後の候補から除外します。履歴はアプリを閉じても保持されます。次のセットでは「履歴をリセット」を押してください（現在デッキに載っている曲は引き続き除外されます）。再生済み判定ではなく、アシストが確認したロード履歴です。
-- ジャンル条件は「指定なし」「同一ジャンル」「同一サブジャンル」から選べます。Djalyの基準曲の分類に合わせて絞り込み、分類が未設定の場合は条件を勝手に緩めません。
-- ピンボタンで最前面表示を切り替えられます。「解析」「プレイ」に戻ると元のサイズへ戻ります。プレイからアシストへ移る際はDjalyの再生エンジンとコントローラー接続を解放します。
+初回のローカルネットワーク接続はmacOSの案内に従って許可します。設定は「システム設定 → プライバシーとセキュリティ → ローカルネットワーク」で確認できます。開発用のad-hoc署名はmacOSで識別が安定しない場合があるため、配布時にはApple発行の署名で直接接続も確認します（[Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。
 
-MASTER自動追従は未対応です。確認済みの構成はrekordbox 7.2.18の2Deck Horizontalです。別レイアウトや同名ファイルなどで曲を特定できない場合は、未確認として表示します。ブラウザ版ではデッキ取得と外部ドラッグは利用できません。
+招待には参加情報が含まれます。ホストが参加者を承認し、必要に応じて招待を再発行します。招待・復旧シークレット・TURN共有シークレットはログやGitへ残しません。
+
+### 検証
+
+```bash
+native/mixxx-engine-host/build-junction/junction-core-tests
+native/mixxx-engine-host/build-upstream/junction-fx-tests
+pnpm junction:test:integration
+```
+
+実音声の統合試験は、ビルド済みのmacOSホストとステレオのループバックデバイスを使います。既定のデバイスはBlackHole 2chです。`DJALY_MIXXX_OUTPUT_DEVICE` で変更できます。実音声の試験は同じデバイスを奪い合わないよう直列で実行します。
+
+統合試験の追加条件は以下です。
+
+- `DJALY_JUNCTION_TEST_DECKS=4`：4デッキ。
+- `DJALY_JUNCTION_TEST_THIRD=1`：3人、ゲスト間の交代。
+- `DJALY_JUNCTION_TEST_SAMPLER=1`：表示中・非表示バンクの発音。
+- `DJALY_JUNCTION_TEST_MUSIC_OPERATIONS=tempo,keylock,eq,loop,next`：交代後の演奏変更。
+- `DJALY_JUNCTION_TEST_FX` / `DJALY_JUNCTION_TEST_COLOR` / `DJALY_JUNCTION_TEST_PAD`：効果名を指定。
+- `DJALY_TEST_HOST`：パッケージ内など別のホスト実行ファイルを指定。
+- `DJALY_JUNCTION_TEST_TURN_TTL=8`：短いTURN認証期限で、更新後の参加・交代を確認。
+- `JUNCTION_TURN_ADDRESS` / `JUNCTION_TURN_TLS=1` / `JUNCTION_TURN_SECRET_FILE` / `DJALY_JUNCTION_FORCE_RELAY=1`：用意したTURN経由で接続。
+
+### 現在の制約
+
+準備中の演奏変更は状態の再取得で追従します。継続的な変更がある場合は準備完了が遅れます。全操作について実際の音声適用フレームを記録・再生する操作ジャーナルは未完成です。
+
+接続サービス停止時の既存P2P継続、ホスト再登録、新しい接続に使うTURN認証の期限前更新には対応していますが、ネットワーク経路の変更、スリープ復帰、既存のTURN接続が切れた後の再割り当てなどは追加検証・対応が必要です。
+
+同一Mac上の複数プロセス、実音声Program、TURN TCP/TLSでの試験と、別Mac・別回線・実機の検証は区別してください。2台のMac・異なるインターネット回線・DDJ実機・clusterへの実配信、8人の大容量転送、2時間の連続運用は未検証です。現時点ではこれらの条件を満たす本番運用の保証はしていません。
+
+## rekordboxアシスト
+
+macOSのアクセシビリティから、rekordboxが表示しているデッキの曲情報を読み取ります。初回の案内に従ってDjalyのアクセシビリティを許可してください。OCRや画面録画は使用しません。
+
+「グルーヴ」「展開」「ワードプレイ」、エネルギーの方向、ジャンル条件を選んで候補を探します。現在の基準デッキは手動で選択します。ロードを確認した曲は履歴へ保存し、候補から除外します。新しいセットでは履歴をリセットできます。
+
+確認済みの画面構成はrekordbox 7.2.18の2Deck Horizontalです。同名曲などで一意に照合できない場合は未確認として表示します。アシストへの切り替えではDjalyの音声とコントローラー接続を解放します。
+
+`src-tauri/vendor/drag` はdrag 2.1.1を同梱しています。macOSの外部Copyドラッグで `NSDragOperationCopy | NSDragOperationGeneric` を許可し、JUCEがGenericを返す場合に対応する変更があります。Copy操作に移動・削除は追加していません。上流のApache-2.0 / MITライセンスは同ディレクトリに保持しています。
+
+## MCP・データ操作
+
+アプリのMCP画面に表示されるURLでStreamable HTTPに接続します。通常の製品ビルドは `http://127.0.0.1:48123/mcp`、開発時は `http://127.0.0.1:8001/mcp` です。利用可能なツールは起動中のサーバーの一覧で確認してください。
+
+- あいまいな選曲条件はクライアント側でBPM・Energy等の条件に変換し、検索へ渡します。
+- 書き込みには検索で取得したtrack id / setlist idを使います。名前から存在を仮定しません。
+- ジャンルは文脈取得後にクライアントが判断し、構造化した結果を適用します。
+- 音響再解析は影響範囲を確認して開始し、既存タグを保持する設定を優先します。
+- ワードプレイは歌詞を読んで提案し、承認と実際の試聴確認を区別します。
+- セットリスト、分類、解析ジョブはUIと共有する永続状態です。同じ対象へ複数の処理が並行して書き込まないようにします。
+
+rekordbox MCPの起動・DBモード・操作手順は [rekordbox-mcp/README.md](rekordbox-mcp/README.md) にあります。Djalyに同梱した接続設定は読み取り専用です。
+
+## ブランチ・配布
+
+`main` を配布の基点とし、変更は `feature/*`、`fix/*`、`refactor/*`、`chore/*` で進めます。ブランチのプッシュと製品リリースは別の操作です。
+
+`pnpm release vX.Y.Z` はバックエンドの梱包、Tauriビルド、GitHub Releasesへのアップロードを含みます。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/DJaly/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
+
+## ライセンスと対応ソース
+
+Mixxx音声ホストはMixxx 2.5.6のコミット `3ebac449e7e5fe2a0186596657696e87ce8b0e56` を利用し、GPL-2.0-or-laterの条件で配布します。Djalyのアダプターとビルドスクリプトも対応ソースの一部です。プロセスを分けることをライセンス適用の免除とは扱いません。
+
+JCTではSoundTouch 2.4.1、RubberBand 4.0.0、libdatachannel、libnice、Opus等を使用します。SoundTouchとRubberBandの状態移送用ビルドには上流のライセンス条件が適用されます。固定ソース・ビルド構成・変更用スクリプトは対応ソースのアーカイブへ含めます。Qtなど動的リンクのライブラリについては、互換ビルドへの置き換えを妨げない構成を維持します。
+
+同梱物のライセンスはステージ済みホストの `Contents/Resources/licenses` に置きます。対応ソースのアーカイブには固定依存ソース、アダプター、ビルド環境・Homebrewメタデータ・同梱ファイルの一覧を含めます。
+
+- [Mixxxのライセンス](https://github.com/mixxxdj/mixxx/blob/2.5.6/LICENSE)
+- [Mixxxのソース](https://github.com/mixxxdj/mixxx/tree/2.5.6)
+
+RustのシミュレーターはMixxxコードを含まず、依存バージョンは `native/dj-engine-host/Cargo.lock` で固定しています。

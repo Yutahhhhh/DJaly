@@ -1,0 +1,27 @@
+{
+  "name": "@djaly/junction-signaling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebSocket signaling service for Djaly Junction (peer-to-peer remote DJ): room discovery, invite validation, host admission control, and opaque WebRTC SDP/ICE relay. Never carries audio or music files.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput & node --watch dist/src/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "tsc -p tsconfig.json",
+    "test": "node --test --test-timeout=15000 dist/test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.5.4"
+  }
+}
