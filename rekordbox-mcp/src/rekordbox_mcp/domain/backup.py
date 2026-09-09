@@ -115,7 +115,14 @@ class BackupManager:
             with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
 
-            shutil.copy2(db_path, tmp_path)
+            snapshot = getattr(self._db_accessor, "backup_to", None)
+            if callable(snapshot):
+                snapshot(tmp_path)
+            else:
+                # Legacy/test accessors: the SQLite backup API includes WAL.
+                with sqlite3.connect(str(db_path)) as source:
+                    with sqlite3.connect(str(tmp_path)) as target:
+                        source.backup(target)
 
             # Compress
             original_size = tmp_path.stat().st_size

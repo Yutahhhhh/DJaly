@@ -50,7 +50,7 @@ async function buildApiError(response: Response): Promise<ApiError> {
 }
 
 class ApiClient {
-  private baseUrl: string;
+  readonly baseUrl: string;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -67,7 +67,7 @@ class ApiClient {
   private async request<T>(url: string, init: RequestInit): Promise<T> {
     const response = await fetch(url, {
       ...init,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw await buildApiError(response);
@@ -77,7 +77,8 @@ class ApiClient {
 
   async get<T>(
     path: string,
-    params?: Record<string, string | number | boolean | null | undefined | string[]>
+    params?: Record<string, string | number | boolean | null | undefined | string[]>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<T> {
     const url = new URL(this.resolveUrl(path));
     if (params) {
@@ -92,14 +93,15 @@ class ApiClient {
       });
     }
 
-    return this.request<T>(url.toString(), { method: "GET" });
+    return this.request<T>(url.toString(), { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
   }
 
-  async post<T>(path: string, body: any): Promise<T> {
+  async post<T>(path: string, body: any, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     return this.request<T>(this.resolveUrl(path), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   }
 
@@ -122,11 +124,12 @@ class ApiClient {
     }
   }
 
-  async patch<T>(path: string, body: any): Promise<T> {
+  async patch<T>(path: string, body: any, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     return this.request<T>(this.resolveUrl(path), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   }
 }

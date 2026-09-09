@@ -1,6 +1,6 @@
 import math
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator, model_validator
 
@@ -11,7 +11,7 @@ FiniteNumber = Annotated[StrictInt | StrictFloat, Field(ge=0)]
 class CuePoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slot: StrictInt = Field(ge=0, le=7)
+    slot: StrictInt = Field(ge=0, le=15)
     position_ms: FiniteNumber
     label: str = Field(default="", max_length=100)
     color: str | None = Field(default=None, max_length=32)
@@ -59,6 +59,33 @@ class BeatGrid(BaseModel):
     bpm: StrictInt | StrictFloat = Field(ge=20, le=300)
     first_beat_ms: FiniteNumber
     beats_per_bar: StrictInt = Field(default=4, ge=1, le=16)
+    beat_times_ms: list[FiniteNumber] | None = Field(default=None, min_length=2, max_length=100000)
+    beat_numbers: list[Annotated[StrictInt, Field(ge=1, le=16)]] | None = None
+    source: Literal["rekordbox", "analysis", "manual"] = "manual"
+    # Raw RhythmExtractor2013(method="multifeature") confidence; not a probability
+    # or percentage. Unavailable for imported/manual grids.
+    confidence: StrictInt | StrictFloat | None = Field(
+        default=None, ge=0,
+        description="Raw Essentia multifeature rhythm confidence; not a probability or percentage",
+    )
+
+    @model_validator(mode="after")
+    def validate_beats(self) -> "BeatGrid":
+        if self.confidence is not None and not math.isfinite(self.confidence):
+            raise ValueError("confidence must be finite")
+        if self.beat_times_ms is not None:
+            if any(not math.isfinite(t) for t in self.beat_times_ms):
+                raise ValueError("beat times must be finite")
+            if any(b <= a for a, b in zip(self.beat_times_ms, self.beat_times_ms[1:])):
+                raise ValueError("beat times must be strictly increasing")
+            if abs(self.first_beat_ms - self.beat_times_ms[0]) > 0.01:
+                raise ValueError("first_beat_ms must match the first beat timestamp")
+        if self.beat_numbers is not None:
+            if self.beat_times_ms is None or len(self.beat_numbers) != len(self.beat_times_ms):
+                raise ValueError("beat_numbers must match beat_times_ms length")
+            if any(n > self.beats_per_bar for n in self.beat_numbers):
+                raise ValueError("beat numbers must fit beats_per_bar")
+        return self
 
     @field_validator("bpm", "first_beat_ms")
     @classmethod
@@ -74,7 +101,7 @@ class PerformanceMetadataWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     revision: StrictInt = Field(ge=0)
-    cue_points: list[CuePoint] = Field(default_factory=list, max_length=8)
+    cue_points: list[CuePoint] = Field(default_factory=list, max_length=16)
     loops: list[SavedLoop] = Field(default_factory=list, max_length=32)
     beat_grid: BeatGrid | None = None
 
@@ -97,3 +124,42 @@ class PerformanceMetadataRead(BaseModel):
     beat_grid: BeatGrid | None
     created_at: datetime | None
     updated_at: datetime | None
+    grid_warning: str | None = None
+
+
+class GridAnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    force: bool = False
+
+
+class RekordboxCueImportRequest(BaseModel):
+    """Expected DJaly revision for a source-to-owned-metadata import."""
+
+    model_config = ConfigDict(extra="forbid")
+    revision: StrictInt = Field(ge=0)
+
+
+class RekordboxCueBulkImportRequest(BaseModel):
+    """Whole-library import request; reserved for future import options."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RekordboxCueImportError(BaseModel):
+    track_id: int
+    message: str
+
+
+class RekordboxCueBulkImportRead(BaseModel):
+    imported: int
+    skipped: int
+    failed: int
+    conflicts: int
+    errors: list[RekordboxCueImportError]
+    errors_truncated: int = 0
+
+
+class CueSlotsRequest(BaseModel):
+    """Track ids to summarise. Capped so a stray caller cannot scan the library."""
+
+    track_ids: list[int] = Field(default_factory=list, max_length=500)

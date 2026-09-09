@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any, Union
 from sqlmodel import Session, select, or_, and_, col, text
-from sqlalchemy import func, bindparam
+from sqlalchemy import case, func, bindparam
 import json
 import re
 
@@ -8,6 +8,44 @@ from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
 from domain.constants import EMBEDDING_DIM
 from utils.embedding import LEGACY_MODELS, embedding_space
+from utils.audio_math import CAMELOT_ADJACENCY, KEY_TO_CAMELOT
+
+# Camelot ホイール順。辞書順だと隣接キーがばらけて選曲に使えない。
+# 対応表はレコメンドと同じ utils.audio_math を唯一の出典にする（表記ゆれも同じ扱いになる）。
+CAMELOT_ORDER = {
+    **{spelling.lower(): (int(code[:-1]) - 1) * 2 + (1 if code[-1].upper() == "A" else 2)
+       for spelling, code in KEY_TO_CAMELOT.items()},
+    **{code.lower(): (int(code[:-1]) - 1) * 2 + (1 if code[-1].upper() == "A" else 2)
+       for code in CAMELOT_ADJACENCY},
+}
+
+# 一覧のヘッダから並べ替えられる列。ここに無い値は無視して既定順のままにする。
+SORTABLE_FIELDS = ("title", "artist", "album", "genre", "subgenre", "bpm", "key", "duration", "year", "energy", "danceability", "created_at")
+TEXT_SORT_FIELDS = ("title", "artist", "album", "genre", "subgenre")
+
+
+def apply_sort(query, sort: Optional[str], order: str):
+    """未知の列や未指定は既定の並び（+ id のタイブレーク）。明示指定はそれを置き換える。
+
+    値の無い曲（キー未解析、タイトル空）は昇順・降順のどちらでも末尾に置く。
+    ページ境界がぶれないよう、最後に必ず id を足す。
+    """
+    if not sort or sort not in SORTABLE_FIELDS:
+        return query.order_by(Track.id.asc())
+    # 類似度順などの既定の並びより、ユーザーが選んだ列を優先する。
+    query = query.order_by(None)
+    descending = str(order).lower() == "desc"
+    if sort == "key":
+        # 辞書順ではなく Camelot ホイール順。隣接キーが並ぶほうが選曲に使える。
+        # 表記ゆれ（"F Minor" / "f minor" / "8A"）を吸収してから順位に落とす。
+        value = case(CAMELOT_ORDER, value=func.lower(func.trim(Track.key)), else_=None)
+    elif sort in TEXT_SORT_FIELDS:
+        value = func.nullif(func.lower(func.coalesce(getattr(Track, sort), "")), "")
+    else:
+        value = getattr(Track, sort)
+    missing = case((value.is_(None), 1), else_=0)
+    return query.order_by(missing.asc(), value.desc() if descending else value.asc(), Track.id.asc())
+
 
 class TrackRepository:
     def __init__(self, session: Session):
@@ -287,6 +325,8 @@ class TrackRepository:
         lyrics_status: str = "all",
         lyrics: Optional[str] = None,
         target_params: Optional[Dict[str, float]] = None,
+        sort: Optional[str] = None,
+        order: str = "asc",
         limit: int = 100, 
         offset: int = 0
     ) -> List[Dict[str, Any]]:
@@ -327,7 +367,9 @@ class TrackRepository:
             already_joined_lyrics=True
         )
         
-        query = query.offset(offset).limit(limit)
+        # Always include a unique tiebreaker so page boundaries cannot drift when
+        # many imports share the same created_at or target distance.
+        query = apply_sort(query, sort, order).offset(offset).limit(limit)
         results = self.session.exec(query).all()
         
         final_tracks = []
@@ -338,6 +380,31 @@ class TrackRepository:
             final_tracks.append(track_data)
             
         return final_tracks
+
+    def search_tracks_page(self, **filters) -> Dict[str, Any]:
+        """Return one bounded result page and an exact count for the same filters."""
+        limit = int(filters.pop("limit", 100))
+        offset = int(filters.pop("offset", 0))
+        sort = filters.pop("sort", None)
+        order = filters.pop("order", "asc")
+        tracks = self.search_tracks(limit=limit, offset=offset, sort=sort, order=order, **filters)
+
+        count_query = select(Track.id)
+        count_query = self._apply_search_conditions(
+            query=count_query,
+            already_joined_lyrics=False,
+            **filters,
+        ).order_by(None)
+        total = self.session.exec(
+            select(func.count()).select_from(count_query.subquery())
+        ).one()
+        return {
+            "items": tracks,
+            "total": int(total),
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(tracks) < int(total),
+        }
 
     def search_track_ids(
         self,

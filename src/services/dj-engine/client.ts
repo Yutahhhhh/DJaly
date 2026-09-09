@@ -10,10 +10,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { LatestCommandQueue } from "./latest-command-queue";
+import { ScratchCommandQueue } from "./scratch-command-queue";
+import { microphoneCommandParams } from "./audio-settings";
 
 import {
   DJ_ENGINE_OPS,
   type DeckId,
+  type AudioConfig,
+  type MicrophoneSettings,
+  type RecordingState,
   type EngineClientState,
   type EngineConnection,
   type EngineError,
@@ -23,10 +29,18 @@ import {
   type EngineSnapshot,
   type EngineStatus,
   type EqBand,
+  type PadEffect,
+  type ScratchCommand,
+  type ScratchPhase,
   type TrackDescriptor,
 } from "@/types/dj-engine";
 import {
   applySnapshotWithEvents,
+  buildBeatgridParams,
+  buildBeatStepParams,
+  buildFilterParams,
+  buildTrimParams,
+  buildFxParams,
   buildChannelGainParams,
   buildCrossfaderParams,
   buildEqParams,
@@ -36,6 +50,7 @@ import {
   buildMasterGainParams,
   buildMetersParams,
   buildSeekParams,
+  buildScratchParams,
   buildTempoParams,
   createInitialClientState,
   describeEngineError,
@@ -84,20 +99,36 @@ function isTauriAvailable(): boolean {
 
 type StateListener = (state: EngineClientState) => void;
 type StatusListener = (status: EngineStatus) => void;
+type ContinuousControl = { op: string; params: Record<string, unknown>; session: string | null; deck?: DeckId; generation?: number };
 
 export class DjEngineClient {
   private clientState: EngineClientState = createInitialClientState();
   private sessionId: string | null = null;
+  private seekQueues = new Map<DeckId, LatestCommandQueue<{ params: Record<string, unknown>; session: string | null; generation: number; trackId: string | undefined }>>();
+  private seekGeneration: Record<DeckId, number> = { A: 0, B: 0, C: 0, D: 0 };
+  private controlQueues = new Map<string, LatestCommandQueue<ContinuousControl>>();
+  private scratchQueues = new Map<DeckId, ScratchCommandQueue>();
+  private scratchGestures = new Map<string, { deck: DeckId; session: string | null; generation: number; trackId: string | undefined; positionMs: number }>();
   private stateListeners = new Set<StateListener>();
   private statusListeners = new Set<StatusListener>();
   private unsubscribers: UnlistenFn[] = [];
   private attaching: Promise<void> | null = null;
   /** Events arriving while a snapshot command is in flight are replayed afterward. */
   private snapshotEventBuffer: EngineEventMessage[] | null = null;
+  private snapshotOperations: Promise<unknown> = Promise.resolve();
+  private refreshing: Promise<EngineSnapshot> | null = null;
+
+  private serializeSnapshot<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.snapshotOperations.then(task, task);
+    this.snapshotOperations = result.catch(() => undefined);
+    return result;
+  }
 
   getState(): EngineClientState {
     return this.clientState;
   }
+
+  getDeckGeneration(deck: DeckId): number { return this.seekGeneration[deck]; }
 
   getSessionId(): string | null {
     return this.sessionId;
@@ -129,11 +160,12 @@ export class DjEngineClient {
   }
 
   /** 明示的なオプトイン起動。既定では誰も自動起動しない。 */
-  async start(outputDevice?: string): Promise<EngineStatus> {
+  async start(outputDevice?: string, recordingDir?: string): Promise<EngineStatus> {
     if (!isTauriAvailable()) return UNAVAILABLE_STATUS;
     try {
       const status = await invoke<EngineStatus>("dj_engine_start", {
         outputDevice: outputDevice?.trim() || null,
+        recordingDir: recordingDir?.trim() || null,
       });
       this.emitStatus(status);
       return status;
@@ -155,6 +187,7 @@ export class DjEngineClient {
     if (!isTauriAvailable()) return UNAVAILABLE_STATUS;
     const status = await invoke<EngineStatus>("dj_engine_stop");
     this.sessionId = null;
+    this.clearScratchState();
     this.clientState = createInitialClientState();
     this.emitState();
     this.emitStatus(status);
@@ -165,7 +198,11 @@ export class DjEngineClient {
    * セッションを張り直してスナップショットを取得する。
    * webview の再読み込み後はこれを呼ぶだけで状態が復元でき、再生は止まらない。
    */
-  async connect(): Promise<EngineConnection> {
+  connect(): Promise<EngineConnection> {
+    return this.serializeSnapshot(() => this.connectSnapshot());
+  }
+
+  private async connectSnapshot(): Promise<EngineConnection> {
     if (!isTauriAvailable()) {
       throw new Error(UNAVAILABLE_STATUS.detail ?? "エンジンを利用できません");
     }
@@ -177,6 +214,7 @@ export class DjEngineClient {
         throw new Error("エンジンから不正な状態スナップショットを受信しました");
       }
       this.sessionId = connection.sessionId;
+      this.clearScratchState();
       this.clientState = this.applyBufferedSnapshot(
         createInitialClientState(),
         connection.snapshot
@@ -203,10 +241,20 @@ export class DjEngineClient {
   }
 
   /** スナップショットを取り直す。イベント欠落を検知したときに使う。 */
-  async refreshSnapshot(): Promise<EngineSnapshot> {
+  refreshSnapshot(): Promise<EngineSnapshot> {
+    if (this.refreshing) return this.refreshing;
+    const result = this.serializeSnapshot(() => this.fetchSnapshot());
+    this.refreshing = result;
+    void result.finally(() => { if (this.refreshing === result) this.refreshing = null; }).catch(() => undefined);
+    return result;
+  }
+
+  private async fetchSnapshot(): Promise<EngineSnapshot> {
+    const session = this.sessionId;
     this.beginSnapshotBuffer();
     try {
       const snapshot = await this.send(DJ_ENGINE_OPS.snapshot, {});
+      if (session !== this.sessionId) throw new Error("音声エンジンの接続が変更されました");
       if (!isEngineSnapshot(snapshot)) {
         throw new Error("エンジンから不正な状態スナップショットを受信しました");
       }
@@ -241,7 +289,7 @@ export class DjEngineClient {
       message: "エンジンから理由不明のエラーが返りました",
       retryable: false,
     };
-    if (error.code === "session_mismatch" || error.code === "session_required") {
+    if (sessionId === this.sessionId && (error.code === "session_mismatch" || error.code === "session_required")) {
       this.clientState = { ...this.clientState, sessionInvalidated: true };
       this.emitState();
     }
@@ -258,11 +306,17 @@ export class DjEngineClient {
     return this.send(DJ_ENGINE_OPS.ping, {});
   }
 
-  load(deck: DeckId, track: TrackDescriptor): Promise<unknown> {
+  async load(deck: DeckId, track: TrackDescriptor): Promise<unknown> {
+    await this.releaseScratch(deck);
+    ++this.seekGeneration[deck]; this.seekQueues.get(deck)?.clear();
+    this.scratchQueues.get(deck)?.clear();
     return this.send(DJ_ENGINE_OPS.deckLoad, buildLoadParams(deck, track));
   }
 
-  unload(deck: DeckId): Promise<unknown> {
+  async unload(deck: DeckId): Promise<unknown> {
+    await this.releaseScratch(deck);
+    ++this.seekGeneration[deck]; this.seekQueues.get(deck)?.clear();
+    this.scratchQueues.get(deck)?.clear();
     return this.send(DJ_ENGINE_OPS.deckUnload, { deck });
   }
 
@@ -274,15 +328,67 @@ export class DjEngineClient {
     return this.send(DJ_ENGINE_OPS.deckPause, { deck });
   }
 
+  pitchbend(deck: DeckId, amount: number): Promise<unknown> {
+    return this.continuous(`${deck}:pitchbend`, "deck.pitchbend", this.withTrack(deck, { deck, amount }), deck);
+  }
+
   seek(deck: DeckId, positionMs: number, durationMs?: number): Promise<unknown> {
-    return this.send(
-      DJ_ENGINE_OPS.deckSeek,
-      buildSeekParams(deck, positionMs, durationMs)
+    const params = buildSeekParams(deck, positionMs, durationMs);
+    let queue = this.seekQueues.get(deck);
+    if (!queue) {
+      queue = new LatestCommandQueue(async (target) => {
+        if (target.session !== this.sessionId || target.generation !== this.seekGeneration[deck]
+          || target.trackId !== this.clientState.snapshot?.decks[deck]?.track?.trackId) return;
+        return this.send(DJ_ENGINE_OPS.deckSeek, target.params);
+      });
+      this.seekQueues.set(deck, queue);
+    }
+    return queue.enqueue({ params, session: this.sessionId, generation: this.seekGeneration[deck], trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId });
+  }
+
+  scratch(deck: DeckId, phase: ScratchPhase, positionMs: number, gestureId: string): Promise<unknown> {
+    const command = buildScratchParams(deck, phase, positionMs, gestureId);
+    let context = this.scratchGestures.get(gestureId);
+    if (phase === "begin") {
+      context = {
+        deck,
+        session: this.sessionId,
+        generation: this.seekGeneration[deck],
+        trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId,
+        positionMs,
+      };
+      this.scratchGestures.set(gestureId, context);
+    } else if (!context || context.deck !== deck) {
+      return Promise.resolve();
+    } else {
+      context.positionMs = positionMs;
+    }
+
+    let queue = this.scratchQueues.get(deck);
+    if (!queue) {
+      queue = new ScratchCommandQueue(async (queued: ScratchCommand) => {
+        const guard = this.scratchGestures.get(queued.gestureId);
+        if (!guard || guard.session !== this.sessionId || guard.generation !== this.seekGeneration[deck]
+          || guard.trackId !== this.clientState.snapshot?.decks[deck]?.track?.trackId) return;
+        return this.send(DJ_ENGINE_OPS.deckScratch, { ...queued });
+      });
+      this.scratchQueues.set(deck, queue);
+    }
+    const result = queue.enqueue(command);
+    if (phase === "begin") void result.catch(() => this.scratchGestures.delete(gestureId));
+    if (phase === "end") void result.then(
+      () => this.scratchGestures.delete(gestureId),
+      () => this.scratchGestures.delete(gestureId),
     );
+    return result;
   }
 
   setTempo(deck: DeckId, rate: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.deckTempoSet, buildTempoParams(deck, rate));
+    return this.continuous(`${deck}:tempo`, DJ_ENGINE_OPS.deckTempoSet, buildTempoParams(deck, rate), deck);
+  }
+
+  setBeatgrid(deck: DeckId, trackId: string, bpm: number, firstBeatMs: number, beatsPerBar = 4, beatTimesMs?: number[] | null, beatNumbers?: number[] | null): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.deckBeatgridSet, buildBeatgridParams(deck, trackId, bpm, firstBeatMs, beatsPerBar, beatTimesMs, beatNumbers));
   }
 
   setKeylock(deck: DeckId, enabled: boolean): Promise<unknown> {
@@ -293,38 +399,71 @@ export class DjEngineClient {
     return this.send(DJ_ENGINE_OPS.deckSyncSet, { deck, enabled, leader });
   }
 
-  setHotCue(deck: DeckId, index: number, positionMs?: number): Promise<unknown> {
+  setHotCue(deck: DeckId, index: number, positionMs?: number, quantize?: boolean): Promise<unknown> {
     return this.send(
       DJ_ENGINE_OPS.deckHotcueSet,
-      buildHotcueParams(deck, index, positionMs)
+      this.withTrack(deck, { ...buildHotcueParams(deck, index, positionMs), ...(quantize === undefined ? {} : { quantize }) })
     );
   }
 
   jumpToHotCue(deck: DeckId, index: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.deckHotcueJump, buildHotcueParams(deck, index));
+    return this.send(DJ_ENGINE_OPS.deckHotcueJump, this.withTrack(deck, buildHotcueParams(deck, index)));
   }
 
   clearHotCue(deck: DeckId, index: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.deckHotcueClear, buildHotcueParams(deck, index));
+    return this.send(DJ_ENGINE_OPS.deckHotcueClear, this.withTrack(deck, buildHotcueParams(deck, index)));
   }
 
   setLoop(deck: DeckId, startMs: number, endMs: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.deckLoopSet, buildLoopParams(deck, startMs, endMs));
+    return this.send(DJ_ENGINE_OPS.deckLoopSet, this.withTrack(deck, buildLoopParams(deck, startMs, endMs)));
   }
 
   enableLoop(deck: DeckId, enabled: boolean): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.deckLoopEnable, { deck, enabled });
+    return this.send(DJ_ENGINE_OPS.deckLoopEnable, this.withTrack(deck, { deck, enabled }));
+  }
+
+  beatJump(deck: DeckId, beats: number): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.deckBeatJump, this.withTrack(deck, buildBeatStepParams(deck, beats)));
+  }
+
+  beatLoop(deck: DeckId, beats: number): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.deckBeatLoop, this.withTrack(deck, buildBeatStepParams(deck, beats, true)));
+  }
+
+  setQuantize(deck: DeckId, enabled: boolean): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.deckQuantizeSet, this.withTrack(deck, { deck, enabled }));
+  }
+
+  setFilter(deck: DeckId, value: number): Promise<unknown> {
+    return this.continuous(`${deck}:filter`, DJ_ENGINE_OPS.mixerFilterSet, buildFilterParams(deck, value));
+  }
+
+  setTrim(deck: DeckId, gain: number): Promise<unknown> {
+    return this.continuous(`${deck}:trim`, DJ_ENGINE_OPS.mixerTrimSet, buildTrimParams(deck, gain));
+  }
+
+  /**
+   * オン/オフは潰してはいけないので latest-wins キューを通さない。`continuous`
+   * は待機中の値を上書きするため、押下の `true` が離した `false` に置き換わり、
+   * エフェクトが一瞬しか掛からない（＝掛かっていないように聞こえる）。
+   */
+  async setFx(deck: DeckId, effect: PadEffect, enabled: boolean, mix: number, depth?: number): Promise<unknown> {
+    const params = this.withTrack(deck, buildFxParams(deck, effect, enabled, mix, depth));
+    try {
+      return await this.send(DJ_ENGINE_OPS.mixerFxSet, params);
+    } catch (cause) {
+      // A missing reply does not prove the audio processor stayed off.
+      if (enabled) await this.send(DJ_ENGINE_OPS.mixerFxSet, { ...params, enabled: false }).catch(() => undefined);
+      throw cause;
+    }
   }
 
   setChannelGain(deck: DeckId, gain: number): Promise<unknown> {
-    return this.send(
-      DJ_ENGINE_OPS.mixerChannelGain,
-      buildChannelGainParams(deck, gain)
-    );
+    return this.continuous(`${deck}:gain`, DJ_ENGINE_OPS.mixerChannelGain, buildChannelGainParams(deck, gain));
   }
 
   setEq(deck: DeckId, band: EqBand, gain: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.mixerChannelEq, buildEqParams(deck, band, gain));
+    return this.continuous(`${deck}:eq:${band}`, DJ_ENGINE_OPS.mixerChannelEq, buildEqParams(deck, band, gain));
   }
 
   setPfl(deck: DeckId, enabled: boolean): Promise<unknown> {
@@ -332,15 +471,72 @@ export class DjEngineClient {
   }
 
   setCrossfader(position: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.mixerCrossfader, buildCrossfaderParams(position));
+    return this.continuous("crossfader", DJ_ENGINE_OPS.mixerCrossfader, buildCrossfaderParams(position));
   }
 
   setMasterGain(gain: number): Promise<unknown> {
-    return this.send(DJ_ENGINE_OPS.mixerMasterGain, buildMasterGainParams(gain));
+    return this.continuous("master", DJ_ENGINE_OPS.mixerMasterGain, buildMasterGainParams(gain));
+  }
+
+  private withTrack(deck: DeckId, params: Record<string, unknown>): Record<string, unknown> {
+    return { ...params, trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId };
+  }
+
+  private continuous(key: string, op: string, params: Record<string, unknown>, deck?: DeckId): Promise<unknown> {
+    let queue = this.controlQueues.get(key);
+    if (!queue) {
+      queue = new LatestCommandQueue(async target => {
+        if (target.session !== this.sessionId || target.deck !== undefined && target.generation !== this.seekGeneration[target.deck]) return;
+        return await this.send(target.op, target.params);
+      });
+      this.controlQueues.set(key, queue);
+    }
+    return queue.enqueue({ op, params, session: this.sessionId, deck, generation: deck === undefined ? undefined : this.seekGeneration[deck] });
+  }
+
+  startRecording(): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.recordingStart, {});
+  }
+
+  async stopRecording(): Promise<RecordingState> {
+    const session = this.sessionId;
+    let recording = await this.send(DJ_ENGINE_OPS.recordingStop, {}) as RecordingState;
+    const recordingPath = recording.path;
+    const deadline = Date.now() + 15_000;
+    while (recording.active || recording.stopping) {
+      if (this.sessionId !== session) throw new Error("録音の保存完了を待つ間に音声エンジンが切り替わりました。");
+      if (Date.now() >= deadline) throw new Error("録音ファイルの書き込み完了を待っています。少し待ってから再試行してください。");
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const current = (await this.refreshSnapshot()).recording;
+      if (!current) throw new Error("録音の保存状態を確認できませんでした。");
+      if (recordingPath && current.path !== recordingPath) throw new Error("別の録音が開始されたため、元の録音の保存状態を確認できませんでした。");
+      recording = current;
+    }
+    if (this.sessionId !== session) throw new Error("録音の保存完了を待つ間に音声エンジンが切り替わりました。");
+    return recording;
+  }
+
+  /**
+   * 録音の保存先を差し替える。エンジンは録音のたびに読み直すので、
+   * プロセスを立て直さなくても次の録音から新しい場所になる。
+   */
+  setRecordingDirectory(directory: string): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.recordingDirectorySet, { directory });
+  }
+
+  /** 保存形式。書き出せない形式はエンジンが拒否する。 */
+  setRecordingFormat(format: string): Promise<unknown> {
+    return this.send(DJ_ENGINE_OPS.recordingFormatSet, { format });
   }
 
   listAudioDevices(): Promise<unknown> {
     return this.send(DJ_ENGINE_OPS.audioDevicesList, {});
+  }
+
+  async setMicrophone(microphone: Partial<MicrophoneSettings>): Promise<AudioConfig> {
+    const config = await this.send(DJ_ENGINE_OPS.audioConfigSet, microphoneCommandParams(microphone)) as AudioConfig;
+    await this.refreshSnapshot();
+    return config;
   }
 
   subscribeMeters(enabled: boolean, intervalMs?: number): Promise<unknown> {
@@ -385,6 +581,23 @@ export class DjEngineClient {
     });
 
     return this.attaching;
+  }
+
+  private async releaseScratch(deck: DeckId): Promise<void> {
+    const gestures = [...this.scratchGestures.entries()].filter(([, item]) => item.deck === deck);
+    if (!gestures.length) return;
+    const results = await Promise.allSettled(gestures.map(([gestureId, item]) =>
+      this.scratch(deck, "end", item.positionMs, gestureId)));
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+
+  private clearScratchState(): void {
+    for (const queue of this.controlQueues.values()) queue.clear();
+    this.controlQueues.clear();
+    for (const queue of this.scratchQueues.values()) queue.clear();
+    this.scratchQueues.clear();
+    this.scratchGestures.clear();
   }
 
   private emitState(): void {

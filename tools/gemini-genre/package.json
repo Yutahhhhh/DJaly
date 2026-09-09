@@ -1,0 +1,20 @@
+{
+  "name": "djaly-gemini-genre",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Deploy-excluded Playwright tool: classify Djaly's unanalyzed genres through a Gemini Gem and save the results as JSON per batch.",
+  "scripts": {
+    "login": "tsx src/run.ts --login-only",
+    "classify": "tsx src/run.ts",
+    "apply": "tsx src/run.ts --apply-only"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

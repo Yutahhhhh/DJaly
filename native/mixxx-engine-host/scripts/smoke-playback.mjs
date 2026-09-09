@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -27,7 +27,12 @@ const fixture = path.join(output, 'fixture.wav');
 await writeFile(fixture, Buffer.concat([header, pcm]));
 const binary = process.env.DJALY_TEST_HOST || path.join(root, 'build-upstream/djaly-mixxx-engine-host');
 const binarySHA256 = createHash('sha256').update(await readFile(binary)).digest('hex');
-const child = spawn(binary, [], { env: { ...process.env, ...(process.env.DJALY_TRACE_LIBRARIES ? { DYLD_PRINT_LIBRARIES: '1' } : {}), DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' }, stdio: ['pipe', 'pipe', 'pipe'] });
+const recordingDir = path.join(output, 'recordings');
+await mkdir(recordingDir, { recursive: true });
+const outputSelection = process.env.DJALY_SMOKE_DEFAULT_OUTPUT === '1'
+  ? {}
+  : { DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' };
+const child = spawn(binary, [], { env: { ...process.env, ...(process.env.DJALY_TRACE_LIBRARIES ? { DYLD_PRINT_LIBRARIES: '1' } : {}), ...outputSelection, DJALY_MIXXX_RECORDING_DIR: recordingDir }, stdio: ['pipe', 'pipe', 'pipe'] });
 let stderr = '', id = 0, hello;
 const transcript = [], queue = [], waiting = [];
 child.stderr.on('data', data => { stderr += data; });
@@ -100,8 +105,17 @@ try {
       if (event.event === 'deck.loaded' && event.data.deck === 'B') break;
     }
     await command('deck.play', { deck: 'B' }); await sleep(400);
+    for (const deck of ['C', 'D']) {
+      await command('deck.load', { deck, track: { trackId: `generated-deck-${deck}-smoke`, path: fixtureB, durationMs: 12000 } });
+      while (true) {
+        const event = await next(); assert.notEqual(event.event, 'deck.load.failed', JSON.stringify(event));
+        if (event.event === 'deck.loaded' && event.data.deck === deck) break;
+      }
+      await command('deck.play', { deck });
+    }
+    await sleep(500);
     const both = (await command('state.snapshot')).data;
-    assert.equal(both.decks.A.status, 'playing'); assert.equal(both.decks.B.status, 'playing');
+    for (const deck of ['A', 'B', 'C', 'D']) assert.equal(both.decks[deck].status, 'playing');
     await command('mixer.crossfader', { position: -1 }); await sleep(400);
     assert.equal((await command('state.snapshot')).data.mixer.crossfader, -1);
     await command('mixer.crossfader', { position: 1 }); await sleep(400);
@@ -111,13 +125,21 @@ try {
     await command('mixer.master.gain', { gain: 0.4 });
     const mixed = (await command('state.snapshot')).data;
     assert.equal(mixed.mixer.channels.A.gain, 0.75); assert.equal(mixed.mixer.channels.B.gain, 0.25); assert.equal(mixed.mixer.masterGain, 0.4);
+    await command('recording.start'); await sleep(1500);
+    const recording = (await command('state.snapshot')).data.recording;
+    assert.equal(recording.active, true); assert.equal(typeof recording.path, 'string');
+    await command('recording.stop'); await sleep(500);
+    const recorded = (await command('state.snapshot')).data.recording;
+    assert.equal(recorded.active, false); assert.equal(recorded.path, recording.path);
+    assert((await stat(recorded.path)).size > 44, 'recording WAV must contain audio data');
     await command('deck.pause', { deck: 'B' }); await sleep(250);
     const bPause = (await command('state.snapshot')).data; await sleep(300);
     const separate = (await command('state.snapshot')).data;
     assert.equal(separate.decks.B.status, 'paused'); assert(Math.abs(separate.decks.B.positionMs - bPause.decks.B.positionMs) < 30);
     assert(separate.decks.A.positionMs > bPause.decks.A.positionMs + 100);
     await command('deck.unload', { deck: 'B' });
-    twoDeck = { bothPlaying: true, independentPause: true, mixerApplied: mixed.mixer };
+    for (const deck of ['C', 'D']) await command('deck.unload', { deck });
+    twoDeck = { fourDecksPlaying: true, independentPause: true, mixerApplied: mixed.mixer, recording: { path: recorded.path, elapsedMs: recorded.elapsedMs } };
   }
   await command('deck.unload', { deck: 'A' });
   assert.equal((await command('state.snapshot')).data.decks.A.status, 'empty');

@@ -8,5 +8,6 @@
   <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSBackgroundOnly</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>DJプレイにマイクの音声をミックスし、出力・録音するために使用します。</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
 </dict></plist>

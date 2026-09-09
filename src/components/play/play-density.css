@@ -1,0 +1,143 @@
+/* Density tokens. Every size that differs between 通常/コンパクト, 2/4 decks and
+   横/縦 waveforms is declared here so the variants stay one coherent scale and
+   the deck stack can never grow past the master strip. */
+.dj-workspace {
+  --d-globalbar: 30px;
+  --d-master: 28px;
+  --d-decks: 2;
+  --d-lane: 72px;
+
+  --d-meta: 32px;
+  --d-overview: 24px;
+  --d-controls: 100px;
+  --d-cover: 24px;
+  --d-title: 13px;
+  --d-time: 17px;
+
+  --d-btn: 70px;
+  --d-round: 32px;
+  --d-platter: 66px;
+  --d-bpm: 15px;
+  --d-tempo: 40px;
+  --d-channel: 38px;
+  --d-pad: 18px;
+  --d-jump: 18px;
+  --d-readout: 12px;
+  --d-centre: 176px;
+
+  --d-tree: 190px;
+  --d-recommend: clamp(186px, 19vw, 262px);
+  --d-row: 22px;
+  --d-preview: 16px;
+  --d-reco-row: 44px;
+}
+
+/* 4 decks: two pairs must fit above the master strip, so the controller row
+   loses the readout's second line rather than overflowing. */
+.dj-workspace--four {
+  --d-decks: 4;
+  --d-lane: 48px;
+  --d-meta: 28px;
+  --d-overview: 16px;
+  --d-controls: 86px;
+  --d-cover: 21px;
+  --d-title: 12px;
+  --d-time: 14px;
+  --d-round: 27px;
+  --d-btn: 64px;
+  --d-platter: 54px;
+  --d-bpm: 13px;
+  --d-tempo: 34px;
+  --d-channel: 36px;
+  --d-pad: 15px;
+  --d-readout: 11px;
+  --d-centre: 150px;
+  --d-reco-row: 40px;
+}
+
+/* コンパクト: transport / tempo / level stay, browsing space grows. */
+.dj-workspace--compact {
+  --d-lane: 46px;
+  --d-meta: 26px;
+  --d-overview: 14px;
+  --d-controls: 72px;
+  --d-cover: 20px;
+  --d-title: 12px;
+  --d-time: 14px;
+  --d-btn: 62px;
+  --d-round: 24px;
+  /* The BPM readout must fit the platter's inner circle: width ≈ 2.9 × --d-bpm
+     has to stay under (--d-platter − 12px) × 0.9. */
+  --d-platter: 56px;
+  --d-bpm: 11px;
+  --d-tempo: 32px;
+  --d-channel: 32px;
+  --d-jump: 16px;
+  --d-centre: 132px;
+  --d-row: 19px;
+  --d-preview: 13px;
+  --d-reco-row: 40px;
+}
+.dj-workspace--compact.dj-workspace--four {
+  --d-lane: 36px;
+  --d-meta: 24px;
+  --d-overview: 12px;
+  --d-controls: 62px;
+  --d-cover: 18px;
+  --d-platter: 50px;
+  --d-bpm: 10px;
+  --d-round: 22px;
+  --d-btn: 56px;
+}
+.dj-workspace--compact .dj-readout { display: none; }
+.dj-workspace--compact .dj-cue-grid { grid-auto-rows: 15px; }
+.dj-workspace--compact .dj-transport { gap: 3px; }
+/* Compact drops the column captions, not the controls under them. */
+.dj-workspace--compact .dj-control-label { display: none; }
+.dj-workspace--compact.dj-workspace--four .dj-perf-caption { display: none; }
+.dj-workspace--compact .dj-track-time span { display: none; }
+
+/* 縦波形: the pair keeps both detail lanes between the decks, so the deck
+   columns get the height the lanes no longer take at the top. */
+.dj-workspace--vertical { --d-controls: 148px; --d-readout: 13px; --d-jump: 20px; --d-pad: 20px; }
+.dj-workspace--vertical.dj-workspace--four { --d-controls: 108px; --d-readout: 11px; --d-jump: 17px; --d-pad: 16px; }
+.dj-workspace--vertical.dj-workspace--compact { --d-controls: 96px; }
+.dj-workspace--vertical.dj-workspace--compact.dj-workspace--four { --d-controls: 78px; }
+.dj-workspace--vertical .dj-scrolling-waves { display: none; }
+/* Only the tall 2-deck vertical column has room for a 2×4 pad block. */
+.dj-workspace--vertical:not(.dj-workspace--four):not(.dj-workspace--compact) .dj-cue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* 1200×800 and narrower: give the browser its columns back before the decks. */
+@media (max-width: 1280px) {
+  .dj-workspace {
+    --d-tree: 168px;
+    --d-recommend: 184px;
+    --d-platter: 58px;
+    --d-bpm: 14px;
+    --d-btn: 66px;
+    --d-round: 29px;
+    --d-tempo: 34px;
+    --d-channel: 36px;
+    --d-centre: 140px;
+    --d-title: 12px;
+    --d-time: 15px;
+  }
+  .dj-workspace--four { --d-platter: 48px; --d-bpm: 11px; --d-btn: 59px; --d-round: 25px; --d-centre: 120px; }
+  .dj-workspace--compact { --d-platter: 52px; --d-bpm: 11px; --d-round: 23px; --d-btn: 56px; }
+  .dj-workspace--compact.dj-workspace--four { --d-platter: 46px; --d-bpm: 10px; }
+  .dj-global-bar { gap: 7px; padding: 0 6px; }
+  .dj-engine-status { max-width: 118px; }
+  .dj-workspace--four .dj-perf-caption span:last-child { display: none; }
+}
+
+/* Short windows: the deck stack shrinks first, the browser keeps its rows. */
+@media (max-height: 820px) {
+  .dj-workspace--four { --d-lane: 36px; --d-controls: 80px; }
+  .dj-workspace--vertical.dj-workspace--four { --d-controls: 100px; }
+}
+@media (max-height: 720px) {
+  .dj-workspace { --d-lane: 46px; --d-controls: 92px; }
+  .dj-workspace--four { --d-lane: 31px; --d-controls: 74px; --d-meta: 25px; --d-overview: 13px; }
+  .dj-workspace--vertical { --d-controls: 128px; }
+  .dj-workspace--vertical.dj-workspace--four { --d-controls: 92px; }
+}

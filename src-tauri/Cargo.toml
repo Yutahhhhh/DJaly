@@ -1,6 +1,6 @@
 [package]
 name = "djaly"
-version = "0.4.7"
+version = "0.4.8"
 description = "Djaly Music Library"
 authors = ["you"]
 edition = "2021"
@@ -28,3 +28,8 @@ serde_json = "1"
 tauri-plugin-devtools = "2.0.1"
 tauri-plugin-http = "2.5.4"
 tauri-plugin-process = "2.3.1"
+midir = "0.10"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+hidapi = { version = "2.6.7", features = ["macos-shared-device"] }

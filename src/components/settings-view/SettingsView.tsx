@@ -230,6 +230,60 @@ export function SettingsView() {
             </h3>
 
             <div className="space-y-2">
+              <Label>録音の保存形式</Label>
+              <Select
+                value={settings.recording_format || "WAV"}
+                onValueChange={(value) => void saveSetting("recording_format", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* 実際に書き出せることを 1 形式ずつ録音して確認したものだけ。 */}
+                  <SelectItem value="WAV">WAV（可逆・最大サイズ）</SelectItem>
+                  <SelectItem value="AIFF">AIFF（可逆）</SelectItem>
+                  <SelectItem value="FLAC">FLAC（可逆・圧縮）</SelectItem>
+                  <SelectItem value="MP3">MP3（非可逆）</SelectItem>
+                  <SelectItem value="OGG">OGG Vorbis（非可逆）</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                次の録音から反映されます。AAC はこのビルドのエンジンでは書き出せないため除いています。
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="recording-directory">録音の保存先</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="recording-directory"
+                  value={settings.recording_directory ?? ""}
+                  placeholder="未設定のときは ~/Music/Djaly Recordings"
+                  onChange={(event) =>
+                    setSettings((prev) => ({ ...prev, recording_directory: event.target.value }))
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void saveSetting("recording_directory", (settings.recording_directory ?? "").trim());
+                    }
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    void saveSetting("recording_directory", (settings.recording_directory ?? "").trim())
+                  }
+                >
+                  保存
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                絶対パスで指定してください。保存すると次の録音から反映されます（エンジンの再起動は不要）。フォルダが無ければ自動で作成されます。
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label>Theme</Label>
               <Select value={theme} onValueChange={(val: any) => setTheme(val)}>
                 <SelectTrigger>

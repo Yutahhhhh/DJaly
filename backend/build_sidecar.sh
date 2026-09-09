@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+
+RECORDING_FFMPEG=$(python packaging_ffmpeg.py)
 
 ARCH_NAME=$(uname -m)
 if [ "$ARCH_NAME" = "x86_64" ]; then
@@ -21,6 +24,7 @@ rm -rf build dist
 # --add-data: 静的ファイルやモデルがあれば追加 (例: "models/*.pb:models")
 # hidden-import: 自動検出されないライブラリを指定
 pyinstaller --clean --noconfirm --onefile --name djaly-server \
+    --add-binary="$RECORDING_FFMPEG:bin" \
     --hidden-import="uvicorn.logging" \
     --hidden-import="uvicorn.loops" \
     --hidden-import="uvicorn.loops.auto" \
@@ -35,6 +39,8 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
     --hidden-import="sklearn.utils._typedefs" \
     --hidden-import="sklearn.neighbors._partition_nodes" \
     --hidden-import="scipy.special.cython_special" \
+    --collect-all="pyrekordbox" \
+    --collect-all="sqlcipher3" \
     --add-data="models/msd-musicnn-1.pb:models" \
     server.py
 

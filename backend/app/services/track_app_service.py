@@ -129,3 +129,7 @@ class TrackAppService:
             lyrics=lyrics,
             target_params=sanitize_target_parameters(target_params)
         )
+
+    def get_tracks_page(self, **filters) -> Dict[str, Any]:
+        filters["target_params"] = sanitize_target_parameters(filters.get("target_params"))
+        return self.repository.search_tracks_page(**filters)

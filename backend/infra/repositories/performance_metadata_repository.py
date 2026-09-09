@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from sqlmodel import Session
+from collections.abc import Sequence
+
+from sqlmodel import Session, col, select
 
 from domain.models.performance_metadata import TrackPerformanceMetadata
 
@@ -11,6 +13,15 @@ class PerformanceMetadataRepository:
 
     def get(self, track_id: int) -> TrackPerformanceMetadata | None:
         return self.session.get(TrackPerformanceMetadata, track_id)
+
+    def get_many(self, track_ids: Sequence[int]) -> list[TrackPerformanceMetadata]:
+        """Rows for the given tracks. Missing tracks are simply absent."""
+        if not track_ids:
+            return []
+        statement = select(TrackPerformanceMetadata).where(
+            col(TrackPerformanceMetadata.track_id).in_(list(track_ids))
+        )
+        return list(self.session.exec(statement).all())
 
     def save(
         self,

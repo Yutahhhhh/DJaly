@@ -2,6 +2,22 @@ if(NOT TARGET mixxx-lib)
   message(FATAL_ERROR "DJaly host requires the pinned upstream mixxx-lib target")
 endif()
 set(DJALY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
+# Extend the pinned built-in registry in the build tree; keep upstream clean.
+set(DJALY_REGISTRY_SOURCE "${CMAKE_SOURCE_DIR}/src/effects/backends/builtin/builtinbackend.cpp")
+file(READ "${DJALY_REGISTRY_SOURCE}" DJALY_REGISTRY)
+set(DJALY_REGISTRATIONS "")
+foreach(DJALY_EFFECT RANGE 0 7)
+  string(APPEND DJALY_REGISTRATIONS "    registerEffect<DdjTimedProcessor<DdjBeatProcessor<${DJALY_EFFECT}>>>();\n")
+endforeach()
+foreach(DJALY_EFFECT Echo Reverb Tremolo Flanger Phaser PitchShift)
+  string(APPEND DJALY_REGISTRATIONS "    registerEffect<DdjTimedProcessor<${DJALY_EFFECT}Effect>>();\n")
+endforeach()
+string(REPLACE "BuiltInBackend::BuiltInBackend() {" "BuiltInBackend::BuiltInBackend() {\n${DJALY_REGISTRATIONS}" DJALY_REGISTRY "${DJALY_REGISTRY}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/djaly_builtinbackend.cpp" "#include \"${DJALY_ROOT}/src/ddj_beat_processors.h\"\n${DJALY_REGISTRY}")
+get_target_property(DJALY_MIXXX_SOURCES mixxx-lib SOURCES)
+list(FILTER DJALY_MIXXX_SOURCES EXCLUDE REGEX "effects/backends/builtin/builtinbackend\\.cpp$")
+set_property(TARGET mixxx-lib PROPERTY SOURCES "${DJALY_MIXXX_SOURCES}")
+target_sources(mixxx-lib PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/djaly_builtinbackend.cpp")
 add_executable(djaly-mixxx-engine-host
   "${DJALY_ROOT}/src/main.cpp"
   "${DJALY_ROOT}/src/host.cpp"

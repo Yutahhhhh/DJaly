@@ -21,8 +21,10 @@ fi
 # backend/build_sidecar.sh の内容を参考に、release.sh と同じ手順でビルド
 cd backend
 source .venv/bin/activate
+RECORDING_FFMPEG=$(python packaging_ffmpeg.py)
 # 必要な隠しインポートを含めてビルド (release.shと同期)
 pyinstaller --clean --noconfirm --onefile --name djaly-server \
+    --add-binary="$RECORDING_FFMPEG:bin" \
     --collect-all uvicorn \
     --collect-all starlette \
     --collect-all fastapi \

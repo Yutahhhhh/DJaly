@@ -112,7 +112,7 @@ export function PerformanceView({ onRequestTrack }: PerformanceViewProps) {
 
   useEffect(() => {
     if (!snapshot?.engine.capabilities.includes("deck.hotcue")) return;
-    for (const deckId of ["A", "B"] as DeckId[]) {
+    for (const deckId of snapshot.engine.decks) {
       const pending = pendingHotCues.current[deckId];
       const deck = snapshot.decks[deckId];
       if (!pending || hydratingHotCues.current.has(deckId) || deck.status !== "ready" || deck.track?.trackId !== pending.trackId) continue;

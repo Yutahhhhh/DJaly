@@ -1,8 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
+from pathlib import Path
+import runpy
 
 datas = [('models/msd-musicnn-1.pb', 'models')]
 binaries = []
+# Package the converter and its linked libraries; installed apps must not rely
+# on a developer's Homebrew installation for the recording format selector.
+recording_ffmpeg = runpy.run_path(str(Path(SPECPATH) / 'packaging_ffmpeg.py'))['find_ffmpeg']()
+binaries.append((recording_ffmpeg, 'bin'))
 hiddenimports = ['uvicorn', 'uvicorn.main', 'uvicorn.config', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.loops.asyncio', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.http.httptools_impl', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.protocols.websockets.wsproto_impl', 'uvicorn.protocols.websockets.websockets_impl', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'uvicorn.lifespan.off', 'uvicorn.server', 'starlette', 'starlette.routing', 'starlette.middleware', 'starlette.applications', 'fastapi', 'fastapi.applications', 'sqlmodel', 'platformdirs', 'pydantic_settings', 'sklearn.utils._typedefs', 'sklearn.neighbors._partition_nodes', 'scipy.special.cython_special', 'h11', 'h11._connection', 'h11._state', 'anyio', 'anyio._backends', 'anyio._backends._asyncio', 'mcp_server', 'mcp_server.instance', 'mcp_server.server', 'mcp_server.tools', 'mcp_server.tools.tracks', 'mcp_server.tools.setlists', 'mcp_server.tools.genres', 'mcp_server.tools.lyrics', 'mcp_server.tools.analysis', 'mcp_server.tools.wordplay']
 # 主要な依存関係を収集
 for package in ['uvicorn', 'starlette', 'fastapi', 'h11', 'essentia', 'numpy', 'scipy', 'sklearn', 'tensorflow', 'mcp', 'mcp_types', 'sse_starlette', 'jsonschema']:
@@ -16,6 +22,15 @@ for package in ['uvicorn', 'starlette', 'fastapi', 'h11', 'essentia', 'numpy', '
 
 # essentiaの動的ライブラリを明示的に収集
 binaries += collect_dynamic_libs('essentia')
+
+# Fail the build if local-library dependencies are missing; do not silently ship
+# a grid importer that relies on another checkout or virtual environment.
+for package in ['pyrekordbox', 'sqlcipher3']:
+    __import__(package)
+    package_datas, package_binaries, package_imports = collect_all(package)
+    datas += package_datas
+    binaries += package_binaries
+    hiddenimports += package_imports
 
 a = Analysis(
     ['server.py'],

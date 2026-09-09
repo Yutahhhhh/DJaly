@@ -17,16 +17,18 @@ import { Updater } from "@/components/Updater";
 import { Toaster } from "@/components/ui/toast";
 import { usePlayerStore } from "@/stores/playerStore";
 import { WordplayView } from "@/components/wordplay";
-import { PerformanceView } from "@/components/performance";
 import { djEngineClient } from "@/services/dj-engine/client";
+import { DECK_IDS } from "@/types/dj-engine";
+import { ModeToggle, PlayWorkspace, type AppMode } from "@/components/play";
 
 function App() {
+  const [appMode, setAppMode] = useState<AppMode>(() => sessionStorage.getItem("djaly.appMode") === "play" ? "play" : "analysis");
   const [activeView, setActiveView] = useState(() =>
     sessionStorage.getItem("djaly.activeView") ?? "dashboard"
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isServerReady, setIsServerReady] = useState(false);
-  const previousView = useRef(activeView);
+  const previousMode = useRef(appMode);
   const [releasingPerformanceAudio, setReleasingPerformanceAudio] = useState(false);
 
   // Music Player State
@@ -57,15 +59,21 @@ function App() {
   // entering it so gain/EQ are never applied to two independent players.
   useEffect(() => {
     sessionStorage.setItem("djaly.activeView", activeView);
-    if (activeView === "performance") {
+    if (appMode === "play") {
       pause();
       setReleasingPerformanceAudio(false);
     }
-    if (previousView.current === "performance" && activeView !== "performance" && djEngineClient.getSessionId()) {
+    if (previousMode.current === "play" && appMode === "analysis") {
       // Deliberate navigation away is an audio-safety boundary. A full webview
       // reload still leaves the native process playing and reconnectable.
       setReleasingPerformanceAudio(true);
-      void Promise.allSettled([djEngineClient.pause("A"), djEngineClient.pause("B")])
+      const hasSession = Boolean(djEngineClient.getSessionId());
+      const releaseRecording = hasSession && djEngineClient.getState().snapshot?.recording?.active
+        ? djEngineClient.stopRecording()
+        : Promise.resolve();
+      void releaseRecording.catch(() => undefined).then(() => hasSession
+        ? Promise.allSettled(DECK_IDS.map((deck) => djEngineClient.pause(deck)))
+        : djEngineClient.stop().then(() => []))
         .then(async (outcomes) => {
           if (outcomes.some((outcome) => outcome.status === "rejected")) {
             await djEngineClient.stop();
@@ -76,8 +84,9 @@ function App() {
           console.error("Native DJ audio could not be released; browser player remains disabled", failure);
         });
     }
-    previousView.current = activeView;
-  }, [activeView, pause]);
+    previousMode.current = appMode;
+    sessionStorage.setItem("djaly.appMode", appMode);
+  }, [activeView, appMode, pause]);
 
   if (!isServerReady) {
     return <LoadingScreen />;
@@ -105,8 +114,6 @@ function App() {
         return <McpView />;
       case "wordplay":
         return <WordplayView />;
-      case "performance":
-        return <PerformanceView />;
       case "settings":
         return <SettingsView />;
       default:
@@ -118,7 +125,13 @@ function App() {
     <IngestionProvider>
       <MetadataProvider>
         <Updater />
-        <div className="h-screen w-full bg-background text-foreground flex overflow-hidden">
+        <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#080b11]">
+          <div className="z-[80] flex h-10 shrink-0 items-center border-b border-slate-700 bg-[#11151d] px-3 shadow-md">
+            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Djaly Workspace</span>
+            <div className="ml-auto"><ModeToggle mode={appMode} onChange={(mode) => { if (appMode === "play" && mode === "analysis") setReleasingPerformanceAudio(true); setAppMode(mode); }} /></div>
+          </div>
+        <div className="min-h-0 flex-1">
+        {appMode === "play" ? <PlayWorkspace /> : <div className="h-full w-full bg-background text-foreground flex overflow-hidden">
         <Sidebar
           activeView={activeView}
           onNavigate={setActiveView}
@@ -129,17 +142,19 @@ function App() {
           <div className="flex-1 overflow-hidden relative">{renderView()}</div>
 
           {/* Spacer for Music Player when active to prevent content overlap */}
-          {currentTrack && activeView !== "performance" && !releasingPerformanceAudio && <div className="h-24 shrink-0" />}
+          {currentTrack && !releasingPerformanceAudio && <div className="h-24 shrink-0" />}
         </main>
 
         {/* Global Components */}
         <GlobalProgressIndicator />
 
-        {activeView !== "performance" && !releasingPerformanceAudio && (
+        {!releasingPerformanceAudio && (
           <MusicPlayer onLoadingChange={setIsPlayerLoading} />
         )}
         <Toaster />
-      </div>
+      </div>}
+        </div>
+        </div>
       </MetadataProvider>
     </IngestionProvider>
   );

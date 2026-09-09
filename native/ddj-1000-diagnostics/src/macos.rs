@@ -60,14 +60,14 @@ struct AudioBufferList {
     buffers: [AudioBuffer; 1],
 }
 
-#[repr(C)]
+#[repr(C, packed(4))]
 struct MIDIPacket {
     timestamp: u64,
     length: u16,
     data: [u8; 256],
 }
 
-#[repr(C)]
+#[repr(C, packed(4))]
 struct MIDIPacketList {
     number_packets: u32,
     packet: [MIDIPacket; 1],
@@ -445,12 +445,13 @@ unsafe extern "C" fn midi_read(
     let mut packet = list.packet.as_ptr();
     for _ in 0..list.number_packets {
         let p = &*packet;
-        let length = usize::from(p.length).min(p.data.len());
-        let bytes = &p.data[..length];
+        let timestamp = p.timestamp;
+        let length = usize::from(p.length);
+        let bytes = std::slice::from_raw_parts(p.data.as_ptr(), length);
         if context.json {
             println!(
                 "{}",
-                json!({"timestamp": p.timestamp, "length": length, "bytes": bytes})
+                json!({"timestamp": timestamp, "length": length, "bytes": bytes})
             );
         } else {
             let hex = bytes
@@ -458,7 +459,7 @@ unsafe extern "C" fn midi_read(
                 .map(|byte| format!("{byte:02X}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("timestamp={} bytes={hex}", p.timestamp);
+            println!("timestamp={timestamp} bytes={hex}");
         }
         let next = p.data.as_ptr().add(length) as usize;
         packet = ((next + 3) & !3) as *const MIDIPacket;
@@ -568,5 +569,17 @@ pub fn monitor_source(unique_id: i32, seconds: u64, json_output: bool) -> Result
         drop(resources);
         drop(context);
         result
+    }
+}
+
+#[cfg(test)]
+mod packet_layout_tests {
+    use super::*;
+    #[test]
+    fn packet_layout_matches_core_midi_four_byte_packing() {
+        assert_eq!(std::mem::align_of::<MIDIPacket>(), 4);
+        assert_eq!(std::mem::size_of::<MIDIPacket>(), 268);
+        assert_eq!(std::mem::offset_of!(MIDIPacket, data), 10);
+        assert_eq!(std::mem::offset_of!(MIDIPacketList, packet), 4);
     }
 }

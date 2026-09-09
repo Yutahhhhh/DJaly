@@ -1,6 +1,6 @@
 {
   "productName": "Djaly",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "identifier": "com.djaly.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -33,6 +33,7 @@
         "width": 1200,
         "height": 800,
         "resizable": true,
+        "dragDropEnabled": false,
         "fullscreen": false,
         "devtools": true
       }

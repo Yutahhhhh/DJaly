@@ -37,9 +37,10 @@ pub async fn dj_engine_start(
     app: AppHandle,
     state: State<'_, Arc<EngineSupervisor>>,
     output_device: Option<String>,
+    recording_dir: Option<String>,
 ) -> Result<EngineStatus, String> {
     let supervisor = state.inner().clone();
-    run_blocking(move || supervisor.start(&app, output_device)).await
+    run_blocking(move || supervisor.start(&app, output_device, recording_dir)).await
 }
 
 #[tauri::command]

@@ -6,6 +6,7 @@
  * 単位の約束:
  * - 時間はすべてミリ秒（`...Ms`）。秒は使わない。
  * - `positionFrames` はサンプル位置。`sampleRateHz` と対で解釈する。
+ * - `positionMs` / `positionFrames` は曲頭前の無音区間では負。通常の音声時計で進む。
  * - `rate` は再生速度の倍率（1.0 が原速）。パーセントではない。
  * - フェーダー・マスターの `gain` は線形 0.0〜1.0。dB ではない。
  * - EQ の `gain` は線形倍率 0.0〜4.0（1.0 がユニティ＝0 dB）。
@@ -16,7 +17,7 @@
 
 export const DJ_ENGINE_PROTOCOL_VERSION = 1;
 
-export const DECK_IDS = ["A", "B"] as const;
+export const DECK_IDS = ["A", "B", "C", "D"] as const;
 export type DeckId = (typeof DECK_IDS)[number];
 
 export type DeckStatus =
@@ -53,7 +54,9 @@ export const DJ_ENGINE_OPS = {
   deckPlay: "deck.play",
   deckPause: "deck.pause",
   deckSeek: "deck.seek",
+  deckScratch: "deck.scratch",
   deckTempoSet: "deck.tempo.set",
+  deckBeatgridSet: "deck.beatgrid.set",
   deckKeylockSet: "deck.keylock.set",
   deckSyncSet: "deck.sync.set",
   deckHotcueSet: "deck.hotcue.set",
@@ -61,6 +64,12 @@ export const DJ_ENGINE_OPS = {
   deckHotcueClear: "deck.hotcue.clear",
   deckLoopSet: "deck.loop.set",
   deckLoopEnable: "deck.loop.enable",
+  deckBeatJump: "deck.beatjump",
+  deckBeatLoop: "deck.loop.beats",
+  deckQuantizeSet: "deck.quantize.set",
+  mixerFilterSet: "mixer.filter.set",
+  mixerTrimSet: "mixer.trim.set",
+  mixerFxSet: "mixer.fx.set",
   mixerChannelGain: "mixer.channel.gain",
   mixerChannelEq: "mixer.channel.eq",
   mixerChannelPfl: "mixer.channel.pfl",
@@ -70,9 +79,22 @@ export const DJ_ENGINE_OPS = {
   audioConfigGet: "audio.config.get",
   audioConfigSet: "audio.config.set",
   metersSubscribe: "meters.subscribe",
+  recordingStart: "recording.start",
+  recordingStop: "recording.stop",
+  recordingDirectorySet: "recording.directory.set",
+  recordingFormatSet: "recording.format.set",
 } as const;
 
 export type DjEngineOp = (typeof DJ_ENGINE_OPS)[keyof typeof DJ_ENGINE_OPS];
+
+export type ScratchPhase = "begin" | "move" | "end";
+export interface ScratchCommand {
+  deck: DeckId;
+  phase: ScratchPhase;
+  /** Cumulative displacement in source-track milliseconds; begin is zero. */
+  positionMs: number;
+  gestureId: string;
+}
 
 /** イベント名。 */
 export const DJ_ENGINE_EVENTS = {
@@ -84,6 +106,7 @@ export const DJ_ENGINE_EVENTS = {
   audioConfig: "audio.config",
   meters: "meters",
   sessionInvalidated: "session.invalidated",
+  recordingState: "recording.state",
 } as const;
 
 /** 受理される値域。エンジン側 (`engine.rs`) と同じ値を持つ。 */
@@ -93,7 +116,7 @@ export const DJ_ENGINE_RANGES = {
   eqGain: { min: 0, max: 4 },
   masterGain: { min: 0, max: 1 },
   crossfader: { min: -1, max: 1 },
-  hotCueIndex: { min: 0, max: 7 },
+  hotCueIndex: { min: 0, max: 15 },
   metersIntervalMs: { min: 20, max: 2000 },
 } as const;
 
@@ -102,6 +125,7 @@ export type EqBand = (typeof EQ_BANDS)[number];
 
 /** DJaly からエンジンへ渡す曲記述子。正本は DJaly 側の DB。 */
 export interface TrackDescriptor {
+  musicalKey?: string;
   trackId: string;
   path: string;
   durationMs: number;
@@ -111,6 +135,10 @@ export interface TrackDescriptor {
   sampleRateHz?: number;
   channels?: number;
   beatgridOffsetMs?: number;
+  beatsPerBar?: number;
+  beatTimesMs?: number[];
+  beatNumbers?: number[];
+  hotCues?: (number | null)[];
 }
 
 export interface LoadedTrack {
@@ -122,7 +150,11 @@ export interface LoadedTrack {
   bpm: number | null;
   sampleRateHz: number;
   channels: number;
-  beatgridOffsetMs: number;
+  beatgridOffsetMs?: number;
+  beatsPerBar?: number;
+  beatTimesMs?: number[];
+  beatNumbers?: number[];
+  beatgridApplied?: boolean;
 }
 
 export interface LoopRegion {
@@ -132,11 +164,19 @@ export interface LoopRegion {
 }
 
 export interface DeckState {
+  keyShift?: number;
+  musicalKey?: number;
+  slip?: boolean;
+  reverse?: boolean;
+  slipReverse?: boolean;
   deck: DeckId;
   status: DeckStatus;
   track: LoadedTrack | null;
   positionMs: number;
   positionFrames: number;
+  quantize?: boolean;
+  /** Optional for compatibility with engine snapshots predating scratch. */
+  scratching?: boolean;
   rate: number;
   keylock: boolean;
   syncEnabled: boolean;
@@ -149,6 +189,14 @@ export interface DeckState {
   loadId: number | null;
 }
 
+/**
+ * Mixxx 内蔵エフェクトのうちパッドから叩けるもの。エンジン側 (`host.cpp` の
+ * `padEffects`) と同じ集合で、各名前は org.mixxx.effects.<name> として読まれる。
+ */
+export const PAD_EFFECTS = ["echo", "reverb", "flanger", "phaser", "filter", "bitcrusher", "distortion", "autopan", "tremolo", "moogladder4filter"] as const;
+export type PadEffect = (typeof PAD_EFFECTS)[number];
+export interface ChannelFx { effect: PadEffect; enabled: boolean; mix: number }
+
 export interface ChannelState {
   deck: DeckId;
   gain: number;
@@ -156,14 +204,55 @@ export interface ChannelState {
   eqMid: number;
   eqHigh: number;
   pfl: boolean;
+  trim?: number;
+  filter?: number;
+  fx?: ChannelFx;
+}
+
+export interface BeatFxState {
+  bpm?: number;
+  auto?: boolean;
+  effect: string;
+  target: string;
+  enabled: boolean;
+  mix: number;
+  beats: number;
 }
 
 export interface MixerState {
+  beatFx?: BeatFxState;
   crossfader: number;
   masterGain: number;
   headphoneGain: number;
   headphoneMix: number;
   channels: Record<DeckId, ChannelState>;
+}
+
+export interface MicrophoneSettings {
+  deviceId: string | null;
+  /** Zero-based mono input channel. */
+  channel: number;
+  enabled: boolean;
+  gain: number;
+  duckingEnabled: boolean;
+  duckingStrength: number;
+}
+
+export interface MicrophoneState extends MicrophoneSettings {
+  available: boolean;
+  applied: boolean;
+  level: number;
+  reason?: string;
+}
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+  displayName: string;
+  outputChannels: number;
+  inputChannels?: number;
+  isDefault: boolean;
+  isDefaultInput?: boolean;
 }
 
 export interface AudioConfig {
@@ -177,6 +266,7 @@ export interface AudioConfig {
   applied: boolean;
   /** Optional host explanation when the requested routing was not applied. */
   reason?: string;
+  microphone?: MicrophoneState;
 }
 
 export interface MetersPayload {
@@ -210,7 +300,22 @@ export interface EngineSnapshot {
   decks: Record<DeckId, DeckState>;
   mixer: MixerState;
   audio: AudioConfig;
+  recording?: RecordingState;
   meters: { enabled: boolean; intervalMs: number; simulated: boolean };
+}
+
+export interface RecordingState {
+  active: boolean;
+  /** The encoder is flushing; playback/rename must wait until this is false. */
+  stopping?: boolean;
+  path: string | null;
+  startedAt: string | null;
+  elapsedMs: number;
+  error: string | null;
+  /** このホストが実際に書き出せる形式。ビルド構成で決まる。 */
+  formats?: { name: string; label: string; lossless: boolean; extension: string }[];
+  /** 次の録音で使う形式。 */
+  format?: string;
 }
 
 export interface EngineError {

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "djaly": {
+      "type": "http",
+      "url": "http://127.0.0.1:48123/mcp"
+    },
+    "rekordbox": {
+      "type": "stdio",
+      "command": "/Users/horiyuuta/.local/bin/rekordbox-mcp",
+      "args": ["--mode", "readonly"],
+      "env": {
+        "REKORDBOX_DB_PATH": "/Users/horiyuuta/Library/Pioneer/rekordbox/master.db"
+      }
+    }
+  }
+}

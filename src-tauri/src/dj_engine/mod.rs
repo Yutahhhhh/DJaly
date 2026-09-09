@@ -9,3 +9,6 @@ pub mod commands;
 pub mod supervisor;
 
 pub use supervisor::EngineSupervisor;
+
+pub mod midi;
+pub mod jog_display;

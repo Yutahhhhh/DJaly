@@ -9,6 +9,7 @@ from datetime import datetime
 
 import numpy as np
 from sqlmodel import Session, select
+from sqlalchemy import text
 
 from config import settings
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
@@ -198,6 +199,9 @@ class AnalysisJobService:
             components = {**extra.get("analysis_components", {}), **update.pop("analysis_components", {})}
             if "rhythm" in features:
                 analysis.beat_positions = update.pop("beat_positions")
+                # A new rhythm result invalidates only disposable analysis
+                # candidates. User-saved grids and rekordbox imports are intact.
+                session.exec(text("DELETE FROM track_grid_candidates WHERE track_id=:id AND source='analysis'"), params={"id": track.id})
             if "waveform" in features:
                 analysis.waveform_peaks = update.pop("waveform_peaks")
             extra.update(update)

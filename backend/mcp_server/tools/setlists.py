@@ -149,6 +149,36 @@ def recommend_next_track(
 
 
 @mcp.tool()
+def recommend_next_track_page(
+    track_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    genres: Optional[List[str]] = None,
+    subgenres: Optional[List[str]] = None,
+    target_bpm: Optional[float] = None,
+    target_energy: Optional[float] = None,
+    target_danceability: Optional[float] = None,
+    target_brightness: Optional[float] = None,
+    target_noisiness: Optional[float] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+) -> Dict[str, Any]:
+    """全候補をスコア順に並べてからページングし、正確な総件数を返す。"""
+    if not 1 <= limit <= 500 or offset < 0:
+        raise ValueError("limit must be 1..500 and offset must be non-negative")
+    with db_session() as session:
+        return serialize(SetlistAppService(session).recommend_next_track_page(
+            track_id, limit=limit, offset=offset,
+            target_params={
+                "bpm": target_bpm, "energy": target_energy,
+                "danceability": target_danceability, "brightness": target_brightness,
+                "noisiness": target_noisiness, "year_min": year_min, "year_max": year_max,
+            },
+            genres=genres, subgenres=subgenres,
+        ))
+
+
+@mcp.tool()
 def generate_auto_setlist(
     length: Optional[int] = None,
     min_length: Optional[int] = None,

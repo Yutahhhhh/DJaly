@@ -66,6 +66,10 @@ pub fn run() {
         })
         .manage(Arc::new(dj_engine::EngineSupervisor::new()))
         .invoke_handler(tauri::generate_handler![
+            dj_engine::midi::dj_midi_status,
+            dj_engine::midi::dj_midi_send,
+            dj_engine::midi::dj_midi_read,
+            dj_engine::midi::dj_jog_display_update,
             dj_engine::commands::dj_engine_status,
             dj_engine::commands::dj_engine_start,
             dj_engine::commands::dj_engine_stop,
@@ -73,6 +77,8 @@ pub fn run() {
             dj_engine::commands::dj_engine_send,
         ])
         .setup(|app| {
+            app.manage(dj_engine::midi::controller(app.handle().clone()));
+            app.manage(dj_engine::jog_display::JogDisplay::new());
             // ネイティブ DJ エンジン（Phase 0 シミュレータ）はオプトイン起動。
             // 既定では起動せず、フロントは「未起動」を受け取って素直に劣化する。
             // Python サイドカーとは独立なので、CI 判定より前に置く。
@@ -83,7 +89,7 @@ pub fn run() {
                         .state::<Arc<dj_engine::EngineSupervisor>>()
                         .inner()
                         .clone();
-                    match supervisor.start(&handle, None) {
+                    match supervisor.start(&handle, None, None) {
                         Ok(status) => println!(
                             "[dj-engine] 自動起動しました running={} simulated={}",
                             status.running, status.simulated

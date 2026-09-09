@@ -219,7 +219,7 @@ async def test_list_tools_returns_all_tools(mcp_session):
     """list_tools で全ツールが返り、MCP-client reasoning toolsが含まれることを検証する。"""
     result = await mcp_session.list_tools()
     names = [t.name for t in result.tools]
-    assert len(names) == 45
+    assert len(names) == 46
     assert {"list_wordplay_pairs", "propose_wordplay_pairs", "approve_wordplay_pair", "reject_wordplay_pair"}.issubset(names)
     assert {"register_track_lyrics", "register_track_lyrics_batch"}.issubset(names)
     assert {"plan_track_analysis", "start_track_analysis", "get_track_analysis_status",
@@ -229,6 +229,7 @@ async def test_list_tools_returns_all_tools(mcp_session):
         "list_setlists",
         "create_setlist",
         "generate_auto_setlist",
+        "recommend_next_track_page",
         "export_setlist_m3u8",
         "find_wordplay_links",
         "add_track_to_setlist_with_wordplay",
@@ -241,6 +242,25 @@ async def test_list_tools_returns_all_tools(mcp_session):
         "search_lyrics",
     ]:
         assert expected in names
+
+
+@pytest.mark.asyncio
+async def test_paged_recommendations_mcp_returns_global_order_and_total(mcp_session, session: Session):
+    target = _add_track(session, "/page-target.mp3", "Target", bpm=120)
+    weaker = _add_track(session, "/page-weaker.mp3", "Weaker", bpm=126)
+    strongest = _add_track(session, "/page-strongest.mp3", "Strongest", bpm=120)
+    vector = json.dumps([0.1] * 200)
+    for track in (target, weaker, strongest):
+        session.add(TrackEmbedding(track_id=track.id, embedding_json=vector))
+    session.commit()
+
+    result = await mcp_session.call_tool("recommend_next_track_page", {
+        "track_id": target.id, "limit": 1, "offset": 0,
+    })
+    page = _result_dict(result)
+    assert page["total"] == 2
+    assert page["items"][0]["id"] == strongest.id
+    assert page["has_more"] is True
 
 
 # ---------------------------------------------------------------------------

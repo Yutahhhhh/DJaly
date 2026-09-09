@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Bot,
   MessageSquareQuote,
-  Disc3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -54,13 +53,6 @@ export function Sidebar({
           label="Library"
           isActive={activeView === "library"}
           onClick={() => onNavigate("library")}
-          isOpen={isOpen}
-        />
-        <NavButton
-          icon={<Disc3 className="h-5 w-5" />}
-          label="Performance"
-          isActive={activeView === "performance"}
-          onClick={() => onNavigate("performance")}
           isOpen={isOpen}
         />
         <NavButton

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { djEngineClient, DjEngineCommandError } from "@/services/dj-engine/client";
-import type { EngineClientState, EngineStatus } from "@/types/dj-engine";
+import { DECK_IDS, type EngineClientState, type EngineStatus } from "@/types/dj-engine";
+import { frameNotification } from "@/services/dj-engine/frame-notification";
 
 /**
  * ネイティブ DJ エンジン（Phase 0 シミュレータ）に接続するためのフック。
@@ -30,8 +31,24 @@ export function useDjEngine() {
 
   useEffect(() => {
     let cancelled = false;
+    // The client reduces every protocol event immediately. Only React rendering
+    // is coalesced, so four decks cannot enqueue four whole-workspace renders
+    // per native audio telemetry tick. Commands still read live client state.
+    const notification = frameNotification(setEngineState);
+    let previous = djEngineClient.getState();
     const unsubscribeState = djEngineClient.subscribe((next) => {
-      if (!cancelled) setEngineState(next);
+      if (cancelled) return;
+      // Recording/history and resync effects also consume this hook. Preserve
+      // their immediate lifecycle notifications; coalesce position/meter ticks.
+      const structural = next.sessionInvalidated !== previous.sessionInvalidated
+        || next.droppedEvents !== previous.droppedEvents
+        || next.snapshot?.sessionId !== previous.snapshot?.sessionId
+        || next.snapshot?.recording !== previous.snapshot?.recording
+        || DECK_IDS.some(id => next.snapshot?.decks[id]?.status !== previous.snapshot?.decks[id]?.status
+          || next.snapshot?.decks[id]?.track !== previous.snapshot?.decks[id]?.track);
+      previous = next;
+      if (structural) notification.flush(next);
+      else notification.push(next);
     });
     const unsubscribeStatus = djEngineClient.subscribeStatus((next) => {
       if (!cancelled) setStatus(next);
@@ -39,6 +56,7 @@ export function useDjEngine() {
     void refreshStatus();
     return () => {
       cancelled = true;
+      notification.dispose();
       unsubscribeState();
       unsubscribeStatus();
     };
@@ -97,8 +115,8 @@ export function useDjEngine() {
   );
 
   const start = useCallback(
-    (outputDevice?: string) => run(async () => {
-      const next = await djEngineClient.start(outputDevice);
+    (outputDevice?: string, recordingDir?: string) => run(async () => {
+      const next = await djEngineClient.start(outputDevice, recordingDir);
       setStatus(next);
       if (next.running) {
         await djEngineClient.connect();

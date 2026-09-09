@@ -17,12 +17,16 @@ SEQUENCES = {
     "seq_setlists_id": "setlists",
     "seq_setlist_tracks_id": "setlist_tracks",
     "seq_wordplay_pairs_id": "wordplay_pairs",
+    "seq_play_history_id": "play_history",
+    "seq_recordings_id": "recordings",
 }
 
 # 再構築時にそのままコピーできる (変換不要の) テーブル
 PLAIN_TABLES = [
     "tracks", "lyrics", "setlists", "setlist_tracks", "wordplay_pairs",
-    "track_performance_metadata", "settings", "schema_info"
+    "track_performance_metadata", "track_grid_candidates", "rekordbox_sources", "rekordbox_playlists",
+    "rekordbox_playlist_tracks", "play_sessions", "play_history", "recordings",
+    "settings", "schema_info"
 ]
 # 再構築時に行単位の変換が必要なテーブル
 CONVERTED_TABLES = ["track_analyses", "track_embeddings"]
@@ -55,6 +59,9 @@ COMPATIBILITY_STATEMENTS = [
     "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS source_cue_end_timestamp DOUBLE",
     "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS target_intro_timestamp DOUBLE",
     "ALTER TABLE wordplay_pairs ADD COLUMN IF NOT EXISTS target_landing_timestamp DOUBLE",
+    # 録音に名前を付けて保存できるようにする。既存の録音は名前なしのまま残る。
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS artist VARCHAR",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS title VARCHAR",
 ]
 
 
@@ -67,6 +74,17 @@ def get_table_ddl() -> Dict[str, str]:
     物理的な FOREIGN KEY 句を削除し、インデックスと主キーのみで構成します。
     """
     return {
+        "track_grid_candidates": """
+            CREATE TABLE IF NOT EXISTS track_grid_candidates (
+                track_id INTEGER NOT NULL,
+                source VARCHAR NOT NULL,
+                grid_json VARCHAR NOT NULL,
+                fingerprint VARCHAR NOT NULL,
+                provenance_json VARCHAR NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (track_id, source)
+            )
+        """,
         "tracks": """
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY DEFAULT nextval('seq_tracks_id'),
@@ -186,6 +204,78 @@ def get_table_ddl() -> Dict[str, str]:
                 revision INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "rekordbox_sources": """
+            CREATE TABLE IF NOT EXISTS rekordbox_sources (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "rekordbox_playlists": """
+            CREATE TABLE IF NOT EXISTS rekordbox_playlists (
+                source_id VARCHAR NOT NULL,
+                external_id VARCHAR NOT NULL,
+                parent_external_id VARCHAR,
+                name VARCHAR NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                kind VARCHAR NOT NULL DEFAULT 'playlist',
+                PRIMARY KEY (source_id, external_id)
+            )
+        """,
+        "rekordbox_playlist_tracks": """
+            CREATE TABLE IF NOT EXISTS rekordbox_playlist_tracks (
+                source_id VARCHAR NOT NULL,
+                playlist_external_id VARCHAR NOT NULL,
+                position INTEGER NOT NULL,
+                external_track_id VARCHAR,
+                local_track_id INTEGER,
+                filepath VARCHAR,
+                title VARCHAR,
+                artist VARCHAR,
+                bpm FLOAT,
+                musical_key VARCHAR,
+                duration FLOAT,
+                PRIMARY KEY (source_id, playlist_external_id, position)
+            )
+        """,
+        "play_sessions": """
+            CREATE TABLE IF NOT EXISTS play_sessions (
+                id VARCHAR PRIMARY KEY,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP,
+                deck_count INTEGER NOT NULL DEFAULT 2
+            )
+        """,
+        "play_history": """
+            CREATE TABLE IF NOT EXISTS play_history (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_play_history_id'),
+                event_key VARCHAR UNIQUE NOT NULL,
+                session_id VARCHAR NOT NULL,
+                deck VARCHAR NOT NULL,
+                track_id INTEGER NOT NULL,
+                loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                first_played_at TIMESTAMP,
+                ended_at TIMESTAMP,
+                played_ms BIGINT NOT NULL DEFAULT 0,
+                completed BOOLEAN NOT NULL DEFAULT FALSE,
+                reason VARCHAR
+            )
+        """,
+        "recordings": """
+            CREATE TABLE IF NOT EXISTS recordings (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_recordings_id'),
+                recording_key VARCHAR UNIQUE NOT NULL,
+                session_id VARCHAR,
+                filepath VARCHAR NOT NULL,
+                started_at TIMESTAMP NOT NULL,
+                ended_at TIMESTAMP,
+                duration_ms BIGINT NOT NULL DEFAULT 0,
+                status VARCHAR NOT NULL DEFAULT 'recording',
+                error VARCHAR,
+                artist VARCHAR,
+                title VARCHAR
             )
         """,
         "settings": """

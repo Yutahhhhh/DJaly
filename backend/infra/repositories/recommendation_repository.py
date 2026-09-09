@@ -3,6 +3,8 @@ from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
 from utils.embedding import LEGACY_MODELS, embedding_space
+from domain.constants import EMBEDDING_DIM
+from utils.audio_math import CAMELOT_ADJACENCY, KEY_TO_CAMELOT, normalize_key
 import numpy as np
 import json
 import math
@@ -223,3 +225,164 @@ class RecommendationRepository:
             })
             
         return candidates
+
+    def fetch_ranked_page(
+        self,
+        target_track: Track,
+        target_params: Dict[str, Any],
+        genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Score the complete eligible set in SQL, then apply pagination.
+
+        This avoids the old "take 200, score, then slice" behavior, whose later
+        pages and total could not describe the actual filtered recommendation set.
+        """
+        where = ["t.id <> :track_id"]
+        params: Dict[str, Any] = {
+            "track_id": int(target_track.id), "limit": int(limit), "offset": int(offset),
+        }
+        candidate_order_terms = []
+        genre_parts = []
+        if genres:
+            genre_parts.append("t.genre IN :genres")
+            params["genres"] = tuple(genres)
+        if subgenres:
+            genre_parts.append("t.subgenre IN :subgenres")
+            params["subgenres"] = tuple(subgenres)
+        if genre_parts:
+            where.append("(" + " OR ".join(genre_parts) + ")")
+
+        filter_target_bpm = self._to_float(target_params.get("bpm"))
+        if filter_target_bpm is None or filter_target_bpm <= 0:
+            filter_target_bpm = self._to_float(target_track.bpm)
+        if filter_target_bpm is not None and filter_target_bpm > 0:
+            params["filter_target_bpm"] = filter_target_bpm
+            params["max_tempo_distance"] = math.log2(1.4)
+            filter_tempo_distance = """CASE WHEN t.bpm > 0 AND isfinite(t.bpm) THEN LEAST(
+                ABS(LOG2(t.bpm / :filter_target_bpm)),
+                ABS(LOG2(t.bpm / :filter_target_bpm) - 1),
+                ABS(LOG2(t.bpm / :filter_target_bpm) + 1)
+            ) ELSE 1000 END"""
+            where.append(
+                f"((t.bpm > 0 AND isfinite(t.bpm) AND ({filter_tempo_distance}) <= :max_tempo_distance) "
+                "OR t.bpm = 0 OR t.bpm IS NULL)"
+            )
+            candidate_order_terms.append(filter_tempo_distance)
+        score_target_bpm = self._to_float(target_track.bpm)
+        if score_target_bpm is not None and score_target_bpm > 0:
+            params["score_target_bpm"] = score_target_bpm
+            score_tempo_distance = """CASE WHEN t.bpm > 0 AND isfinite(t.bpm) THEN LEAST(
+                ABS(LOG2(t.bpm / :score_target_bpm)),
+                ABS(LOG2(t.bpm / :score_target_bpm) - 1),
+                ABS(LOG2(t.bpm / :score_target_bpm) + 1)
+            ) ELSE 1000 END"""
+            bpm_score = f"EXP(-0.5 * POWER(({score_tempo_distance}) / :bpm_sigma, 2))"
+            params["bpm_sigma"] = math.log2(1.08)
+        else:
+            bpm_score = "0"
+
+        for name, operator in (("year_min", ">="), ("year_max", "<=")):
+            year = self._to_float(target_params.get(name))
+            if year is not None:
+                where.append(f"t.year {operator} :{name}")
+                params[name] = int(year)
+        target_energy = self._to_float(target_params.get("energy"))
+        if target_energy is not None:
+            where.append("t.energy BETWEEN :min_energy AND :max_energy")
+            params["min_energy"] = max(0.0, target_energy - 0.4)
+            params["max_energy"] = min(1.0, target_energy + 0.4)
+            params["order_energy"] = target_energy
+            candidate_order_terms.append("ABS(t.energy - :order_energy)")
+        for feature in ("danceability", "brightness", "noisiness"):
+            target = self._to_float(target_params.get(feature))
+            if target is not None:
+                params[f"order_{feature}"] = target
+                candidate_order_terms.append(
+                    f"COALESCE(ABS(t.{feature} - :order_{feature}), 1.0)"
+                )
+
+        target_camelot = normalize_key(target_track.key)
+        compatible = CAMELOT_ADJACENCY.get(target_camelot, []) if target_camelot else []
+        if target_camelot:
+            params["target_camelot"] = target_camelot
+            params["compatible_camelot"] = tuple(compatible)
+            raw_key = "trim(replace(replace(t.key, '♯', '#'), '♭', 'b'))"
+            pattern = r"(?i)^([a-g])([#b]?)\s*(major|minor|maj|min|m)?$"
+            suffix = f"regexp_extract({raw_key}, '{pattern}', 3)"
+            canonical = (
+                f"upper(regexp_extract({raw_key}, '{pattern}', 1)) || "
+                f"lower(regexp_extract({raw_key}, '{pattern}', 2)) || ' ' || "
+                f"CASE WHEN lower({suffix}) IN ('minor','min','m') AND {suffix} <> 'M' "
+                "THEN 'Minor' ELSE 'Major' END"
+            )
+            mapping = " ".join(
+                f"WHEN '{key}' THEN '{camelot}'" for key, camelot in KEY_TO_CAMELOT.items()
+            )
+            camelot_values = ",".join(f"'{value}'" for value in CAMELOT_ADJACENCY)
+            normalized_key = f"""CASE
+                WHEN upper({raw_key}) IN ({camelot_values}) THEN upper({raw_key})
+                WHEN regexp_full_match({raw_key}, '{pattern}') THEN
+                    CASE {canonical} {mapping} ELSE NULL END
+                ELSE NULL END"""
+            key_score = f"""CASE
+                WHEN ({normalized_key}) = :target_camelot THEN 1.0
+                WHEN ({normalized_key}) IN :compatible_camelot THEN 0.9
+                WHEN ({normalized_key}) IS NOT NULL THEN 0.1
+                ELSE 0.5 END"""
+        else:
+            key_score = "0.5"
+
+        target_embedding = self.session.get(TrackEmbedding, target_track.id)
+        target_vector = self._parse_embedding(target_embedding.embedding_json) if target_embedding else None
+        if (target_embedding and target_vector is not None
+                and target_vector.size == EMBEDDING_DIM and np.linalg.norm(target_vector) > 0):
+            params["target_vec"] = target_embedding.embedding_json
+            if embedding_space(target_embedding.model_name) == "musicnn":
+                model_filter = "(te.model_name IN :legacy_models OR te.model_name IS NULL)"
+                params["legacy_models"] = tuple(LEGACY_MODELS)
+            else:
+                model_filter = "te.model_name = :target_model"
+                params["target_model"] = target_embedding.model_name
+            candidate_vector = f"TRY_CAST(te.embedding_json AS FLOAT[{EMBEDDING_DIM}])"
+            vector_score = f"""CASE WHEN {model_filter} THEN GREATEST(0.0, LEAST(1.0,
+                COALESCE(TRY(array_cosine_similarity(
+                    {candidate_vector},
+                    CAST(:target_vec AS FLOAT[{EMBEDDING_DIM}])
+                )), 0.0))) ELSE 0.0 END"""
+        else:
+            vector_score = "0.0"
+
+        score = f"""(
+            ({bpm_score}) * 0.35 + ({key_score}) * 0.25 + ({vector_score}) * 0.4 +
+            CASE WHEN EXISTS (
+                SELECT 1 FROM wordplay_pairs wp
+                WHERE wp.from_track_id=:track_id AND wp.to_track_id=t.id AND wp.status='approved'
+            ) THEN 0.25 ELSE 0 END
+        )"""
+        where_sql = " AND ".join(where)
+        candidate_order = (
+            "(" + " + ".join(candidate_order_terms) + ") ASC, t.id ASC"
+            if candidate_order_terms else "t.created_at DESC, t.id ASC"
+        )
+        count_sql = f"SELECT count(*) FROM tracks t WHERE {where_sql}"
+        total = int(self.session.connection().execute(text(count_sql), params).scalar_one())
+        page_sql = f"""
+            SELECT t.*, l.content AS lyrics,
+                   (l.content IS NOT NULL AND length(trim(l.content)) > 0) AS has_lyrics,
+                   {score} AS recommendation_score
+            FROM tracks t
+            LEFT JOIN track_embeddings te ON te.track_id=t.id
+            LEFT JOIN lyrics l ON l.track_id=t.id
+            WHERE {where_sql}
+            ORDER BY recommendation_score DESC, {candidate_order}
+            LIMIT :limit OFFSET :offset
+        """
+        rows = self.session.connection().execute(text(page_sql), params).fetchall()
+        items = [dict(row._mapping) for row in rows]
+        return {
+            "items": items, "total": total, "limit": int(limit), "offset": int(offset),
+            "has_more": int(offset) + len(items) < total,
+        }

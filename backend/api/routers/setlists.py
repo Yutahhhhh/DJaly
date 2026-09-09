@@ -106,6 +106,36 @@ def recommend_next_track(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+@router.get("/api/recommendations/next/page")
+def recommend_next_track_page(
+    track_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    genres: Optional[List[str]] = Query(None),
+    subgenres: Optional[List[str]] = Query(None),
+    target_bpm: Optional[float] = None,
+    target_energy: Optional[float] = None,
+    target_danceability: Optional[float] = None,
+    target_brightness: Optional[float] = None,
+    target_noisiness: Optional[float] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    session: Session = Depends(get_session),
+):
+    """Globally ranked recommendation page with an exact eligible total."""
+    try:
+        return SetlistAppService(session).recommend_next_track_page(
+            track_id, limit=limit, offset=offset,
+            target_params={
+                "bpm": target_bpm, "energy": target_energy,
+                "danceability": target_danceability, "brightness": target_brightness,
+                "noisiness": target_noisiness, "year_min": year_min, "year_max": year_max,
+            },
+            genres=genres, subgenres=subgenres,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 @router.post("/api/recommendations/auto")
 def generate_auto_setlist(
     limit: Optional[int] = Body(None),

@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
 bundle="${1:-$repo_root/src-tauri/target/release/bundle/macos/Djaly.app}"
 case "$bundle" in
-  "$repo_root"/src-tauri/target/debug/bundle/macos/Djaly.app|"$repo_root"/src-tauri/target/release/bundle/macos/Djaly.app) ;;
+  "$repo_root"/src-tauri/target/debug/bundle/macos/Djaly.app|"$repo_root"/src-tauri/target/release/bundle/macos/Djaly.app|"$repo_root"/src-tauri/target/release/bundle/macos/"Djaly Preview.app") ;;
   *) echo "Refusing to sign an unexpected bundle path: $bundle" >&2; exit 2 ;;
 esac
 

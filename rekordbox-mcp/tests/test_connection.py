@@ -20,6 +20,26 @@ import pytest
 from rekordbox_mcp.db import connection as connection_module
 from rekordbox_mcp.db.connection import RekordboxConnection
 
+
+def test_encrypted_probe_never_opens_stdlib_sqlite(tmp_path, monkeypatch):
+    path = tmp_path / "master.db"
+    path.write_bytes(b"encrypted database fixture")
+    def forbidden(*args, **kwargs):
+        pytest.fail("stdlib SQLite must not open a SQLCipher database")
+    monkeypatch.setattr(connection_module.sqlite3, "connect", forbidden)
+    assert connection_module.is_rekordbox_database(path)
+    conn = _make_connection(path)
+    assert conn.verify_integrity()
+
+
+def test_plain_sqlite_probe_remains_supported(tmp_path):
+    import sqlite3
+    path = tmp_path / "master.db"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE djmdContent (ID INTEGER)")
+    assert connection_module.is_rekordbox_database(path)
+    assert _make_connection(path).verify_integrity()
+
 # Command lines used by the fake subprocess results.
 REKORDBOX_APP_MAC = "/Applications/rekordbox 7.app/Contents/MacOS/rekordbox"
 REKORDBOX_APP_LINUX = "/opt/rekordbox/rekordbox"

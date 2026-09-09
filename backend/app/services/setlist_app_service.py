@@ -93,6 +93,9 @@ class SetlistAppService:
     def get_setlists(self) -> List[Setlist]:
         return self.repository.find_all()
 
+    def get_setlists_page(self, limit: int, offset: int) -> Dict[str, Any]:
+        return self.repository.find_page(limit, offset)
+
     def create_setlist(self, name: str) -> Setlist:
         setlist = Setlist(name=name)
         return self.repository.create(setlist)
@@ -113,8 +116,12 @@ class SetlistAppService:
         if not setlist:
             return False
         
-        self.repository.clear_tracks(setlist_id)
-        self.repository.delete(setlist)
+        self.repository.clear_tracks(setlist_id, commit=False)
+        try:
+            self.repository.delete(setlist)
+        except Exception:
+            self.session.rollback()
+            raise
         return True
 
     def get_setlist_tracks(self, setlist_id: int) -> List[Dict[str, Any]]:
@@ -129,6 +136,23 @@ class SetlistAppService:
             t_dict["has_lyrics"] = bool(lyrics_content and lyrics_content.strip())
             tracks.append(t_dict)
         return tracks
+
+    def get_setlist_tracks_page(self, setlist_id: int, limit: int, offset: int) -> Optional[Dict[str, Any]]:
+        if not self.repository.get_by_id(setlist_id):
+            return None
+        return self.repository.get_tracks_page(setlist_id, limit, offset)
+
+    def add_setlist_track(self, setlist_id: int, track_id: int, position: Optional[int] = None) -> Optional[int]:
+        if not self.repository.get_by_id(setlist_id):
+            return None
+        if not self.track_repository.get_by_id(track_id):
+            raise ValueError("Track not found")
+        return self.repository.insert_track(setlist_id, track_id, position)
+
+    def remove_setlist_track(self, setlist_id: int, entry_id: int) -> bool:
+        if not self.repository.get_by_id(setlist_id):
+            return False
+        return self.repository.remove_track_entry(setlist_id, entry_id)
 
     def update_setlist_tracks(self, setlist_id: int, track_data: List[Any]) -> bool:
         setlist = self.repository.get_by_id(setlist_id)
@@ -263,6 +287,32 @@ class SetlistAppService:
         
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
         return [c[0] for c in scored_candidates[:limit]]
+
+    def recommend_next_track_page(
+        self,
+        track_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        target_params: Optional[Dict[str, Any]] = None,
+        genres: Optional[List[str]] = None,
+        subgenres: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        target_track = self.track_repository.get_by_id(track_id)
+        if not target_track:
+            raise ValueError("Track not found")
+        validated_targets = sanitize_target_parameters(target_params)
+        if "bpm" not in validated_targets:
+            validated_targets["bpm"] = target_track.bpm
+        page = self.recommendation_repository.fetch_ranked_page(
+            target_track, validated_targets, genres=genres, subgenres=subgenres,
+            limit=limit, offset=offset,
+        )
+        wordplay = self._approved_wordplay(track_id)
+        for item in page["items"]:
+            pair = wordplay.get((track_id, item["id"]))
+            if pair:
+                item["wordplay_json"] = json.dumps(self._wordplay_payload(pair), ensure_ascii=False)
+        return page
 
     def generate_auto_setlist(
         self,

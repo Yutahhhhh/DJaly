@@ -75,7 +75,12 @@ def client_fixture(session: Session) -> Generator:
 
     app.dependency_overrides[get_session] = get_session_override
     with TestClient(app) as client:
-        yield client
+        try:
+            yield client
+        finally:
+            # This fixture shares a session across requests; production closes
+            # each request's session. End test reads before shutdown CHECKPOINT.
+            session.rollback()
     app.dependency_overrides.clear()
 
 @pytest.fixture(autouse=True)

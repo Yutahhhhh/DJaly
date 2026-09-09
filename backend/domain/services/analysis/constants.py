@@ -9,7 +9,7 @@ EMBEDDING_PIPELINE_VERSION = "musicnn-16khz-v1"
 EMBEDDING_MODEL = "msd-musicnn-1:musicnn-16khz-v1"
 COMPONENT_VERSIONS = {
     "embedding": EMBEDDING_PIPELINE_VERSION,
-    "rhythm": "rhythm-v2",
+    "rhythm": "rhythm-v3",
     "key": "key-v1",
     "timbre": "timbre-v1",
     "waveform": "waveform-v1",

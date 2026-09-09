@@ -11,6 +11,7 @@ import {
   DJ_ENGINE_EVENTS,
   DJ_ENGINE_RANGES,
   EQ_BANDS,
+  PAD_EFFECTS,
 } from "../../types/dj-engine.ts";
 import type {
   DeckId,
@@ -22,7 +23,10 @@ import type {
   EngineSnapshot,
   EqBand,
   MetersPayload,
+  ScratchCommand,
+  ScratchPhase,
   TrackDescriptor,
+  PadEffect,
 } from "../../types/dj-engine.ts";
 
 /** 送信前のクライアント側検証で投げるエラー。 */
@@ -107,7 +111,41 @@ export function buildLoadParams(
   if (track.bpm !== undefined) {
     assertRange("track.bpm", track.bpm, { min: 20, max: 300 });
   }
+  if (track.hotCues !== undefined && (!Array.isArray(track.hotCues) || ![8, 16].includes(track.hotCues.length)
+    || !track.hotCues.every(cue => cue === null || typeof cue === "number" && Number.isFinite(cue) && cue >= 0 && cue < track.durationMs))) {
+    throw new DjEngineValidationError("track.hotCues", "Hot Cue は曲内の時刻または null を8個または16個指定してください");
+  }
   return { deck, track };
+}
+
+export function buildBeatStepParams(deck: DeckId, beats: number, loop = false): Record<string, unknown> {
+  assertDeckId(deck);
+  assertRange("beats", beats, { min: loop ? .125 : -64, max: 64 });
+  if (Math.abs(beats) < .125) throw new DjEngineValidationError("beats", "拍数は 1/8 拍以上で指定してください");
+  return { deck, beats };
+}
+
+export function buildFilterParams(deck: DeckId, value: number): Record<string, unknown> {
+  assertDeckId(deck); assertRange("value", value, { min: -1, max: 1 });
+  return { deck, value };
+}
+
+export function buildTrimParams(deck: DeckId, gain: number): Record<string, unknown> {
+  assertDeckId(deck); assertRange("gain", gain, { min: 0, max: 2 });
+  return { deck, gain };
+}
+
+/** 送信の検証と受信スナップショットの検証で同じ値を使う。 */
+export const FX_MIX_RANGE = { min: 0, max: 1 } as const;
+export const FX_DEPTH_RANGE = { min: 0, max: 1 } as const;
+
+export function buildFxParams(deck: DeckId, effect: PadEffect, enabled: boolean, mix: number, depth?: number): Record<string, unknown> {
+  assertDeckId(deck);
+  if (!PAD_EFFECTS.includes(effect) || typeof enabled !== "boolean") throw new DjEngineValidationError("effect", "エフェクトの種類または状態が不正です");
+  assertRange("mix", mix, FX_MIX_RANGE);
+  if (depth === undefined) return { deck, effect, enabled, mix };
+  assertRange("depth", depth, FX_DEPTH_RANGE);
+  return { deck, effect, enabled, mix, depth };
 }
 
 export function buildSeekParams(
@@ -117,14 +155,46 @@ export function buildSeekParams(
 ): Record<string, unknown> {
   assertDeckId(deck);
   const max = durationMs === undefined ? Number.MAX_SAFE_INTEGER : durationMs;
-  assertRange("positionMs", positionMs, { min: 0, max });
+  assertRange("positionMs", positionMs, { min: -60_000, max });
   return { deck, positionMs };
+}
+
+export function buildScratchParams(
+  deck: DeckId,
+  phase: ScratchPhase,
+  positionMs: number,
+  gestureId: string,
+): ScratchCommand {
+  assertDeckId(deck);
+  if (phase !== "begin" && phase !== "move" && phase !== "end") {
+    throw new DjEngineValidationError("phase", "phase は begin / move / end のいずれかです");
+  }
+  assertRange("positionMs", positionMs, { min: -60_000, max: 60_000 });
+  if (!gestureId.trim()) throw new DjEngineValidationError("gestureId", "gestureId が必要です");
+  if (phase === "begin" && positionMs !== 0) {
+    throw new DjEngineValidationError("positionMs", "scratch begin の positionMs は 0 である必要があります");
+  }
+  return { deck, phase, positionMs, gestureId };
 }
 
 export function buildTempoParams(deck: DeckId, rate: number): Record<string, unknown> {
   assertDeckId(deck);
   assertRange("rate", rate, DJ_ENGINE_RANGES.rate);
   return { deck, rate };
+}
+
+export function buildBeatgridParams(deck: DeckId, trackId: string, bpm: number, firstBeatMs: number, beatsPerBar = 4, beatTimesMs?: number[] | null, beatNumbers?: number[] | null): Record<string, unknown> {
+  assertDeckId(deck);
+  if (!trackId.trim()) throw new DjEngineValidationError("trackId", "曲IDが必要です");
+  assertRange("bpm", bpm, { min: 20, max: 300 });
+  assertRange("firstBeatMs", firstBeatMs, { min: 0, max: Number.MAX_SAFE_INTEGER });
+  assertRange("beatsPerBar", beatsPerBar, { min: 1, max: 16 });
+  if (!Number.isInteger(beatsPerBar)) throw new DjEngineValidationError("beatsPerBar", "拍子は整数で指定してください");
+  if (beatTimesMs) {
+    if (beatTimesMs.length < 2 || beatTimesMs.length > 100000 || beatTimesMs.some((ms, i) => !Number.isFinite(ms) || ms < 0 || i > 0 && ms <= beatTimesMs[i - 1])) throw new DjEngineValidationError("beatTimesMs", "拍位置は2〜100000個、時刻順で指定してください");
+  }
+  if (beatNumbers && (!beatTimesMs || beatNumbers.length !== beatTimesMs.length || beatNumbers.some(n => !Number.isInteger(n) || n < 1 || n > beatsPerBar))) throw new DjEngineValidationError("beatNumbers", "小節内拍番号が不正です");
+  return { deck, trackId, bpm, firstBeatMs, beatsPerBar, ...(beatTimesMs ? { beatTimesMs } : {}), ...(beatNumbers ? { beatNumbers } : {}) };
 }
 
 export function buildChannelGainParams(
@@ -222,7 +292,7 @@ function isNullableString(value: unknown): value is string | null {
 }
 
 export function isDeckId(value: unknown): value is DeckId {
-  return value === "A" || value === "B";
+  return typeof value === "string" && DECK_IDS.includes(value as DeckId);
 }
 
 function isDeckStatus(value: unknown): value is DeckStatus {
@@ -267,13 +337,15 @@ function parseDeckState(data: unknown): DeckState | null {
   if (
     !isFiniteNumber(data.positionMs) ||
     !isFiniteNumber(data.positionFrames) ||
+    !(data.scratching === undefined || typeof data.scratching === "boolean") ||
+    !(data.quantize === undefined || typeof data.quantize === "boolean") ||
     !isFiniteNumber(data.rate) ||
     typeof data.keylock !== "boolean" ||
     typeof data.syncEnabled !== "boolean" ||
     !(data.syncLeader === null || isDeckId(data.syncLeader)) ||
     !(data.effectiveBpm === null || isFiniteNumber(data.effectiveBpm)) ||
     !Array.isArray(data.hotCues) ||
-    data.hotCues.length !== 8 ||
+    ![8, 16].includes(data.hotCues.length) ||
     !data.hotCues.every((cue) => cue === null || isFiniteNumber(cue)) ||
     !isNullableString(data.lastError) ||
     !(data.loadId === null || Number.isSafeInteger(data.loadId))
@@ -289,7 +361,7 @@ function parseDeckState(data: unknown): DeckState | null {
       !(data.track.bpm === null || isFiniteNumber(data.track.bpm)) ||
       !isFiniteNumber(data.track.sampleRateHz) ||
       !isFiniteNumber(data.track.channels) ||
-      !isFiniteNumber(data.track.beatgridOffsetMs)
+      (data.track.beatgridOffsetMs !== undefined && !isFiniteNumber(data.track.beatgridOffsetMs))
     ) return null;
   }
   if (data.loopRegion !== null) {
@@ -311,7 +383,7 @@ function parseMixerState(data: unknown): EngineSnapshot["mixer"] | null {
     !isFiniteNumber(data.headphoneGain) ||
     !isFiniteNumber(data.headphoneMix)
   ) return null;
-  for (const deck of DECK_IDS) {
+  for (const deck of ["A", "B"] as const) {
     const channel = data.channels[deck];
     if (!isRecord(channel) || channel.deck !== deck) return null;
     if (
@@ -321,6 +393,22 @@ function parseMixerState(data: unknown): EngineSnapshot["mixer"] | null {
       !isFiniteNumber(channel.eqHigh) ||
       typeof channel.pfl !== "boolean"
     ) return null;
+  }
+  for (const deck of ["C", "D"] as const) {
+    const channel = data.channels[deck];
+    if (channel === undefined) continue;
+    if (!isRecord(channel) || channel.deck !== deck || !isFiniteNumber(channel.gain) ||
+        !isFiniteNumber(channel.eqLow) || !isFiniteNumber(channel.eqMid) ||
+        !isFiniteNumber(channel.eqHigh) || typeof channel.pfl !== "boolean") return null;
+  }
+  for (const deck of DECK_IDS) {
+    const channel = data.channels[deck];
+    if (!isRecord(channel)) continue;
+    if (channel.trim !== undefined && (!isFiniteNumber(channel.trim) || channel.trim < 0 || channel.trim > 2)) return null;
+    if (channel.filter !== undefined && (!isFiniteNumber(channel.filter) || channel.filter < -1 || channel.filter > 1)) return null;
+    if (channel.fx !== undefined && (!isRecord(channel.fx) || !PAD_EFFECTS.includes(channel.fx.effect as PadEffect)
+      || typeof channel.fx.enabled !== "boolean" || !isFiniteNumber(channel.fx.mix)
+      || channel.fx.mix < FX_MIX_RANGE.min || channel.fx.mix > FX_MIX_RANGE.max)) return null;
   }
   return data as unknown as EngineSnapshot["mixer"];
 }
@@ -360,8 +448,16 @@ function parseMeters(data: unknown): MetersPayload | null {
   return data as unknown as MetersPayload;
 }
 
+function parseRecording(data: unknown): EngineSnapshot["recording"] | null {
+  if (!isRecord(data) || typeof data.active !== "boolean" ||
+      !isNullableString(data.path) || !isNullableString(data.startedAt) ||
+      !isFiniteNumber(data.elapsedMs) || !isNullableString(data.error)) return null;
+  return data as unknown as NonNullable<EngineSnapshot["recording"]>;
+}
+
 export function isEngineSnapshot(value: unknown): value is EngineSnapshot {
   if (!isRecord(value) || !isRecord(value.engine) || !isRecord(value.decks)) return false;
+  const decks = value.decks;
   if (
     !Number.isSafeInteger(value.rev) ||
     !Number.isSafeInteger(value.seq) ||
@@ -377,11 +473,15 @@ export function isEngineSnapshot(value: unknown): value is EngineSnapshot {
     !Array.isArray(value.engine.decks) ||
     !Array.isArray(value.engine.capabilities)
   ) return false;
+  if (!value.engine.decks.every(isDeckId)) return false;
+  const engineDecks = value.engine.decks as DeckId[];
+  const mixer = parseMixerState(value.mixer);
   return (
-    parseDeckState(value.decks.A) !== null &&
-    parseDeckState(value.decks.B) !== null &&
-    parseMixerState(value.mixer) !== null &&
+    engineDecks.every((deck) => parseDeckState(decks[deck]) !== null) &&
+    mixer !== null &&
+    engineDecks.every((deck) => mixer.channels[deck] !== undefined) &&
     parseAudioConfig(value.audio) !== null &&
+    (value.recording === undefined || parseRecording(value.recording) !== null) &&
     isRecord(value.meters) &&
     typeof value.meters.enabled === "boolean" &&
     isFiniteNumber(value.meters.intervalMs) &&
@@ -394,6 +494,8 @@ interface DeckPositionUpdate {
   positionFrames: number;
   rate: number;
   status: DeckStatus;
+  scratching?: boolean;
+  effectiveBpm?: number | null;
 }
 
 function parseDeckPositions(
@@ -412,7 +514,13 @@ function parseDeckPositions(
     const rate = readNumber(entry, "rate");
     if (positionMs === null || positionFrames === null || rate === null) continue;
     if (!isDeckStatus(entry.status)) continue;
-    parsed[deckId] = { positionMs, positionFrames, rate, status: entry.status };
+    if (!(entry.scratching === undefined || typeof entry.scratching === "boolean")) continue;
+    if (!(entry.effectiveBpm === undefined || entry.effectiveBpm === null || isFiniteNumber(entry.effectiveBpm))) continue;
+    parsed[deckId] = {
+      positionMs, positionFrames, rate, status: entry.status,
+      ...(typeof entry.scratching === "boolean" ? { scratching: entry.scratching } : {}),
+      ...(entry.effectiveBpm === null || isFiniteNumber(entry.effectiveBpm) ? { effectiveBpm: entry.effectiveBpm } : {}),
+    };
   }
   return parsed;
 }
@@ -576,6 +684,11 @@ export function reduceEngineEvent(
           audio,
         },
       };
+    }
+    case DJ_ENGINE_EVENTS.recordingState: {
+      const recording = parseRecording(event.data);
+      if (!recording) return next;
+      return { ...next, rev: event.rev, snapshot: { ...snapshot, rev: event.rev, recording } };
     }
     case DJ_ENGINE_EVENTS.meters: {
       const meters = parseMeters(event.data);

@@ -121,6 +121,12 @@ def _use_static_connection(db: Any) -> None:
     db.session = SqlAlchemySession(bind=new_engine)
 
 
+def _is_plain_sqlite(path: Path) -> bool:
+    """Inspect the header without opening an incompatible SQLite connection."""
+    with path.open("rb") as stream:
+        return stream.read(16) == b"SQLite format 3\x00"
+
+
 def is_rekordbox_database(path: Path | None) -> bool:
     """Return whether *path* has the Rekordbox master database schema.
 
@@ -131,6 +137,8 @@ def is_rekordbox_database(path: Path | None) -> bool:
     """
     if path is None or not path.exists():
         return False
+    if path.stat().st_size and not _is_plain_sqlite(path):
+        return True
     try:
         with sqlite3.connect(str(path)) as conn:
             row = conn.execute(
@@ -601,6 +609,8 @@ class RekordboxConnection:
                 # master.db is encrypted.  Keep a raw connection only when it
                 # is actually a normal SQLite file (tests and old databases).
                 try:
+                    if not _is_plain_sqlite(self._db_path):
+                        raise sqlite3.DatabaseError("SQLCipher database")
                     self._sqlite_conn = sqlite3.connect(str(self._db_path))
                     self._sqlite_conn.execute("SELECT 1")
                     self._sqlite_conn.row_factory = sqlite3.Row
@@ -795,6 +805,13 @@ class RekordboxConnection:
         if not PYREKORDBOX_AVAILABLE:
             return True  # Mock mode
 
+        # Never mix stdlib SQLite and SQLCipher handles on the same file.
+        # Closing one library's handle can release the other's POSIX locks,
+        # causing apparently successful WAL writes to disappear on reopen.
+        if self._db_path.stat().st_size and not _is_plain_sqlite(self._db_path):
+            return True  # Validated through the SQLCipher connection below.
+
+        conn = None
         try:
             conn = sqlite3.connect(str(self._db_path))
             cursor = conn.cursor()
@@ -813,6 +830,33 @@ class RekordboxConnection:
             return True
         except sqlite3.Error as e:
             raise RuntimeError(f"Database integrity check error: {e}") from e
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def backup_to(self, destination: Path) -> None:
+        """Create a consistent snapshot, including committed WAL contents."""
+        with self._lock:
+            self.connect()
+            if self._db is not None:
+                source = self._db.session.connection().connection.driver_connection
+                driver = self._db.engine.dialect.dbapi
+                target = driver.connect(str(destination))
+                try:
+                    key = self._db.engine.url.password
+                    if key:
+                        target.execute("PRAGMA key='" + key.replace("'", "''") + "'")
+                    source.backup(target)
+                finally:
+                    target.close()
+            elif self._sqlite_conn is not None:
+                target = sqlite3.connect(str(destination))
+                try:
+                    self._sqlite_conn.backup(target)
+                finally:
+                    target.close()
+            else:
+                raise RuntimeError("Database connection unavailable for snapshot")
 
     def is_rekordbox_running(self) -> bool:
         """

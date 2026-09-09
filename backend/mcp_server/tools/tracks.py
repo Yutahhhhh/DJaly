@@ -37,9 +37,11 @@ def search_tracks(
     genres/subgenres は完全一致リスト。status='verified'|'unverified'|'all' でジャンル検証状態を絞れる。
     自然言語の雰囲気は、このツールを呼ぶMCPクライアント自身がBPMや特徴量の
     範囲へ解釈して指定すること。Djaly内ではLLM推論を行わない。"""
+    if not 1 <= limit <= 500 or offset < 0:
+        raise ValueError("limit must be 1..500 and offset must be non-negative")
     with db_session() as session:
         service = TrackAppService(session)
-        tracks = service.get_tracks(
+        page = service.get_tracks_page(
             status=status, q=q, title=title, artist=artist, album=album,
             genres=genres, subgenres=subgenres, key=key, bpm=bpm, bpm_range=bpm_range,
             min_duration=min_duration, max_duration=max_duration,
@@ -50,7 +52,11 @@ def search_tracks(
             year_status=year_status, lyrics_status=lyrics_status, lyrics=lyrics,
             limit=limit, offset=offset,
         )
-        return track_list_payload(tracks)
+        return {
+            "count": len(page["items"]), "tracks": serialize(page["items"]),
+            "total": page["total"], "limit": page["limit"], "offset": page["offset"],
+            "has_more": page["has_more"],
+        }
 
 @mcp.tool()
 def get_track_similar(track_id: int, limit: int = 20) -> Dict[str, Any]:

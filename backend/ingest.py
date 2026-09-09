@@ -1,8 +1,10 @@
 import os
 import logging
 import threading
-from typing import Optional
-from domain.services.analysis.analyzer import AudioAnalyzer
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from domain.services.analysis.analyzer import AudioAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,9 +16,13 @@ logger = logging.getLogger(__name__)
 # while maintaining thread safety (Essentia algorithms are not thread-safe).
 _thread_local = threading.local()
 
-def get_analyzer() -> Optional[AudioAnalyzer]:
+def get_analyzer() -> Optional["AudioAnalyzer"]:
     if not hasattr(_thread_local, "analyzer"):
         try:
+            # Loading Essentia also maps its TensorFlow dependency. Keep this
+            # inside the analysis worker, not the Play/library startup path.
+            from domain.services.analysis.analyzer import AudioAnalyzer
+
             _thread_local.analyzer = AudioAnalyzer()
         except ImportError:
             _thread_local.analyzer = None

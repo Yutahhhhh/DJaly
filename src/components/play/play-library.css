@@ -1,0 +1,73 @@
+.dj-tree-section { justify-content: space-between; }
+.dj-tree-section > button { display: grid; place-items: center; width: 18px; height: 16px; border-radius: 2px; }
+.dj-tree-section > button:hover { background: #2b2e33; }
+.dj-local-playlist { position: relative; }
+.dj-local-playlists-viewport { max-height: 150px; overflow: auto; }
+.dj-mirror-tree-viewport { position: relative; max-height: 180px; overflow: auto; }
+.dj-mirror-tree-viewport .dj-tree-row { inset-inline: 0; }
+.dj-mirror-tree-viewport .dj-tree-more { inset-inline: 12px; margin-block: 1px; }
+.dj-local-playlist > .dj-tree-row { padding-right: 45px; }
+.dj-playlist-actions { position: absolute; right: 3px; top: 2px; display: none; gap: 1px; }
+.dj-local-playlist:hover .dj-playlist-actions, .dj-local-playlist:focus-within .dj-playlist-actions { display: flex; }
+.dj-playlist-actions button { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 2px; background: #25282c; color: #8e949d; }
+.dj-playlist-actions svg { width: 10px; height: 10px; }
+.dj-tree-more { width: calc(100% - 24px); height: 18px; margin: 2px 12px; border: 1px solid #30343a; border-radius: 2px; color: #8e959f; font-size: 8px; }
+.dj-tree-loading { display: grid; place-items: center; height: 20px; color: #707780; }
+.dj-library-notice { display: flex; align-items: center; justify-content: space-between; min-height: 22px; padding: 2px 8px; border-bottom: 1px solid #3f4b5c; background: #1b2634; color: #aabdd5; font-size: 9px; }
+.dj-library-notice button { width: 18px; height: 18px; }
+
+.dj-virtual-tracks { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.dj-vtrack-header, .dj-vtrack-row { display: grid; grid-template-columns: 34px 46px 116px 28px 54px minmax(150px, 1fr) 120px 46px 78px 72px; min-width: 760px; align-items: center; }
+.dj-vtrack-header { height: 20px; flex-shrink: 0; border-bottom: 1px solid #000; background: #202225; color: #9297a0; font-size: 9px; font-weight: 600; letter-spacing: .04em; }
+.dj-vtrack-header > span, .dj-vtrack-row > span { min-width: 0; height: 100%; padding: 0 5px; overflow: hidden; border-right: 1px solid #1b1c1e; white-space: nowrap; text-overflow: ellipsis; }
+.dj-vtrack-header > span { display: flex; align-items: center; }
+/* 並べ替えできる列。押している列だけ明るくして向きを ▲▼ で示す。 */
+.dj-vtrack-header button { display: flex; align-items: center; gap: 3px; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; overflow: hidden; }
+.dj-vtrack-header button > i { font-size: 7px; font-style: normal; line-height: 1; }
+.dj-vtrack-header button:hover { color: #dfe3e9; background: #2a2d31; }
+.dj-vtrack-header button.is-sorted { color: #cfe0f7; }
+.dj-vtrack-scroll { position: relative; min-height: 0; flex: 1; overflow: auto; background: #0a0b0c; }
+.dj-vtrack-row { position: absolute; top: 0; left: 0; right: 0; height: 24px; background: #121314; color: #aeb2b8; font-size: 10px; cursor: grab; }
+.dj-vtrack-row:nth-child(even) { background: #171819; }
+.dj-vtrack-row:hover { background: #232830; }
+.dj-vtrack-row.is-selected { background: var(--dj-select); color: #fff; }
+.dj-vtrack-row > span { display: flex; align-items: center; }
+.dj-vtrack-row > span:first-child, .dj-vtrack-row > span:nth-child(5), .dj-vtrack-row > span:nth-child(8) { justify-content: flex-end; color: #9298a1; font-variant-numeric: tabular-nums; }
+.dj-vtrack-row > span:nth-child(3) { padding: 3px 4px; }
+.dj-vtrack-row .dj-waveform { height: 16px; width: 100%; }
+.dj-vtrack-row > span:nth-child(4) img { width: 20px; height: 20px; border-radius: 2px; object-fit: cover; }
+.dj-vtrack-row > span:nth-child(4) svg { width: 14px; color: #4f545b; }
+.dj-vtrack-row > span:nth-child(6) { color: #e2e4e7; }
+.dj-vtrack-actions { gap: 2px; justify-content: center; padding: 0 2px !important; }
+.dj-vtrack-actions button { display: grid; place-items: center; min-width: 18px; height: 17px; padding: 0 3px; border: 1px solid #3b414b; border-radius: 2px; background: #22262c; color: #9fb2cb; font-size: 8px; }
+.dj-vtrack-actions svg { width: 10px; height: 10px; }
+.dj-page-state { display: flex; min-height: 24px; align-items: center; justify-content: center; gap: 6px; color: #7f858e; font-size: 9px; }
+.dj-page-state button { min-height: 18px; padding: 0 7px; border: 1px solid #30353d; border-radius: 2px; background: #1c1f23; }
+
+.dj-right-tabs { display: grid; grid-template-columns: 1fr 1fr; height: 26px; flex-shrink: 0; border-bottom: 1px solid #000; }
+.dj-right-tabs button { display: flex; align-items: center; justify-content: center; gap: 4px; border-right: 1px solid #111; color: #858b94; font-size: 8px; font-weight: 700; }
+.dj-right-tabs button.is-on { color: #fff; background: #31558e; }
+.dj-right-tabs svg { width: 11px; }
+.dj-right-search { display: flex; align-items: center; gap: 4px; height: 25px; padding: 3px 6px; border-bottom: 1px solid #000; }
+.dj-right-search input { width: 100%; min-width: 0; height: 18px; border: 1px solid #30343a; border-radius: 2px; padding: 0 5px; background: #0d0e0f; outline: none; font-size: 9px; }
+.dj-right-search svg { width: 11px; color: #777d86; }
+.dj-recommend-virtual { position: relative; }
+.dj-recommend-virtual .dj-recommend-row { position: absolute; inset-inline: 0; top: 0; }
+.dj-recommend-virtual .dj-recommend-row { height: 44px; }
+
+.dj-playlist-dialog { width: min(420px, calc(100vw - 32px)); gap: 14px; border: 1px solid #3a3d43; border-radius: 5px; padding: 18px; background: #1b1d20; color: #e2e5e9; box-shadow: 0 18px 55px #000b; }
+.dj-playlist-dialog h2 { font-size: 15px; }
+.dj-playlist-dialog p { margin-top: 6px; color: #9ca2ab; font-size: 11px; line-height: 1.55; }
+.dj-playlist-dialog__field { display: flex; flex-direction: column; gap: 5px; color: #b8bdc5; font-size: 10px; }
+.dj-playlist-dialog__field input { height: 30px; border: 1px solid #444952; border-radius: 3px; padding: 0 8px; background: #0d0e10; color: #f0f2f5; outline: none; }
+.dj-playlist-dialog__field input:focus { border-color: #638bd0; box-shadow: 0 0 0 1px #638bd0; }
+.dj-playlist-dialog__error { padding: 7px 8px; border: 1px solid #6e3835; border-radius: 3px; background: #341e1c; color: #efaaa4; font-size: 10px; }
+.dj-playlist-dialog__actions { display: flex; flex-direction: row; justify-content: flex-end; gap: 6px; }
+.dj-playlist-dialog__actions button { min-width: 68px; height: 28px; border: 1px solid #444850; border-radius: 3px; background: #292c31; color: #d2d5da; font-size: 10px; }
+.dj-playlist-dialog__actions button.is-primary { border-color: #4772b8; background: #315e9f; color: #fff; }
+.dj-playlist-dialog__actions button.is-destructive { border-color: #8b4944; background: #6e302c; color: #fff; }
+.dj-playlist-dialog__actions button:disabled { opacity: .45; cursor: default; }
+
+/* レコメンド／検索からプレイリストへドロップできることを示す。 */
+.dj-virtual-tracks.is-drop { outline: 1px solid var(--dj-blue); outline-offset: -1px; background: #16202e; }
+.dj-vtrack-scroll:focus-visible { outline: 1px solid var(--dj-blue); outline-offset: -1px; }

@@ -136,6 +136,50 @@ def get_tracks(
         offset=offset
     )
 
+@router.get("/api/tracks/page")
+def get_tracks_page(
+    status: str = "all",
+    q: Optional[str] = None,
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    genres: Optional[List[str]] = Query(None),
+    subgenres: Optional[List[str]] = Query(None),
+    key: Optional[str] = None,
+    bpm: Optional[float] = None,
+    bpm_range: float = 5.0,
+    min_duration: Optional[float] = None,
+    max_duration: Optional[float] = None,
+    min_energy: Optional[float] = None,
+    max_energy: Optional[float] = None,
+    min_danceability: Optional[float] = None,
+    max_danceability: Optional[float] = None,
+    min_brightness: Optional[float] = None,
+    max_brightness: Optional[float] = None,
+    min_year: Optional[int] = None,
+    max_year: Optional[int] = None,
+    year_status: str = "all",
+    lyrics_status: str = "all",
+    lyrics: Optional[str] = None,
+    sort: Optional[str] = Query(None, description="並べ替える列。未知の列は無視して既定順のまま"),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+):
+    """Stable bounded library page with an exact total for the applied filters."""
+    return TrackAppService(session).get_tracks_page(
+        status=status, q=q, title=title, artist=artist, album=album,
+        genres=genres, subgenres=subgenres, key=key, bpm=bpm, bpm_range=bpm_range,
+        min_duration=min_duration, max_duration=max_duration,
+        min_energy=min_energy, max_energy=max_energy,
+        min_danceability=min_danceability, max_danceability=max_danceability,
+        min_brightness=min_brightness, max_brightness=max_brightness,
+        min_year=min_year, max_year=max_year, year_status=year_status,
+        lyrics_status=lyrics_status, lyrics=lyrics, sort=sort, order=order,
+        limit=limit, offset=offset,
+    )
+
 @router.get("/api/tracks/count")
 def get_tracks_count(
     status: str = "all",
@@ -165,7 +209,7 @@ def get_tracks_count(
 ):
     """検索条件に一致する楽曲の総数を返す (一覧表示のカウント用)"""
     app_service = TrackAppService(session)
-    ids = app_service.get_track_ids(
+    page = app_service.get_tracks_page(
         status=status,
         q=q,
         title=title,
@@ -189,8 +233,10 @@ def get_tracks_count(
         year_status=year_status,
         lyrics_status=lyrics_status,
         lyrics=lyrics,
+        limit=1,
+        offset=0,
     )
-    return {"count": len(ids)}
+    return {"count": page["total"]}
 
 @router.get("/api/tracks/ids", response_model=List[int])
 def get_track_ids(

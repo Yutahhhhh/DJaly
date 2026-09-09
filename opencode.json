@@ -3,7 +3,7 @@
   "mcp": {
     "djaly": {
       "type": "remote",
-      "url": "http://127.0.0.1:8001/mcp",
+      "url": "http://127.0.0.1:48123/mcp",
       "enabled": true
     },
     "rekordbox": {

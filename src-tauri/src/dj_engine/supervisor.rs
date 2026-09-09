@@ -17,13 +17,17 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+
+#[path = "notification_relay.rs"]
+mod notification_relay;
+use notification_relay::NotificationRelay;
 
 /// スーパーバイザが話すプロトコルバージョン。
 /// `native/dj-engine-host/src/protocol.rs` の `PROTOCOL_VERSION` と一致させる。
@@ -43,6 +47,7 @@ const MAX_TIMEOUT_MS: u64 = 60_000;
 const TICK_MS: u64 = 20;
 /// stop 時に正常終了を待つ猶予。
 const STOP_GRACE: Duration = Duration::from_millis(500);
+const WRITER_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +94,9 @@ pub struct EngineReply {
 }
 
 struct Running {
-    child: Child,
+    child: Arc<Mutex<Child>>,
+    notifications: Arc<NotificationRelay>,
+    shutdown_warning: Arc<Mutex<Option<String>>>,
     writer: Option<SyncSender<String>>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     alive: Arc<AtomicBool>,
@@ -135,7 +142,7 @@ impl EngineSupervisor {
         let mut guard = lock(&self.state);
         if let Some(running) = guard.as_mut() {
             // 子プロセスが死んでいれば回収して running=false にする。
-            if matches!(running.child.try_wait(), Ok(Some(_))) {
+            if matches!(lock(&running.child).try_wait(), Ok(Some(_))) {
                 running.alive.store(false, Ordering::SeqCst);
             }
         }
@@ -147,15 +154,17 @@ impl EngineSupervisor {
         &self,
         app: &AppHandle,
         output_device: Option<String>,
+        recording_dir: Option<String>,
     ) -> Result<EngineStatus, String> {
         let _lifecycle = lock(&self.lifecycle);
-        self.start_serialized(app, output_device)
+        self.start_serialized(app, output_device, recording_dir)
     }
 
     fn start_serialized(
         &self,
         app: &AppHandle,
         output_device: Option<String>,
+        recording_dir: Option<String>,
     ) -> Result<EngineStatus, String> {
         {
             let guard = lock(&self.state);
@@ -183,6 +192,10 @@ impl EngineSupervisor {
         if let Some(output_device) = output_device {
             command.env("DJALY_MIXXX_OUTPUT_DEVICE", output_device);
         }
+        // 保存先はアプリの設定。未指定ならエンジン既定の ~/Music/Djaly Recordings。
+        if let Some(recording_dir) = normalize_recording_dir(recording_dir)? {
+            command.env("DJALY_MIXXX_RECORDING_DIR", recording_dir);
+        }
         let mut child = command.spawn().map_err(|error| {
             let message = format!(
                 "エンジンを起動できませんでした ({}): {error}",
@@ -198,10 +211,50 @@ impl EngineSupervisor {
 
         let pending: Arc<Mutex<HashMap<u64, Sender<Value>>>> = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
+        let child = Arc::new(Mutex::new(child));
+        let shutdown_warning = Arc::new(Mutex::new(None));
+        let notifications = {
+            let relay_ref = Arc::new(OnceLock::<Weak<NotificationRelay>>::new());
+            let failure_relay_ref = Arc::clone(&relay_ref);
+            let scheduler_app = app.clone();
+            let emitter_app = app.clone();
+            let child = Arc::clone(&child);
+            let alive = Arc::clone(&alive);
+            let pending = Arc::clone(&pending);
+            let shutdown_warning = Arc::clone(&shutdown_warning);
+            let relay = NotificationRelay::new(
+                Arc::new(move |task| {
+                    scheduler_app
+                        .run_on_main_thread(task)
+                        .map_err(|error| error.to_string())
+                }),
+                Arc::new(move |channel, payload| {
+                    emitter_app
+                        .emit_str(channel, payload)
+                        .map_err(|error| error.to_string())
+                }),
+                Arc::new(move |error| {
+                    // A broken event stream cannot leave audio running with an
+                    // unusable controller. Closing stdin allows recording
+                    // finalization; a detached watchdog bounds shutdown time.
+                    fail_event_delivery(
+                        &child,
+                        &alive,
+                        &pending,
+                        &shutdown_warning,
+                        failure_relay_ref.get().cloned(),
+                        error,
+                    );
+                }),
+            );
+            // No notifications are submitted until after this initialization.
+            let _ = relay_ref.set(Arc::downgrade(&relay));
+            relay
+        };
 
         // stdout: プロトコル専用。
         {
-            let app = app.clone();
+            let notifications = Arc::clone(&notifications);
             let pending = Arc::clone(&pending);
             let alive = Arc::clone(&alive);
             thread::spawn(move || {
@@ -223,22 +276,7 @@ impl EngineSupervisor {
                             continue;
                         }
                     };
-                    let kind = value
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let correlated = matches!(kind, "result" | "error" | "hello");
-                    let id = value.get("id").and_then(Value::as_u64);
-                    if correlated {
-                        if let Some(id) = id {
-                            let waiter = lock(&pending).remove(&id);
-                            if let Some(waiter) = waiter {
-                                let _ = waiter.send(value);
-                                continue;
-                            }
-                        }
-                    }
-                    emit(&app, EVENT_CHANNEL, &value);
+                    route_protocol_value(value, &pending, &notifications);
                 }
 
                 // EOF = 子プロセスの終了。待っている要求を全部失敗させる。
@@ -255,10 +293,9 @@ impl EngineSupervisor {
                         }
                     }));
                 }
-                emit(
-                    &app,
+                notifications.enqueue(
                     STATUS_CHANNEL,
-                    &json!({ "running": false, "reason": "engine_exited" }),
+                    json!({ "running": false, "reason": "engine_exited" }).to_string(),
                 );
             });
         }
@@ -280,11 +317,19 @@ impl EngineSupervisor {
         // or prevent stop() from killing it.
         let (writer, writer_rx) = mpsc::sync_channel::<String>(MAX_IN_FLIGHT);
         {
-            let app = app.clone();
+            let notifications = Arc::clone(&notifications);
             let pending = Arc::clone(&pending);
             let alive = Arc::clone(&alive);
             thread::spawn(move || {
-                while let Ok(line) = writer_rx.recv() {
+                while alive.load(Ordering::SeqCst) {
+                    let line = match writer_rx.recv_timeout(WRITER_POLL) {
+                        Ok(line) => line,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    };
+                    if !alive.load(Ordering::SeqCst) {
+                        break;
+                    }
                     if let Err(error) = write_line(&mut stdin, &line) {
                         eprintln!("[dj-engine] stdin への書き込みに失敗しました: {error}");
                         alive.store(false, Ordering::SeqCst);
@@ -300,10 +345,10 @@ impl EngineSupervisor {
                                 }
                             }));
                         }
-                        emit(
-                            &app,
+                        notifications.enqueue(
                             STATUS_CHANNEL,
-                            &json!({ "running": false, "reason": "engine_stdin_closed" }),
+                            json!({ "running": false, "reason": "engine_stdin_closed" })
+                                .to_string(),
                         );
                         break;
                     }
@@ -315,6 +360,8 @@ impl EngineSupervisor {
             let mut guard = lock(&self.state);
             *guard = Some(Running {
                 child,
+                notifications: Arc::clone(&notifications),
+                shutdown_warning,
                 writer: Some(writer),
                 pending,
                 alive,
@@ -337,7 +384,10 @@ impl EngineSupervisor {
         *lock(&self.last_error) = None;
 
         let status = self.status();
-        emit(app, STATUS_CHANNEL, &json!({ "running": status.running }));
+        notifications.enqueue(
+            STATUS_CHANNEL,
+            json!({ "running": status.running }).to_string(),
+        );
         Ok(status)
     }
 
@@ -505,7 +555,7 @@ impl EngineSupervisor {
             ));
         }
 
-        let (receiver, command_id) = {
+        let (receiver, command_id, command_pending) = {
             let mut guard = lock(&self.state);
             let running = guard
                 .as_mut()
@@ -560,29 +610,22 @@ impl EngineSupervisor {
                     return Err("エンジンへの送信経路が閉じています".to_string());
                 }
             }
-            (receiver, command_id)
+            (receiver, command_id, Arc::clone(&running.pending))
         };
 
         match receiver.recv_timeout(self.timeout) {
             Ok(value) => Ok(value),
             Err(RecvTimeoutError::Timeout) => {
-                self.forget_pending(command_id);
+                lock(&command_pending).remove(&command_id);
                 Err(format!(
                     "エンジンが {} ms 以内に応答しませんでした（op={op}）",
                     self.timeout.as_millis()
                 ))
             }
             Err(RecvTimeoutError::Disconnected) => {
-                self.forget_pending(command_id);
+                lock(&command_pending).remove(&command_id);
                 Err("エンジンプロセスが終了しました".to_string())
             }
-        }
-    }
-
-    fn forget_pending(&self, command_id: u64) {
-        let guard = lock(&self.state);
-        if let Some(running) = guard.as_ref() {
-            lock(&running.pending).remove(&command_id);
         }
     }
 
@@ -591,23 +634,26 @@ impl EngineSupervisor {
         let Some(mut running) = taken else {
             return;
         };
+        running.notifications.close();
         // Drop the bounded sender. A responsive writer then closes stdin and the
         // engine exits itself. If it is blocked, the grace timeout below kills it.
         running.writer.take();
         let deadline = Instant::now() + STOP_GRACE;
         loop {
-            match running.child.try_wait() {
+            let child_status = lock(&running.child).try_wait();
+            match child_status {
                 Ok(Some(_)) => break,
                 Ok(None) => {
                     if Instant::now() >= deadline {
-                        let _ = running.child.kill();
-                        let _ = running.child.wait();
+                        let mut child = lock(&running.child);
+                        let _ = child.kill();
+                        let _ = child.wait();
                         break;
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
                 Err(_) => {
-                    let _ = running.child.kill();
+                    let _ = lock(&running.child).kill();
                     break;
                 }
             }
@@ -626,7 +672,10 @@ impl EngineSupervisor {
 
         match state {
             Some(running) => {
-                let running_now = running.alive.load(Ordering::SeqCst);
+                let notification_error = running.notifications.error();
+                let shutdown_warning = lock(&running.shutdown_warning).clone();
+                let running_now =
+                    running.alive.load(Ordering::SeqCst) && notification_error.is_none();
                 let implementation = running
                     .engine_info
                     .get("implementation")
@@ -650,7 +699,10 @@ impl EngineSupervisor {
                     protocol: Some(running.protocol),
                     simulated,
                     implementation,
-                    last_error,
+                    last_error: match (notification_error.or(last_error), shutdown_warning) {
+                        (Some(error), Some(warning)) => Some(format!("{error}。{warning}")),
+                        (error, warning) => error.or(warning),
+                    },
                     detail: None,
                 }
             }
@@ -698,10 +750,95 @@ fn try_enqueue(writer: &SyncSender<String>, line: String) -> Result<(), EnqueueE
     }
 }
 
-fn emit(app: &AppHandle, channel: &str, payload: &Value) {
-    if let Err(error) = app.emit(channel, payload) {
-        eprintln!("[dj-engine] webview へのイベント送出に失敗しました: {error}");
+fn route_protocol_value(
+    value: Value,
+    pending: &Mutex<HashMap<u64, Sender<Value>>>,
+    notifications: &NotificationRelay,
+) {
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if matches!(kind, "result" | "error" | "hello") {
+        if let Some(id) = value.get("id").and_then(Value::as_u64) {
+            let waiter = lock(pending).remove(&id);
+            if let Some(waiter) = waiter {
+                let _ = waiter.send(value);
+                return;
+            }
+        }
     }
+    notifications.enqueue(EVENT_CHANNEL, value.to_string());
+}
+
+fn fail_event_delivery(
+    child: &Arc<Mutex<Child>>,
+    alive: &AtomicBool,
+    pending: &Mutex<HashMap<u64, Sender<Value>>>,
+    shutdown_warning: &Arc<Mutex<Option<String>>>,
+    notifications: Option<Weak<NotificationRelay>>,
+    error: &str,
+) {
+    alive.store(false, Ordering::SeqCst);
+    let waiters: Vec<Sender<Value>> = lock(pending).drain().map(|(_, tx)| tx).collect();
+    for waiter in waiters {
+        let _ = waiter.send(json!({
+            "kind": "error",
+            "error": {
+                "code": "engine_event_delivery_failed",
+                "message": error,
+                "retryable": true
+            }
+        }));
+    }
+    let child = Arc::clone(child);
+    let shutdown_warning = Arc::clone(shutdown_warning);
+    thread::spawn(move || {
+        // The writer observes alive=false within WRITER_POLL and drops stdin.
+        // EOF lets Mixxx stop recording/finalize the WAV before it exits.
+        let deadline = Instant::now() + STOP_GRACE;
+        loop {
+            if matches!(lock(&child).try_wait(), Ok(Some(_))) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                let warning =
+                    "正常終了が間に合わず強制停止しました。録音ファイルが未完了の可能性があります";
+                *lock(&shutdown_warning) = Some(warning.to_string());
+                eprintln!("[dj-engine] {warning}");
+                let mut child = lock(&child);
+                if let Err(error) = child.kill() {
+                    let message = format!("エンジンを強制停止できませんでした: {error}");
+                    *lock(&shutdown_warning) = Some(message.clone());
+                    eprintln!("[dj-engine] {message}");
+                } else {
+                    let _ = child.try_wait();
+                }
+                drop(child);
+                if let Some(relay) = notifications.as_ref().and_then(Weak::upgrade) {
+                    relay.refresh_failure_status();
+                }
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    });
+}
+
+/// 保存先ディレクトリ。webview から来る値なので、絶対パスだけを通す。
+fn normalize_recording_dir(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else { return Ok(None) };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 1024 || trimmed.contains(['\0', '\n', '\r']) {
+        return Err("録音の保存先が不正です".to_string());
+    }
+    if !PathBuf::from(trimmed).is_absolute() {
+        return Err("録音の保存先は絶対パスで指定してください".to_string());
+    }
+    Ok(Some(trimmed.to_string()))
 }
 
 fn normalize_output_device(value: Option<String>) -> Result<Option<String>, String> {
@@ -803,6 +940,201 @@ fn resolve_binary() -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     use std::sync::Barrier;
+
+    #[cfg(unix)]
+    #[test]
+    fn delivery_failure_terminates_its_child_and_fails_pending_commands() {
+        // This test owns a new inert process; it never addresses the live app
+        // or a native engine process belonging to the user's session.
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "read ignored; exit 0"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take();
+        let child = Arc::new(Mutex::new(child));
+        let warning = Arc::new(Mutex::new(None));
+        let alive = AtomicBool::new(true);
+        let (sender, receiver) = mpsc::channel();
+        let pending = Mutex::new(HashMap::from([(1, sender)]));
+        fail_event_delivery(
+            &child,
+            &alive,
+            &pending,
+            &warning,
+            None,
+            "notification overflow",
+        );
+        // Simulate the writer observing alive=false and closing its owned stdin.
+        drop(stdin);
+        assert!(!alive.load(Ordering::SeqCst));
+        assert!(lock(&pending).is_empty());
+        let reply = receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(reply["error"]["code"], "engine_event_delivery_failed");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = lock(&child).try_wait().unwrap() {
+                assert!(status.success(), "responsive child must finalize normally");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "failed relay left its child running"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(lock(&warning).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unresponsive_child_is_forced_to_stop_only_after_grace_with_recording_warning() {
+        let child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let child = Arc::new(Mutex::new(child));
+        let alive = AtomicBool::new(true);
+        let warning = Arc::new(Mutex::new(None));
+        let (scheduled, tasks) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let observed_warnings = Arc::new(Mutex::new(Vec::new()));
+        let observations = Arc::clone(&observed_warnings);
+        let status_warning = Arc::clone(&warning);
+        let notifications = NotificationRelay::new(
+            Arc::new(move |task| scheduled.send(task).map_err(|error| error.to_string())),
+            Arc::new(move |channel, _| {
+                assert_eq!(channel, STATUS_CHANNEL);
+                lock(&observations).push(lock(&status_warning).clone());
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        );
+        notifications.enqueue(
+            EVENT_CHANNEL,
+            "x".repeat(notification_relay::MAX_NOTIFICATION_BYTES + 1),
+        );
+        tasks.recv_timeout(Duration::from_secs(2)).unwrap()();
+        assert_eq!(*lock(&observed_warnings), vec![None]);
+        let started = Instant::now();
+        fail_event_delivery(
+            &child,
+            &alive,
+            &Mutex::new(HashMap::new()),
+            &warning,
+            Some(Arc::downgrade(&notifications)),
+            "overflow",
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = lock(&child).try_wait().unwrap() {
+                assert!(!status.success());
+                break;
+            }
+            assert!(Instant::now() < deadline, "watchdog did not stop its child");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(started.elapsed() >= STOP_GRACE);
+        assert!(lock(&warning)
+            .as_ref()
+            .unwrap()
+            .contains("録音ファイルが未完了"));
+        tasks.recv_timeout(Duration::from_secs(2)).unwrap()();
+        assert!(lock(&observed_warnings)[1].is_some());
+        notifications.close();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_old_command_timeout_cannot_remove_a_new_sessions_reused_command_id() {
+        let mut child = Command::new("/usr/bin/true").spawn().unwrap();
+        child.wait().unwrap();
+        let (writer, commands) = mpsc::sync_channel(1);
+        let old_pending = Arc::new(Mutex::new(HashMap::new()));
+        let notifications = NotificationRelay::new(
+            Arc::new(|_| Ok(())),
+            Arc::new(|_, _| Ok(())),
+            Arc::new(|error| panic!("unexpected failure: {error}")),
+        );
+        let supervisor = Arc::new(EngineSupervisor {
+            state: Mutex::new(Some(Running {
+                child: Arc::new(Mutex::new(child)),
+                notifications,
+                shutdown_warning: Arc::new(Mutex::new(None)),
+                writer: Some(writer),
+                pending: Arc::clone(&old_pending),
+                alive: Arc::new(AtomicBool::new(true)),
+                next_command_id: 0,
+                binary_path: PathBuf::from("/usr/bin/true"),
+                engine_id: "test".into(),
+                session_id: Some("old".into()),
+                protocol: PROTOCOL_VERSION,
+                engine_info: Value::Null,
+            })),
+            last_error: Mutex::new(None),
+            lifecycle: Mutex::new(()),
+            timeout: Duration::from_millis(100),
+        });
+        let requester = Arc::clone(&supervisor);
+        let request = thread::spawn(move || requester.dispatch("test", json!({}), Some("old")));
+        commands.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (new_sender, _new_receiver) = mpsc::channel();
+        let new_pending = Arc::new(Mutex::new(HashMap::from([(1, new_sender)])));
+        {
+            let mut state = lock(&supervisor.state);
+            let running = state.as_mut().unwrap();
+            running.pending = Arc::clone(&new_pending);
+            running.next_command_id = 1;
+            running.session_id = Some("new".into());
+        }
+        assert!(request.join().unwrap().is_err());
+        assert!(lock(&old_pending).is_empty());
+        assert!(lock(&new_pending).contains_key(&1));
+        supervisor.stop_internal();
+    }
+
+    #[test]
+    fn stdout_reply_bypasses_notifications_while_main_thread_holds_webview_lock() {
+        let (scheduled, tasks) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let webviews = Arc::new(Mutex::new(()));
+        let emit_webviews = Arc::clone(&webviews);
+        let delivered = Arc::new(AtomicBool::new(false));
+        let emit_delivered = Arc::clone(&delivered);
+        let main_thread = thread::current().id();
+        let notifications = NotificationRelay::new(
+            Arc::new(move |task| scheduled.send(task).map_err(|error| error.to_string())),
+            Arc::new(move |_, _| {
+                assert_eq!(thread::current().id(), main_thread);
+                let _guard = lock(&emit_webviews);
+                emit_delivered.store(true, Ordering::SeqCst);
+                Ok(())
+            }),
+            Arc::new(|error| panic!("unexpected delivery failure: {error}")),
+        );
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (reply_sender, reply_receiver) = mpsc::channel();
+        lock(&pending).insert(7, reply_sender);
+        let main_webview_guard = lock(&webviews);
+        let reader_notifications = Arc::clone(&notifications);
+        let reader = thread::spawn(move || {
+            route_protocol_value(
+                json!({"kind": "event", "seq": 1}),
+                &pending,
+                &reader_notifications,
+            );
+            route_protocol_value(
+                json!({"kind": "result", "id": 7}),
+                &pending,
+                &reader_notifications,
+            );
+        });
+        // A direct background AppHandle.emit would require this same mutex and
+        // stall before the stdout reader could correlate the following reply.
+        let reply = reply_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(reply["id"], 7);
+        reader.join().unwrap();
+        assert!(!delivered.load(Ordering::SeqCst));
+        drop(main_webview_guard);
+        tasks.recv_timeout(Duration::from_secs(2)).unwrap()();
+        assert!(delivered.load(Ordering::SeqCst));
+        notifications.close();
+    }
 
     #[test]
     fn writer_queue_rejects_full_without_waiting_for_a_reader() {

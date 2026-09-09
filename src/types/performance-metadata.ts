@@ -16,6 +16,10 @@ export interface PerformanceBeatGrid {
   bpm: number;
   first_beat_ms: number;
   beats_per_bar: number;
+  beat_times_ms?: number[] | null;
+  beat_numbers?: number[] | null;
+  source?: "rekordbox" | "analysis" | "manual" | null;
+  confidence?: number | null;
 }
 
 export interface PerformanceMetadata {
@@ -24,6 +28,7 @@ export interface PerformanceMetadata {
   cue_points: PerformanceCuePoint[];
   loops: PerformanceLoop[];
   beat_grid: PerformanceBeatGrid | null;
+  grid_warning?: string | null;
   created_at: string | null;
   updated_at: string | null;
 }

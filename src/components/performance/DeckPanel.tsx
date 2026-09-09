@@ -59,6 +59,18 @@ const DECK_COLORS = {
     surface: "from-fuchsia-500/10",
     button: "border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-100 hover:bg-fuchsia-400/20",
   },
+  C: {
+    accent: "text-cyan-300",
+    border: "border-cyan-400/25",
+    surface: "from-cyan-500/10",
+    button: "border-cyan-400/40 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20",
+  },
+  D: {
+    accent: "text-fuchsia-300",
+    border: "border-fuchsia-400/25",
+    surface: "from-fuchsia-500/10",
+    button: "border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-100 hover:bg-fuchsia-400/20",
+  },
 } as const;
 
 function formatTime(milliseconds: number): string {

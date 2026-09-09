@@ -5,6 +5,7 @@ import numpy as np
 from typing import Optional, Dict, Any, Tuple, List, Union
 from tinytag import TinyTag
 from . import constants
+from .beat_grid import playback_grid, VERSION as GRID_VERSION
 
 # Essentia Import
 try:
@@ -137,6 +138,7 @@ class AudioAnalyzer:
             bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
             result["bpm"] = round(float(bpm), 2)
             extra.update(bpm_confidence=float(confidence), beat_positions=ticks.tolist())
+            extra.update(playback_grid=playback_grid(ticks, bpm, float(confidence)), playback_grid_version=GRID_VERSION)
         if "key" in features:
             key, scale, strength = self.key_extractor(audio)
             result.update(key=f"{key} {scale}", scale=scale)
@@ -247,6 +249,8 @@ class AudioAnalyzer:
             "spectral_rolloff": safe_s(features['rolloff']),
             "features_extra": {
                 "bpm_confidence": round(safe_s(features['bpm_confidence']), 2),
+                "playback_grid": playback_grid(features['beat_positions'], features['bpm'], float(features['bpm_confidence'])),
+                "playback_grid_version": GRID_VERSION,
                 "key_strength": round(safe_s(features['key_strength']), 2),
                 "beat_positions": features['beat_positions'].tolist() if hasattr(features['beat_positions'], 'tolist') else []
             }

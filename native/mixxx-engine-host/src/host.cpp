@@ -3,43 +3,167 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
+#include <QVector>
 #include <QUuid>
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <optional>
 
 namespace {
 constexpr double kMaxSafeId = 9007199254740991.0;
 bool integer(const QJsonValue& value) {
     return value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= kMaxSafeId && std::floor(value.toDouble()) == value.toDouble();
 }
-const QSet<QString> known = {"deck.load", "deck.unload", "deck.play", "deck.pause", "deck.seek", "deck.tempo.set", "deck.keylock.set", "deck.sync.set", "deck.hotcue.set", "deck.hotcue.jump", "deck.hotcue.clear", "deck.loop.set", "deck.loop.enable", "mixer.channel.gain", "mixer.channel.eq", "mixer.channel.pfl", "mixer.crossfader", "mixer.master.gain", "audio.devices.list", "audio.config.get", "audio.config.set", "meters.subscribe"};
-const QSet<QString> transport = {"deck.load", "deck.unload", "deck.play", "deck.pause", "deck.seek"};
-const QSet<QString> mixerOps = {"mixer.channel.gain", "mixer.crossfader", "mixer.master.gain"};
-const QString deckNames[] = {"A", "B"};
+bool validGrid(const QJsonValue& bpm, const QJsonValue& offset, const QJsonValue& meter, double duration) {
+    return bpm.isDouble() && std::isfinite(bpm.toDouble()) && bpm.toDouble() >= 20 && bpm.toDouble() <= 300 &&
+            offset.isDouble() && std::isfinite(offset.toDouble()) && offset.toDouble() >= 0 && offset.toDouble() < duration - 0.000001 &&
+            integer(meter) && meter.toDouble() >= 1 && meter.toDouble() <= 16;
+}
+bool validMeter(const QJsonValue& meter) {
+    return integer(meter) && meter.toDouble() >= 1 && meter.toDouble() <= 16;
+}
+bool parseBeatTimes(const QJsonValue& value, double duration, QVector<double>* values = nullptr) {
+    if (!value.isArray()) return false;
+    const auto array = value.toArray();
+    if (array.size() < 2 || array.size() > 100000) return false;
+    QVector<double> parsed;
+    if (values) parsed.reserve(array.size());
+    double previous = -1.0;
+    for (const auto& item : array) {
+        if (!item.isDouble()) return false;
+        const double time = item.toDouble();
+        if (!std::isfinite(time) || time < 0 || time <= previous || time >= duration) return false;
+        previous = time;
+        if (values) parsed.append(time);
+    }
+    if (values) *values = std::move(parsed);
+    return true;
+}
+bool validBeatNumbers(const QJsonValue& value, int expectedSize, int beatsPerBar) {
+    if (!value.isArray()) return false;
+    const auto array = value.toArray();
+    if (array.size() != expectedSize) return false;
+    for (const auto& item : array) if (!integer(item) || item.toDouble() < 1 || item.toDouble() > beatsPerBar) return false;
+    return true;
+}
+bool validOptionalBpm(const QJsonValue& value) {
+    return value.isUndefined() || value.isNull() ||
+            (value.isDouble() && std::isfinite(value.toDouble()) && value.toDouble() >= 20 && value.toDouble() <= 300);
+}
+bool validOptionalOffset(const QJsonValue& value, double duration) {
+    return value.isUndefined() ||
+            (value.isDouble() && std::isfinite(value.toDouble()) && value.toDouble() >= 0 && value.toDouble() < duration);
+}
+std::optional<QVector<double>> descriptorBeatTimes(const QJsonObject& descriptor, double duration) {
+    if (!descriptor.contains("beatTimesMs")) return std::nullopt;
+    QVector<double> values;
+    if (!parseBeatTimes(descriptor["beatTimesMs"], duration, &values)) return std::nullopt;
+    return values;
+}
+QJsonValue effectiveBpmValue(double bpm) {
+    return std::isfinite(bpm) && bpm > 0 ? QJsonValue(bpm) : QJsonValue(QJsonValue::Null);
+}
+bool validCues(const QJsonValue& value, double duration) {
+    if (!value.isArray() || (value.toArray().size() != 8 && value.toArray().size() != 16)) return false;
+    for (const auto cue : value.toArray()) if (!cue.isNull() && (!cue.isDouble() || !std::isfinite(cue.toDouble()) || cue.toDouble() < 0 || cue.toDouble() >= duration)) return false;
+    return true;
+}
+// The decoded duration is authoritative and is routinely shorter than the
+// catalog duration a saved grid was validated against, because decoders drop
+// the encoder delay and padding of MP3/AAC files. Beats behind the decoded end
+// can never be reached, so keep the usable prefix instead of refusing the
+// whole grid. Callers must have checked the shape first: this only cuts the
+// tail off an already strictly increasing list. False means fewer than two
+// beats survive, which is a real mismatch rather than a trimmed tail.
+bool trimBeatsToDuration(QJsonValue& times, QJsonValue& numbers, double duration) {
+    auto beats = times.toArray();
+    int keep = 0;
+    while (keep < beats.size() && beats[keep].toDouble() < duration) ++keep;
+    if (keep == beats.size()) return true;
+    if (keep < 2) return false;
+    while (beats.size() > keep) beats.removeLast();
+    times = beats;
+    if (numbers.isArray()) {
+        auto bars = numbers.toArray();
+        while (bars.size() > keep) bars.removeLast();
+        numbers = bars;
+    }
+    return true;
+}
+// A saved cue behind the decoded end is unreachable for the same reason. Empty
+// that slot only on this deck; the stored cue stays in the library untouched.
+QJsonArray cuesWithinDuration(const QJsonValue& value, double duration) {
+    auto cues = value.toArray();
+    for (int slot = 0; slot < cues.size(); ++slot) if (!cues[slot].isNull() && cues[slot].toDouble() >= duration) cues[slot] = QJsonValue::Null;
+    return cues;
+}
+const QSet<QString> samplerOps = {"sampler.bank","sampler.state", "sampler.load", "sampler.eject", "sampler.play", "sampler.stop", "sampler.stopAll", "sampler.gain", "sampler.pfl"};
+const QSet<QString> known = {"deck.load", "deck.unload", "deck.play", "deck.pause", "deck.seek", "deck.tempo.set", "deck.keylock.set", "deck.sync.set", "deck.beatgrid.set", "deck.hotcue.set", "deck.hotcue.jump", "deck.hotcue.clear", "deck.loop.set", "deck.loop.enable", "mixer.channel.gain", "mixer.channel.eq", "mixer.channel.pfl", "mixer.crossfader", "mixer.master.gain", "audio.devices.list", "audio.config.get", "audio.config.set", "meters.subscribe", "recording.start", "recording.stop", "recording.directory.set", "recording.format.set"};
+const QSet<QString> transport = {"deck.load", "deck.unload", "deck.play", "deck.pause", "deck.seek", "deck.pitchbend", "deck.scratch"};
+const QSet<QString> deckControls = {"deck.key.shift", "deck.key.sync", "deck.key.reset", "deck.slip.set", "deck.reverse.set", "deck.slipReverse.set","deck.tempo.set", "deck.keylock.set", "deck.sync.set", "deck.beatgrid.set", "deck.hotcue.set", "deck.hotcue.jump", "deck.hotcue.clear", "deck.loop.set", "deck.loop.enable", "deck.loop.beats", "deck.beatjump", "deck.quantize.set"};
+// Builtin Mixxx effects usable as performance pads. Each name is loaded as
+// org.mixxx.effects.<name>; keep this in sync with PAD_EFFECTS on the client.
+const QSet<QString> padEffects = {"echo", "reverb", "flanger", "phaser", "filter", "bitcrusher", "distortion", "autopan", "tremolo", "moogladder4filter"};
+const QSet<QString> mixerOps = {"mixer.colorfx.set","mixer.beatfx.set","mixer.channel.orientation", "mixer.channel.pfl", "mixer.channel.gain", "mixer.crossfader", "mixer.master.gain", "mixer.channel.eq", "mixer.eq.set", "mixer.filter.set", "mixer.trim.set", "mixer.fx.set"};
+const QString deckNames[] = {"A", "B", "C", "D"};
+int deckIndex(const QString& name) {
+    for (int index = 0; index < 4; ++index) if (deckNames[index] == name) return index;
+    return -1;
+}
 }
 
 Host::Host(std::unique_ptr<PlaybackBackend> backend) : backend_(std::move(backend)), engineId_(QUuid::createUuid().toString(QUuid::WithoutBraces)) {
     clock_.start();
-    resetDeck(0); resetDeck(1);
+    for (int index = 0; index < 4; ++index) resetDeck(index);
     backend_->loaded = [this](int index, quint64 generation, QJsonObject metadata, QString error) {
         // Even immediate decoder failures are delivered after the accepted reply.
         QTimer::singleShot(0, this, [this, index, generation, metadata, error] { completed(index, generation, metadata, error); });
     };
+    backend_->recordingChanged = [this](QJsonObject state) {
+        QTimer::singleShot(0, this, [this, state] { ++rev_; event("recording.state", state); });
+    };
     connect(&timer_, &QTimer::timeout, this, [this] { sample(); });
-    timer_.start(100);
+    timer_.start(20);
 }
 void Host::resetDeck(int index) {
+    releaseScratch(index, false);
+    ++slots_[index].reverseGesture;
     slots_[index].state = emptyDeck(); slots_[index].state["deck"] = deckNames[index];
+    slots_[index].state["scratching"] = false;
     slots_[index].transportTouched = false;
     slots_[index].state["available"] = backend_->implementation() == "mixxx";
+}
+/** Mirror the engine's sync leader onto every deck, and announce the decks that
+ *  changed. The leader is engine-wide state, so a deck other than the one being
+ *  commanded can lose or gain it. `commanded` is emitted by the caller. */
+void Host::publishSyncLeader(int commanded) {
+    const int leader = backend_->syncLeader();
+    for (int index = 0; index < 4; ++index) {
+        const QJsonValue value = leader < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(deckNames[index]);
+        const QJsonValue next = index == leader ? value : QJsonValue(QJsonValue::Null);
+        if (slots_[index].state["syncLeader"] == next) continue;
+        slots_[index].state["syncLeader"] = next;
+        if (index != commanded) event("deck.state", slots_[index].state);
+    }
+}
+void Host::releaseScratch(int index, bool finish) {
+    auto& slot = slots_[index];
+    if (!slot.scratchGesture.isEmpty()) {
+        backend_->scratch(index, finish ? "end" : "abort", slot.scratchLastPositionMs);
+    }
+    slot.scratchGesture.clear();
+    slot.scratchLastPositionMs = 0;
 }
 QJsonObject Host::emptyDeck() {
     return {{"deck", "A"}, {"status", "empty"}, {"track", QJsonValue::Null}, {"positionMs", 0}, {"positionFrames", 0}, {"rate", 1.0}, {"keylock", false}, {"syncEnabled", false}, {"syncLeader", QJsonValue::Null}, {"effectiveBpm", QJsonValue::Null}, {"hotCues", QJsonArray{QJsonValue::Null, QJsonValue::Null, QJsonValue::Null, QJsonValue::Null, QJsonValue::Null, QJsonValue::Null, QJsonValue::Null, QJsonValue::Null}}, {"loopRegion", QJsonValue::Null}, {"lastError", QJsonValue::Null}, {"loadId", QJsonValue::Null}};
 }
 QJsonObject Host::info() const {
     QJsonArray capabilities;
-    if (backend_->available()) capabilities = {"deck.load.async", "deck.transport", "mixer.gain", "mixer.crossfader"};
-    return {{"name", backend_->implementation() == "mixxx" ? "djaly-mixxx-engine-host" : "djaly-mixxx-host-unavailable"}, {"version", "0.2.0"}, {"implementation", backend_->implementation()}, {"simulated", false}, {"deterministic", false}, {"audioAvailable", backend_->available()}, {"audioProblem", backend_->problem()}, {"decks", QJsonArray{"A", "B"}}, {"capabilities", capabilities}, {"upstreamCommit", "3ebac449e7e5fe2a0186596657696e87ce8b0e56"}};
+    if (backend_->available()) capabilities = {"sampler", "mixer.beatfx", "mixer.colorfx", "deck.key", "deck.slip", "deck.reverse", "deck.load.async", "deck.transport", "deck.scratch", "deck.pitchbend", "deck.tempo", "deck.keylock", "deck.sync", "deck.beatgrid", "deck.hotcue", "deck.loop", "deck.beatjump", "deck.quantize", "mixer.eq", "mixer.filter", "mixer.trim", "mixer.fx", "mixer.gain", "mixer.crossfader", "recording", "audio.microphone", "audio.microphone.ducking"};
+    if (backend_->audio()["pflApplied"].toBool()) capabilities.append("mixer.pfl");
+    if (backend_->available()) capabilities.append("mixer.beatfx.release");
+    return {{"name", backend_->implementation() == "mixxx" ? "djaly-mixxx-engine-host" : "djaly-mixxx-host-unavailable"}, {"version", "0.3.0"}, {"implementation", backend_->implementation()}, {"simulated", false}, {"deterministic", false}, {"audioAvailable", backend_->available()}, {"audioProblem", backend_->problem()}, {"decks", QJsonArray{"A", "B", "C", "D"}}, {"capabilities", capabilities}, {"upstreamCommit", "3ebac449e7e5fe2a0186596657696e87ce8b0e56"}};
 }
 QJsonObject Host::envelope(const QString& kind) const {
     return {{"protocol", 1}, {"kind", kind}, {"engineId", engineId_}, {"rev", static_cast<qint64>(rev_)}, {"engineTimeMs", static_cast<double>(clock_.elapsed())}};
@@ -63,7 +187,7 @@ void Host::event(const QString& name, const QJsonObject& data) {
     auto message = envelope("event"); message.insert("event", name); message.insert("seq", static_cast<qint64>(++seq_)); message.insert("data", data); send(message);
 }
 QJsonObject Host::snapshot() {
-    return {{"rev", static_cast<qint64>(rev_)}, {"seq", static_cast<qint64>(seq_)}, {"engineId", engineId_}, {"sessionId", sessionId_}, {"engineTimeMs", static_cast<double>(clock_.elapsed())}, {"engine", info()}, {"decks", QJsonObject{{"A", slots_[0].state}, {"B", slots_[1].state}}}, {"mixer", backend_->mixer()}, {"audio", backend_->audio()}, {"meters", QJsonObject{{"enabled", false}, {"intervalMs", 100}, {"simulated", false}}}};
+    return {{"rev", static_cast<qint64>(rev_)}, {"seq", static_cast<qint64>(seq_)}, {"engineId", engineId_}, {"sessionId", sessionId_}, {"engineTimeMs", static_cast<double>(clock_.elapsed())}, {"engine", info()}, {"decks", QJsonObject{{"A", slots_[0].state}, {"B", slots_[1].state}, {"C", slots_[2].state}, {"D", slots_[3].state}}}, {"mixer", backend_->mixer()}, {"audio", backend_->audio()}, {"recording", backend_->recording()}, {"meters", QJsonObject{{"enabled", false}, {"intervalMs", 100}, {"simulated", false}}}};
 }
 void Host::line(const QByteArray& bytes) {
     if (bytes.trimmed().isEmpty()) return;
@@ -76,10 +200,16 @@ void Host::line(const QByteArray& bytes) {
     if (!cmd["protocol"].isUndefined() && cmd["protocol"] != 1) { error(cmd, "protocol_version_unsupported", "Only protocol 1 is supported"); return; }
     const auto id = static_cast<quint64>(cmd["id"].toDouble());
     if (op == "session.hello") {
+        for (int index = 0; index < 4; ++index) { releaseScratch(index, false); if(backend_->available()) backend_->performanceControl(index,"reverseroll",0); ++slots_[index].reverseGesture; }
+        // A new renderer cannot still own a held pad from the old connection.
+        const bool effectsReleased = backend_->resetFx();
+        if (backend_->available()) backend_->samplerCommand("sampler.stopAll", {});
+        if (effectsReleased) ++rev_;
         const auto previous = sessionId_;
         sessionId_ = QUuid::createUuid().toString(QUuid::WithoutBraces); lastId_ = id;
         auto hello = envelope("hello"); hello.insert("id", cmd["id"]); hello.insert("sessionId", sessionId_); hello.insert("engine", info()); hello.insert("protocolVersions", QJsonObject{{"min", 1}, {"max", 1}}); send(hello);
         if (!previous.isEmpty()) event("session.invalidated", {{"sessionId", previous}, {"reason", "superseded"}});
+        if (effectsReleased) event("mixer.state", backend_->mixer());
         backend_->start();
         return;
     }
@@ -90,42 +220,339 @@ void Host::line(const QByteArray& bytes) {
     lastId_ = id;
     if (op == "engine.ping") { result(cmd, {{"pong", true}}); return; }
     if (op == "state.snapshot") { result(cmd, snapshot()); return; }
-    if (!known.contains(op)) { error(cmd, "unknown_op", "Unknown operation"); return; }
-    if (!transport.contains(op) && !mixerOps.contains(op)) { error(cmd, "unsupported_operation", "This host implements deck transport and basic gains only"); return; }
+    if (!samplerOps.contains(op) && !known.contains(op) && !deckControls.contains(op) && !mixerOps.contains(op) && op != "deck.scratch" && op != "deck.pitchbend" && op != "deck.timing.trace") { error(cmd, "unknown_op", "Unknown operation"); return; }
+    if (op == "mixer.colorfx.set") {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        const auto p = cmd["params"].toObject(); const auto deck = deckIndex(p["deck"].toString()); const auto value = p["amount"];
+        if (deck < 0 || !value.isDouble() || !std::isfinite(value.toDouble()) || std::abs(value.toDouble()) > 1) { error(cmd, "invalid_params", "Expected deck and color amount -1..1"); return; }
+        const auto failure = backend_->colorFx(deck,p["effect"].toString(),value.toDouble());
+        if (!failure.isEmpty()) { error(cmd, "invalid_params", failure); return; }
+        ++rev_; result(cmd, backend_->mixer()); event("mixer.state", backend_->mixer()); return;
+    }
+    if (op == "mixer.beatfx.set") {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "Expected beat FX parameters"); return; }
+        const auto failure = backend_->beatFx(cmd["params"].toObject());
+        if (!failure.isEmpty()) { error(cmd, "invalid_params", failure); return; }
+        ++rev_; result(cmd, backend_->mixer()); event("mixer.state", backend_->mixer()); return;
+    }
+    if (samplerOps.contains(op)) {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "Expected sampler parameters"); return; }
+        if (op == "sampler.pfl" && !backend_->audio()["pflApplied"].toBool()) { error(cmd, "unsupported_operation", "Choose an output with a headphone cue bus"); return; }
+        const auto failure = backend_->samplerCommand(op, cmd["params"].toObject());
+        if (!failure.isEmpty()) { error(cmd, "invalid_params", failure); return; }
+        if (op != "sampler.state") ++rev_;
+        result(cmd, backend_->samplerState()); return;
+    }
+    // Setup queries must work even when the selected output could not open.
+    if (op == "audio.devices.list") { result(cmd, backend_->audioDevices()); return; }
+    if (op == "audio.config.get") { result(cmd, backend_->audio()); return; }
+    if (op == "audio.config.set") {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        const auto params = cmd["params"].toObject();
+        if (params.size() != 1 || !params["microphone"].isObject()) { error(cmd, "invalid_params", "Expected {microphone:{...}}; apply output changes by restarting from Audio Settings"); return; }
+        const auto mic = params["microphone"].toObject();
+        const QSet<QString> fields = {"deviceId", "channel", "enabled", "gain", "duckingEnabled", "duckingStrength"};
+        for (auto it = mic.begin(); it != mic.end(); ++it) {
+            if (!fields.contains(it.key())) { error(cmd, "invalid_params", "Unknown microphone setting: " + it.key()); return; }
+            const auto value = it.value();
+            bool valid = false;
+            if (it.key() == "deviceId") valid = value.isNull() || (value.isString() && !value.toString().isEmpty() && value.toString().size() <= 512);
+            else if (it.key() == "enabled" || it.key() == "duckingEnabled") valid = value.isBool();
+            else if (it.key() == "channel") valid = integer(value) && value.toDouble() <= 255;
+            else valid = value.isDouble() && std::isfinite(value.toDouble()) && value.toDouble() >= 0 && value.toDouble() <= (it.key() == "gain" ? 4.0 : 1.0);
+            if (!valid) { error(cmd, "invalid_params", "Invalid microphone setting: " + it.key()); return; }
+        }
+        const auto failure = backend_->configureMicrophone(mic);
+        if (!failure.isEmpty()) { error(cmd, "invalid_params", failure); return; }
+        ++rev_; const auto state = backend_->audio(); result(cmd, state); event("audio.config", state); return;
+    }
+    if (op == "recording.directory.set") {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "params must be an object"); return; }
+        const auto directory = cmd["params"].toObject()["directory"].toString();
+        if (directory.isEmpty() || directory.size() > 1024 || !directory.startsWith('/')) { error(cmd, "invalid_params", "directory must be an absolute path"); return; }
+        const auto resolved = backend_->recordingDirectory(directory);
+        if (resolved.isEmpty()) { error(cmd, "unsupported_operation", "Recording is unavailable on this host"); return; }
+        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+    }
+    if (op == "recording.format.set") {
+        if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+        if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "params must be an object"); return; }
+        const auto format = cmd["params"].toObject()["format"].toString();
+        if (backend_->recordingFormat(format).isEmpty()) { error(cmd, "invalid_params", "This host cannot write that recording format"); return; }
+        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+    }
+    const bool recordingOp = op == "recording.start" || op == "recording.stop";
+    if (!transport.contains(op) && !deckControls.contains(op) && !mixerOps.contains(op) && !recordingOp && op != "deck.timing.trace") { error(cmd, "unsupported_operation", "This host does not implement the requested controller operation"); return; }
     if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "params must be an object"); return; }
     auto params = cmd["params"].toObject();
     if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
+    if (recordingOp) {
+        if (op == "recording.start") backend_->startRecording(); else backend_->stopRecording();
+        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+    }
     if (mixerOps.contains(op)) {
+        if (op == "mixer.channel.orientation") {
+            const int channel = deckIndex(params["deck"].toString().toUpper());
+            if (channel < 0 || !integer(params["orientation"]) || params["orientation"].toDouble() > 2) { error(cmd, "invalid_params", "Expected deck and orientation 0/1/2"); return; }
+            backend_->orientation(channel, params["orientation"].toInt());
+            ++rev_; result(cmd, backend_->mixer()); event("mixer.state", backend_->mixer()); return;
+        }
+        if (op == "mixer.channel.pfl") {
+            const int channel = deckIndex(params["deck"].toString().toUpper());
+            if (channel < 0 || !params["enabled"].isBool()) { error(cmd, "invalid_params", "Expected deck and boolean enabled"); return; }
+            if (!backend_->audio()["pflApplied"].toBool()) { error(cmd, "unsupported_operation", "Choose DDJ-1000 output to use its headphone cue bus"); return; }
+            backend_->pfl(channel, params["enabled"].toBool());
+            ++rev_; result(cmd, backend_->mixer()); event("mixer.state", backend_->mixer()); return;
+        }
+        if (op == "mixer.fx.set") {
+            const int channel = deckIndex(params["deck"].toString().toUpper());
+            if (channel < 0) { error(cmd, "deck_not_found", "Expected deck A, B, C or D"); return; }
+            if (params.contains("trackId") && params["trackId"] != slots_[channel].state["track"].toObject()["trackId"]) { error(cmd, "invalid_params", "The loaded track changed"); return; }
+            const auto effect = params["effect"].toString();
+            const auto mix = params["mix"];
+            // 掛かりの強さ。省略時は従来どおりの中央値。
+            const auto depthValue = params.contains("depth") ? params["depth"] : QJsonValue(0.5);
+            if (!depthValue.isDouble() || !std::isfinite(depthValue.toDouble()) || depthValue.toDouble() < 0 || depthValue.toDouble() > 1) { error(cmd, "invalid_params", "depth must be 0..1"); return; }
+            if (!padEffects.contains(effect) || !params["enabled"].isBool() || !mix.isDouble() || !std::isfinite(mix.toDouble()) || mix.toDouble() < 0 || mix.toDouble() > 1) { error(cmd, "invalid_params", "Expected a supported pad effect, boolean enabled, mix 0..1"); return; }
+            if (!backend_->fx(channel, effect, params["enabled"].toBool(), mix.toDouble(), depthValue.toDouble())) { error(cmd, "unsupported_operation", "Native effect processor is unavailable"); return; }
+            ++rev_; const auto state = backend_->mixer(); result(cmd, state); event("mixer.state", state); return;
+        }
+        if (op == "mixer.channel.eq" || op == "mixer.eq.set" || op == "mixer.filter.set" || op == "mixer.trim.set") {
+            const int channel = deckIndex(params["deck"].toString().toUpper());
+            if (channel < 0) { error(cmd, "deck_not_found", "Expected deck A, B, C or D"); return; }
+            const bool isFilter = op == "mixer.filter.set";
+            const auto value = params.value(isFilter ? "value" : "gain");
+            const auto band = params.value("band").toString();
+            if (!value.isDouble() || !std::isfinite(value.toDouble()) || value.toDouble() < (isFilter ? -1.0 : 0.0) || value.toDouble() > (isFilter ? 1.0 : op == "mixer.trim.set" ? 2.0 : 4.0) ||
+                    ((op == "mixer.channel.eq" || op == "mixer.eq.set") && band != "low" && band != "mid" && band != "high")) { error(cmd, "invalid_params", "Expected filter -1..1, trim gain 0..2, EQ gain 0..4 and band low/mid/high"); return; }
+            if (isFilter) backend_->filter(channel, value.toDouble());
+            else if (op == "mixer.trim.set") backend_->trim(channel, value.toDouble());
+            else backend_->eq(channel, band, value.toDouble());
+            ++rev_; const auto state = backend_->mixer(); result(cmd, state); event("mixer.state", state); return;
+        }
         const auto value = params[op == "mixer.crossfader" ? "position" : "gain"];
         if (!value.isDouble() || value.toDouble() < (op == "mixer.crossfader" ? -1.0 : 0.0) || value.toDouble() > 1.0) { error(cmd, "invalid_params", "Mixer value outside range"); return; }
         if (op == "mixer.channel.gain") {
             const auto name = params["deck"].toString().toUpper();
-            if (name != "A" && name != "B") { error(cmd, "deck_not_found", "Expected deck A or B"); return; }
-            backend_->gain(name == "A" ? 0 : 1, value.toDouble());
+            const int index = deckIndex(name);
+            if (index < 0) { error(cmd, "deck_not_found", "Expected deck A, B, C or D"); return; }
+            backend_->gain(index, value.toDouble());
         } else if (op == "mixer.master.gain") backend_->masterGain(value.toDouble());
         else backend_->crossfader(value.toDouble());
         ++rev_; result(cmd, backend_->mixer()); event("mixer.state", backend_->mixer()); return;
     }
     const auto name = params["deck"].toString().toUpper();
-    if (name != "A" && name != "B") { error(cmd, "deck_not_found", "Expected deck A or B"); return; }
-    const int index = name == "A" ? 0 : 1;
+    const int index = deckIndex(name);
+    if (index < 0) { error(cmd, "deck_not_found", "Expected deck A, B, C or D"); return; }
     auto& slot = slots_[index]; auto& deck_ = slot.state; auto& descriptor_ = slot.descriptor;
     if (op == "deck.load") {
         const auto descriptor = params["track"].toObject();
         if (!descriptor["path"].isString() || !QDir::isAbsolutePath(descriptor["path"].toString()) || descriptor["trackId"].toString().trimmed().isEmpty()) { error(cmd, "invalid_params", "track requires trackId and an absolute local path"); return; }
+        if (descriptor.contains("musicalKey") && (!descriptor["musicalKey"].isString() || descriptor["musicalKey"].toString().size() > 32)) { error(cmd, "invalid_params", "Expected short musical key string"); return; }
+        if (descriptor.contains("hotCues") && !validCues(descriptor["hotCues"], std::numeric_limits<double>::max())) { error(cmd, "invalid_params", "hotCues must contain 8 or 16 null or finite non-negative positions"); return; }
+        const bool hasBeatTimes = descriptor.contains("beatTimesMs");
+        const auto meter = descriptor.contains("beatsPerBar") ? descriptor["beatsPerBar"] : QJsonValue(4);
+        if ((descriptor.contains("beatsPerBar") && !validMeter(meter)) ||
+                (descriptor.contains("beatNumbers") && (!hasBeatTimes || !descriptor["beatTimesMs"].isArray() || !validBeatNumbers(descriptor["beatNumbers"], descriptor["beatTimesMs"].toArray().size(), static_cast<int>(meter.toDouble())))) ||
+                (hasBeatTimes && (!parseBeatTimes(descriptor["beatTimesMs"], std::numeric_limits<double>::max()) || !validOptionalBpm(descriptor["bpm"]) || !validOptionalOffset(descriptor["beatgridOffsetMs"], std::numeric_limits<double>::max()))) ||
+                (descriptor.contains("beatgridOffsetMs") && !hasBeatTimes && !validGrid(descriptor["bpm"], descriptor["beatgridOffsetMs"], meter, std::numeric_limits<double>::max()))) {
+            error(cmd, "invalid_params", "Invalid beat grid: beatTimesMs must contain 2..100000 finite, strictly increasing non-negative timestamps; beatNumbers must match it and contain integers 1..beatsPerBar"); return;
+        }
         if (deck_["status"] == "loading") { error(cmd, "track_not_ready", "Wait for the current load to finish or unload first"); return; }
         descriptor_ = descriptor; slot.generation = ++generation_; ++rev_; resetDeck(index); deck_["status"] = "loading"; deck_["loadId"] = static_cast<qint64>(slot.generation);
         result(cmd, {{"accepted", true}, {"deck", name}, {"loadId", static_cast<qint64>(slot.generation)}}); event("deck.state", deck_);
-        backend_->load(index, descriptor["path"].toString(), slot.generation); return;
+        backend_->load(index, descriptor["path"].toString(), slot.generation); event("mixer.state", backend_->mixer()); return;
     }
     if (op == "deck.unload") {
-        slot.generation = ++generation_; backend_->unload(index); resetDeck(index); descriptor_ = {}; ++rev_; result(cmd, {{"deck", name}}); event("deck.state", deck_); return;
+        slot.generation = ++generation_; backend_->unload(index); resetDeck(index); descriptor_ = {}; ++rev_; result(cmd, {{"deck", name}}); event("deck.state", deck_); event("mixer.state", backend_->mixer()); return;
     }
     if (deck_["status"] == "loading") { error(cmd, "track_not_ready", "Deck is still loading"); return; }
+    if (op == "deck.timing.trace") { result(cmd, backend_->timingTrace(index)); return; }
     if (!deck_["track"].isObject()) { error(cmd, "no_track_loaded", "No track loaded"); return; }
+    if (op == "deck.pitchbend") {
+        const auto amount = params["amount"];
+        if (!amount.isDouble() || !std::isfinite(amount.toDouble()) || std::abs(amount.toDouble()) > 0.75 ||
+                (params.contains("trackId") && params["trackId"] != deck_["track"].toObject()["trackId"])) {
+            error(cmd, "invalid_params", "Expected pitchbend -0.75..0.75 for the loaded track"); return;
+        }
+        backend_->pitchbend(index, amount.toDouble());
+        result(cmd, {{"accepted", true}, {"deck", name}}); return;
+    }
+    if (op.startsWith("deck.key.") || op == "deck.slip.set" || op == "deck.reverse.set" || op == "deck.slipReverse.set") {
+        if (params.contains("trackId") && params["trackId"] != deck_["track"].toObject()["trackId"]) { error(cmd, "invalid_params", "The loaded track changed"); return; }
+        if (op == "deck.key.shift") {
+            const auto value = params["semitones"];
+            if (!value.isDouble() || !std::isfinite(value.toDouble()) || value.toDouble() < -12 || value.toDouble() > 12) { error(cmd, "invalid_params", "Expected semitones -12..12"); return; }
+            backend_->keylock(index, true); deck_["keylock"] = true;
+            backend_->performanceControl(index, "pitch_adjust", value.toDouble());
+        } else if (op == "deck.key.reset" || op == "deck.key.sync") {
+            const QString control = op == "deck.key.reset" ? "reset_key" : "sync_key";
+            backend_->performanceControl(index, control, 1); backend_->performanceControl(index, control, 0);
+        } else {
+            if (!params["enabled"].isBool()) { error(cmd, "invalid_params", "Expected enabled boolean"); return; }
+            backend_->performanceControl(index, op == "deck.slip.set" ? "slip_enabled" : op == "deck.reverse.set" ? "reverse" : "reverseroll", params["enabled"].toBool() ? 1 : 0);
+            if (op == "deck.slipReverse.set") {
+                const auto gesture = ++slot.reverseGesture, generation = slot.generation;
+                if (params["enabled"].toBool()) {
+                    const double bpm = backend_->effectiveBpm(index);
+                    const int duration = static_cast<int>(480000.0 / (bpm > 0 ? bpm : 120));
+                    QTimer::singleShot(duration, this, [this,index,gesture,generation] { if(slots_[index].generation==generation && slots_[index].reverseGesture==gesture) backend_->performanceControl(index,"reverseroll",0); });
+                }
+            }
+        }
+        ++rev_; result(cmd, {{"accepted", true}}); return;
+    }
+    if (op.startsWith("deck.hotcue.") || op.startsWith("deck.loop.") || op == "deck.beatjump" || op == "deck.quantize.set") {
+        if (params.contains("trackId") && params["trackId"] != deck_["track"].toObject()["trackId"]) { error(cmd, "invalid_params", "The loaded track changed"); return; }
+        const double duration = deck_["track"].toObject()["durationMs"].toDouble();
+        if (op.startsWith("deck.hotcue.")) {
+            if (params.contains("quantize") && !params["quantize"].isBool()) { error(cmd, "invalid_params", "quantize must be boolean"); return; }
+            const auto cue = params["index"];
+            if (!integer(cue) || cue.toDouble() > 15) { error(cmd, "invalid_params", "Hotcue index must be integer 0..15"); return; }
+            std::optional<double> position;
+            if (op == "deck.hotcue.set" && params.contains("positionMs")) {
+                const auto value = params["positionMs"];
+                if (!value.isDouble() || !std::isfinite(value.toDouble()) || value.toDouble() < 0 || value.toDouble() >= duration) { error(cmd, "invalid_params", "Hotcue position must be inside the track"); return; }
+                position = value.toDouble();
+            }
+            if (op == "deck.hotcue.jump" && (cue.toInt() >= backend_->performanceState(index)["hotCues"].toArray().size() || backend_->performanceState(index)["hotCues"].toArray()[cue.toInt()].isNull())) { error(cmd, "invalid_params", "Hotcue is not set"); return; }
+            const bool quantize = backend_->performanceState(index)["quantize"].toBool();
+            if (op == "deck.hotcue.set" && !position) {
+                const bool wanted = params.contains("quantize") ? params["quantize"].toBool() : quantize;
+                position = wanted ? backend_->quantizedPositionMs(index) : backend_->positionMs(index);
+                backend_->hotcue(index, cue.toInt(), "set", qBound(0.0, *position, duration));
+            } else backend_->hotcue(index, cue.toInt(), op.section('.', -1), position);
+        } else if (op == "deck.loop.set") {
+            const auto start = params["startMs"], end = params["endMs"];
+            if (!start.isDouble() || !end.isDouble() || !std::isfinite(start.toDouble()) || !std::isfinite(end.toDouble()) || start.toDouble() < 0 || end.toDouble() <= start.toDouble() || end.toDouble() > duration) { error(cmd, "invalid_params", "Loop must have 0 <= startMs < endMs <= duration"); return; }
+            backend_->loop(index, start.toDouble(), end.toDouble());
+        } else if (op == "deck.loop.enable" || op == "deck.quantize.set") {
+            if (!params["enabled"].isBool()) { error(cmd, "invalid_params", "enabled must be boolean"); return; }
+            if (op == "deck.quantize.set") backend_->quantize(index, params["enabled"].toBool());
+            else {
+                if (params["enabled"].toBool() && !backend_->performanceState(index)["loopRegion"].isObject()) { error(cmd, "invalid_params", "Set a loop region first"); return; }
+                backend_->loopEnable(index, params["enabled"].toBool());
+            }
+        } else {
+            const auto beats = params["beats"];
+            if (!beats.isDouble() || !std::isfinite(beats.toDouble()) || std::abs(beats.toDouble()) > 64 || (op == "deck.beatjump" ? beats.toDouble() == 0 : beats.toDouble() < 0.125)) { error(cmd, "invalid_params", "Beatjump needs nonzero signed beats up to 64; loop needs 0.125..64 beats"); return; }
+            if (backend_->beatgridState(index).isEmpty()) { error(cmd, "invalid_params", "Apply a beat grid first"); return; }
+            if (op == "deck.beatjump") backend_->beatjump(index, beats.toDouble());
+            else backend_->beatloop(index, beats.toDouble());
+        }
+        const auto state = backend_->performanceState(index);
+        for (auto it = state.begin(); it != state.end(); ++it) deck_[it.key()] = it.value();
+        descriptor_["hotCues"] = deck_["hotCues"];
+        ++rev_; result(cmd, deck_); event("deck.state", deck_); return;
+    }
+    if (op == "deck.scratch") {
+        const auto phase = params["phase"].toString();
+        const auto gesture = params["gestureId"].toString();
+        const auto position = params["positionMs"];
+        if ((phase != "begin" && phase != "move" && phase != "end") ||
+                gesture.trimmed().isEmpty() || gesture.size() > 128 ||
+                !position.isDouble() || !std::isfinite(position.toDouble()) ||
+                std::abs(position.toDouble()) > 60000 || (phase == "begin" && position.toDouble() != 0)) {
+            error(cmd, "invalid_params", "scratch requires phase begin/move/end, gestureId 1..128 characters, and finite relative positionMs within +/-60000 (begin must be zero)"); return;
+        }
+        // Input may be serviced before a delayed Qt timer. Expired moves must
+        // not revive a gesture already released by the audio-clock watchdog.
+        if (!slot.scratchGesture.isEmpty() && clock_.elapsed() - slot.scratchLastInputMs >= 1500) releaseScratch(index);
+        if (phase == "begin") {
+            if (slot.scratchGesture != gesture) {
+                // The audio mailbox generation replaces the previous gesture.
+                slot.scratchGesture = gesture;
+                slot.scratchLastPositionMs = 0;
+                backend_->scratch(index, phase, 0);
+            }
+            slot.scratchLastInputMs = clock_.elapsed();
+        } else if (slot.scratchGesture == gesture) {
+            slot.scratchLastInputMs = clock_.elapsed();
+            slot.scratchLastPositionMs = position.toDouble();
+            if (phase == "end") releaseScratch(index);
+            else backend_->scratch(index, phase, position.toDouble());
+        } else {
+            // A delayed move/end must never grab or release a newer gesture.
+            result(cmd, {{"deck", name}, {"accepted", false}, {"scratching", backend_->scratching(index)}}); return;
+        }
+        result(cmd, {{"deck", name}, {"accepted", true}, {"scratching", backend_->scratching(index)}}); return;
+    }
+    if (op == "deck.beatgrid.set") {
+        auto track = deck_["track"].toObject();
+        if (!params["trackId"].isString() || params["trackId"].toString().isEmpty()) { error(cmd, "invalid_params", "trackId is required to guard the loaded track"); return; }
+        if (params["trackId"] != track["trackId"]) { error(cmd, "invalid_params", "The deck track changed; reload its grid before applying"); return; }
+        const auto meter = params.contains("beatsPerBar") ? params["beatsPerBar"] : QJsonValue(4);
+        const bool hasBeatTimes = params.contains("beatTimesMs");
+        const double duration = track["durationMs"].toDouble();
+        std::optional<QVector<double>> beatTimes;
+        QJsonValue times = params.value("beatTimesMs"), numbers = params.value("beatNumbers");
+        if (hasBeatTimes) {
+            QVector<double> values;
+            // The shape is checked without a bound first so that trimming only
+            // ever removes a decoder-trimmed tail, never hides malformed input.
+            if (!validMeter(meter) || !parseBeatTimes(times, std::numeric_limits<double>::max()) ||
+                    (params.contains("beatNumbers") && !validBeatNumbers(numbers, times.toArray().size(), static_cast<int>(meter.toDouble()))) ||
+                    !trimBeatsToDuration(times, numbers, duration) ||
+                    !parseBeatTimes(times, duration, &values) || !validMeter(meter) ||
+                    !validOptionalBpm(params.value("bpm")) || !validOptionalOffset(params.value("firstBeatMs"), duration) ||
+                    (params.contains("beatNumbers") && !validBeatNumbers(numbers, values.size(), static_cast<int>(meter.toDouble())))) {
+                error(cmd, "invalid_params", "beatTimesMs must contain 2..100000 finite, strictly increasing timestamps, at least two of them inside the track; beatNumbers must match it and contain integers 1..beatsPerBar"); return;
+            }
+            beatTimes = std::move(values);
+        } else if (params.contains("beatNumbers") || !validGrid(params["bpm"], params["firstBeatMs"], meter, duration)) {
+            error(cmd, "invalid_params", "Expected BPM 20..300, firstBeatMs >= 0 and before track duration, integer beatsPerBar 1..16"); return;
+        }
+        if (!backend_->beatgrid(index, params["bpm"].toDouble(), params["firstBeatMs"].toDouble(), beatTimes)) { error(cmd, "internal", "Mixxx could not replace the loaded beat grid (the track may be BPM-locked)"); return; }
+        track["beatsPerBar"] = meter; track["beatgridApplied"] = true;
+        descriptor_["beatsPerBar"] = meter;
+        if (hasBeatTimes) {
+            track["beatTimesMs"] = times; descriptor_["beatTimesMs"] = times;
+            if (params.contains("beatNumbers")) { track["beatNumbers"] = numbers; descriptor_["beatNumbers"] = numbers; }
+            else { track.remove("beatNumbers"); descriptor_.remove("beatNumbers"); }
+            if (params.contains("bpm") && !params["bpm"].isNull()) { track["bpm"] = params["bpm"]; descriptor_["bpm"] = params["bpm"]; }
+            else { track["bpm"] = QJsonValue::Null; descriptor_.remove("bpm"); }
+            if (params.contains("firstBeatMs")) { track["beatgridOffsetMs"] = params["firstBeatMs"]; descriptor_["beatgridOffsetMs"] = params["firstBeatMs"]; }
+            else { track.remove("beatgridOffsetMs"); descriptor_.remove("beatgridOffsetMs"); }
+        } else {
+            track.remove("beatTimesMs"); track.remove("beatNumbers"); descriptor_.remove("beatTimesMs"); descriptor_.remove("beatNumbers");
+            track["bpm"] = params["bpm"]; track["beatgridOffsetMs"] = params["firstBeatMs"];
+            descriptor_["bpm"] = params["bpm"]; descriptor_["beatgridOffsetMs"] = params["firstBeatMs"];
+        }
+        track["nativeBeatgrid"] = backend_->beatgridState(index);
+        deck_["track"] = track;
+        deck_["effectiveBpm"] = effectiveBpmValue(backend_->effectiveBpm(index));
+        ++rev_; result(cmd, deck_); event("deck.state", deck_); return;
+    }
+    if (op == "deck.tempo.set") {
+        const auto value = params["rate"];
+        if (!value.isDouble() || value.toDouble() < 0.25 || value.toDouble() > 4.0) { error(cmd, "invalid_params", "rate is outside 0.25..4.0"); return; }
+        backend_->tempo(index, value.toDouble()); deck_["rate"] = value; ++rev_; result(cmd, deck_); event("deck.state", deck_); return;
+    }
+    if (op == "deck.keylock.set") {
+        if (!params["enabled"].isBool()) { error(cmd, "invalid_params", "enabled must be boolean"); return; }
+        backend_->keylock(index, params["enabled"].toBool()); deck_["keylock"] = params["enabled"]; ++rev_; result(cmd, deck_); event("deck.state", deck_); return;
+    }
+    if (op == "deck.sync.set") {
+        if (!params["enabled"].isBool()) { error(cmd, "invalid_params", "enabled must be boolean"); return; }
+        const bool syncEnabled = params["enabled"].toBool();
+        const auto leader = params["leader"];
+        int leaderIndex = -1;
+        if (leader.isString()) {
+            leaderIndex = deckIndex(leader.toString().toUpper());
+            if (leaderIndex < 0) { error(cmd, "invalid_params", "leader must be deck A, B, C or D"); return; }
+        }
+        backend_->sync(index, syncEnabled);
+        if (syncEnabled && leaderIndex >= 0) backend_->setSyncLeader(leaderIndex);
+        deck_["syncEnabled"] = syncEnabled;
+        publishSyncLeader(index);
+        ++rev_; result(cmd, deck_); event("deck.state", deck_); return;
+    }
     if (op == "deck.seek") {
         const auto value = params["positionMs"];
-        if (!value.isDouble() || value.toDouble() < 0 || value.toDouble() > deck_["track"].toObject()["durationMs"].toDouble()) { error(cmd, "invalid_params", "positionMs is outside the track"); return; }
+        if (!value.isDouble() || value.toDouble() < -60000 || value.toDouble() > deck_["track"].toObject()["durationMs"].toDouble()) { error(cmd, "invalid_params", "positionMs is outside the transport range"); return; }
         backend_->seek(index, value.toDouble());
     } else {
         slot.transportTouched = true;
@@ -146,24 +573,88 @@ void Host::completed(int index, quint64 generation, QJsonObject metadata, QStrin
         auto track = descriptor_;
         for (auto it = metadata.begin(); it != metadata.end(); ++it) track.insert(it.key(), it.value());
         for (const auto* key : {"title", "artist", "bpm"}) if (!track.contains(key)) track.insert(key, QJsonValue::Null);
-        if (!track.contains("beatgridOffsetMs")) track.insert("beatgridOffsetMs", 0);
+        if (!track.contains("beatsPerBar")) track.insert("beatsPerBar", 4);
+        const double duration = track["durationMs"].toDouble();
+        // Only the deck copy is emptied. The library keeps every stored cue, so
+        // a later load of a correctly decoded file restores them all.
+        if (track.contains("hotCues")) track["hotCues"] = cuesWithinDuration(track["hotCues"], duration);
+        const bool hasBeatTimes = track.contains("beatTimesMs");
+        if (hasBeatTimes) {
+            QJsonValue times = track["beatTimesMs"], numbers = track.value("beatNumbers");
+            const bool usable = trimBeatsToDuration(times, numbers, duration) && parseBeatTimes(times, duration) &&
+                    (!track.contains("beatNumbers") || validBeatNumbers(numbers, times.toArray().size(), static_cast<int>(track["beatsPerBar"].toDouble())));
+            if (!usable) {
+                deck_["status"] = "error"; deck_["lastError"] = "Fewer than two saved beatTimesMs fall inside the decoded track duration";
+                backend_->unload(index);
+                event("deck.load.failed", {{"deck", deckNames[index]}, {"loadId", static_cast<qint64>(generation)}, {"trackId", descriptor_["trackId"]}, {"error", QJsonObject{{"code", "invalid_beatgrid"}, {"message", deck_["lastError"]}}}});
+                event("deck.state", deck_);
+                return;
+            }
+            track["beatTimesMs"] = times;
+            if (track.contains("beatNumbers")) track["beatNumbers"] = numbers;
+        }
+        const auto beatTimes = descriptorBeatTimes(track, duration);
+        const bool hasConstantGrid = !hasBeatTimes && validGrid(track.value("bpm"), track.value("beatgridOffsetMs"), track.value("beatsPerBar"), duration);
+        // Saved grid metadata must reach Mixxx on load, not only the waveform.
+        track["beatgridApplied"] = (beatTimes || hasConstantGrid) && backend_->beatgrid(index, track.value("bpm").toDouble(), track.value("beatgridOffsetMs").toDouble(), beatTimes);
+        if (hasBeatTimes && !track["beatgridApplied"].toBool()) {
+            deck_["status"] = "error"; deck_["lastError"] = "Mixxx could not apply the saved variable beat grid";
+            backend_->unload(index);
+            event("deck.load.failed", {{"deck", deckNames[index]}, {"loadId", static_cast<qint64>(generation)}, {"trackId", descriptor_["trackId"]}, {"error", QJsonObject{{"code", "beatgrid_apply_failed"}, {"message", deck_["lastError"]}}}});
+            event("deck.state", deck_);
+            return;
+        }
+        if (track["beatgridApplied"].toBool()) track["nativeBeatgrid"] = backend_->beatgridState(index);
+        if (track.contains("musicalKey")) backend_->trackKey(index, track["musicalKey"].toString());
+        if (track.contains("hotCues")) {
+            const auto cues = track["hotCues"].toArray();
+            for (int cue = 0; cue < cues.size(); ++cue) if (!cues[cue].isNull()) backend_->hotcue(index, cue, "set", cues[cue].toDouble());
+        }
+        const auto performance = backend_->performanceState(index);
+        for (auto it = performance.begin(); it != performance.end(); ++it) deck_[it.key()] = it.value();
         deck_["track"] = track; deck_["status"] = "ready";
+        deck_["effectiveBpm"] = effectiveBpmValue(backend_->effectiveBpm(index));
         event("deck.loaded", {{"deck", deckNames[index]}, {"loadId", static_cast<qint64>(generation)}, {"track", track}});
     }
     event("deck.state", deck_);
 }
 void Host::sample() {
-    sampleDeck(0); sampleDeck(1);
+    QJsonObject positions;
+    for (int index = 0; index < 4; ++index) {
+        if (!slots_[index].scratchGesture.isEmpty() && clock_.elapsed() - slots_[index].scratchLastInputMs >= 1500) releaseScratch(index);
+        const auto position = sampleDeck(index);
+        if (!position.isEmpty()) positions.insert(deckNames[index], position);
+    }
+    if (!positions.isEmpty()) event("deck.position", {{"decks", positions}});
 }
-void Host::sampleDeck(int index) {
+QJsonObject Host::sampleDeck(int index) {
     auto& deck_ = slots_[index].state;
-    if (!deck_["track"].isObject()) return;
+    if (!deck_["track"].isObject()) return {};
     const auto track = deck_["track"].toObject();
-    const auto position = qBound(0.0, backend_->positionMs(index), track["durationMs"].toDouble());
+    // Negative time is real audio-clock transport (silence before the file),
+    // not a separate UI countdown. Never hide it at the protocol boundary.
+    const auto position = qMin(backend_->positionMs(index), track["durationMs"].toDouble());
     const auto previousStatus = deck_["status"].toString();
     const QString status = backend_->playing(index) ? "playing" : (previousStatus == "ready" && !slots_[index].transportTouched ? "ready" : "paused");
-    if (position == deck_["positionMs"].toDouble() && status == previousStatus) return;
-    deck_["positionMs"] = position; deck_["positionFrames"] = std::floor(position * track["sampleRateHz"].toDouble() / 1000.0); deck_["status"] = status; ++rev_;
-    if (status != previousStatus) event("deck.state", deck_);
-    event("deck.position", {{"decks", QJsonObject{{deckNames[index], QJsonObject{{"positionMs", position}, {"positionFrames", deck_["positionFrames"]}, {"rate", deck_["rate"]}, {"status", status}}}}}});
+    const auto effectiveBpm = effectiveBpmValue(backend_->effectiveBpm(index));
+    const auto rate = backend_->playbackRate(index);
+    const bool bpmChanged = effectiveBpm.isDouble() != deck_["effectiveBpm"].isDouble() ||
+            (effectiveBpm.isDouble() && std::abs(effectiveBpm.toDouble() - deck_["effectiveBpm"].toDouble()) > 0.0001);
+    const bool tempoChanged = bpmChanged || (std::isfinite(rate) && rate > 0 && std::abs(rate - deck_["rate"].toDouble()) > 0.000001);
+    const bool scratching = backend_->scratching(index);
+    const bool scratchChanged = scratching != deck_["scratching"].toBool();
+    const auto performance = backend_->performanceState(index);
+    bool performanceChanged = false;
+    for (auto it = performance.begin(); it != performance.end(); ++it) {
+        if (deck_[it.key()] != it.value()) { performanceChanged = true; deck_[it.key()] = it.value(); }
+    }
+    if (position == deck_["positionMs"].toDouble() && status == previousStatus && !tempoChanged && !scratchChanged && !performanceChanged) return {};
+    deck_["positionMs"] = position; deck_["positionFrames"] = std::floor(position * track["sampleRateHz"].toDouble() / 1000.0); deck_["status"] = status;
+    deck_["effectiveBpm"] = effectiveBpm; if (std::isfinite(rate) && rate > 0) deck_["rate"] = rate;
+    deck_["scratching"] = scratching;
+    ++rev_;
+    // Beat grids can contain 100,000 markers. Never resend that full descriptor
+    // for per-buffer tempo/scratch changes; the lightweight event carries them.
+    if (status != previousStatus || performanceChanged) event("deck.state", deck_);
+    return {{"positionMs", position}, {"positionFrames", deck_["positionFrames"]}, {"rate", deck_["rate"]}, {"effectiveBpm", effectiveBpm}, {"status", status}, {"scratching", scratching}};
 }
