@@ -17,19 +17,27 @@ import { Updater } from "@/components/Updater";
 import { Toaster } from "@/components/ui/toast";
 import { usePlayerStore } from "@/stores/playerStore";
 import { WordplayView } from "@/components/wordplay";
-import { djEngineClient } from "@/services/dj-engine/client";
-import { DECK_IDS } from "@/types/dj-engine";
+import { releasePerformanceHardware, suspendPerformanceAudio, type ReleaseOutcome } from "@/services/performance-release";
+import { isAppMode } from "@/components/play/ModeToggle";
+import { AssistWorkspace } from "@/components/assist/AssistWorkspace";
 import { ModeToggle, PlayWorkspace, type AppMode } from "@/components/play";
 
 function App() {
-  const [appMode, setAppMode] = useState<AppMode>(() => sessionStorage.getItem("djaly.appMode") === "play" ? "play" : "analysis");
+  const [appMode, setAppMode] = useState<AppMode>(() => {
+    const saved = sessionStorage.getItem("djaly.appMode");
+    return isAppMode(saved) ? saved : "analysis";
+  });
   const [activeView, setActiveView] = useState(() =>
     sessionStorage.getItem("djaly.activeView") ?? "dashboard"
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isServerReady, setIsServerReady] = useState(false);
   const previousMode = useRef(appMode);
-  const [releasingPerformanceAudio, setReleasingPerformanceAudio] = useState(false);
+  const [releasingPerformanceAudio, setReleasingPerformanceAudio] = useState(appMode === "assist");
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [releaseRetry, setReleaseRetry] = useState(0);
+  const releaseTask = useRef<Promise<ReleaseOutcome> | null>(null);
+  const releaseAction = useRef(releasePerformanceHardware);
 
   // Music Player State
   const { currentTrack, pause } = usePlayerStore();
@@ -55,38 +63,53 @@ function App() {
     checkServer();
   }, []);
 
-  // Performance mode owns audio output. Stop the browser preview path before
-  // entering it so gain/EQ are never applied to two independent players.
   useEffect(() => {
     sessionStorage.setItem("djaly.activeView", activeView);
-    if (appMode === "play") {
-      pause();
-      setReleasingPerformanceAudio(false);
-    }
-    if (previousMode.current === "play" && appMode === "analysis") {
-      // Deliberate navigation away is an audio-safety boundary. A full webview
-      // reload still leaves the native process playing and reconnectable.
-      setReleasingPerformanceAudio(true);
-      const hasSession = Boolean(djEngineClient.getSessionId());
-      const releaseRecording = hasSession && djEngineClient.getState().snapshot?.recording?.active
-        ? djEngineClient.stopRecording()
-        : Promise.resolve();
-      void releaseRecording.catch(() => undefined).then(() => hasSession
-        ? Promise.allSettled(DECK_IDS.map((deck) => djEngineClient.pause(deck)))
-        : djEngineClient.stop().then(() => []))
-        .then(async (outcomes) => {
-          if (outcomes.some((outcome) => outcome.status === "rejected")) {
-            await djEngineClient.stop();
-          }
-          setReleasingPerformanceAudio(false);
-        })
-        .catch((failure) => {
-          console.error("Native DJ audio could not be released; browser player remains disabled", failure);
-        });
-    }
-    previousMode.current = appMode;
+  }, [activeView]);
+
+  useEffect(() => {
     sessionStorage.setItem("djaly.appMode", appMode);
-  }, [activeView, appMode, pause]);
+    const from = previousMode.current;
+    previousMode.current = appMode;
+    if (appMode !== "analysis") pause();
+    if (appMode === "assist") {
+      releaseAction.current = releasePerformanceHardware;
+    } else if (from === "play" && appMode === "analysis") {
+      releaseAction.current = suspendPerformanceAudio;
+    } else if (!releaseTask.current && releaseRetry === 0) {
+      return;
+    }
+    let live = true;
+    setReleasingPerformanceAudio(true);
+    setReleaseError(null);
+    // StrictMode can remount the effect while a release is pending. Reuse it
+    // so two engine stops cannot race with each other or with a new session.
+    const task = releaseTask.current ?? releaseAction.current();
+    releaseTask.current = task;
+    void task.then((outcome) => {
+      if (!live) return;
+      if (!outcome.audioReleased || !outcome.midiReleased) {
+        setReleaseError(outcome.problems.join("\n") || "オーディオとコントローラーの解放を確認できませんでした");
+      } else if (outcome.problems.length) {
+        console.warn("Performance release:", outcome.problems);
+      }
+    }).catch((failure) => {
+      if (live) setReleaseError(String(failure));
+    }).finally(() => {
+      if (releaseTask.current === task) releaseTask.current = null;
+      if (live) setReleasingPerformanceAudio(false);
+    });
+    return () => { live = false; };
+  }, [appMode, pause, releaseRetry]);
+
+  const changeMode = (mode: AppMode) => {
+    if (mode === appMode || releasingPerformanceAudio) return;
+    if (mode !== "analysis") pause();
+    if (appMode === "play" || mode === "assist") setReleasingPerformanceAudio(true);
+    setReleaseError(null);
+    setReleaseRetry(0);
+    setAppMode(mode);
+  };
 
   if (!isServerReady) {
     return <LoadingScreen />;
@@ -127,11 +150,16 @@ function App() {
         <Updater />
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#080b11]">
           <div className="z-[80] flex h-10 shrink-0 items-center border-b border-slate-700 bg-[#11151d] px-3 shadow-md">
-            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Djaly Workspace</span>
-            <div className="ml-auto"><ModeToggle mode={appMode} onChange={(mode) => { if (appMode === "play" && mode === "analysis") setReleasingPerformanceAudio(true); setAppMode(mode); }} /></div>
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Djaly<span className="hidden sm:inline"> Workspace</span></span>
+            <div className="ml-auto"><ModeToggle mode={appMode} onChange={changeMode} disabled={releasingPerformanceAudio} /></div>
           </div>
         <div className="min-h-0 flex-1">
-        {appMode === "play" ? <PlayWorkspace /> : <div className="h-full w-full bg-background text-foreground flex overflow-hidden">
+        {releasingPerformanceAudio || releaseError ? <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-sm text-slate-300" role="status">
+          {releasingPerformanceAudio ? <p>オーディオとコントローラーを解放しています…</p> : <>
+            <p className="whitespace-pre-wrap text-amber-200">{releaseError}</p>
+            <button className="rounded border border-slate-600 px-4 py-2 hover:bg-slate-800" onClick={() => setReleaseRetry((value) => value + 1)}>再試行</button>
+          </>}
+        </div> : appMode === "play" ? <PlayWorkspace /> : appMode === "assist" ? <AssistWorkspace /> : <div className="h-full w-full bg-background text-foreground flex overflow-hidden">
         <Sidebar
           activeView={activeView}
           onNavigate={setActiveView}

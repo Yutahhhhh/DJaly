@@ -5,6 +5,7 @@ use tauri::Manager;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
+mod assist;
 mod dj_engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_drag::init())
         .menu(|handle| {
             let menu = Menu::new(handle)?;
 
@@ -65,7 +67,16 @@ pub fn run() {
             }
         })
         .manage(Arc::new(dj_engine::EngineSupervisor::new()))
+        // Assist mode only reads; both of these are passive state holders.
+        .manage(assist::AssistState::default())
+        .manage(assist::commands::WindowBounds::default())
         .invoke_handler(tauri::generate_handler![
+            assist::commands::assist_snapshot,
+            assist::commands::assist_request_accessibility,
+            assist::commands::assist_open_accessibility_settings,
+            assist::commands::assist_enter_compact_window,
+            assist::commands::assist_exit_compact_window,
+            assist::commands::assist_set_always_on_top,
             dj_engine::midi::dj_midi_status,
             dj_engine::midi::dj_midi_send,
             dj_engine::midi::dj_midi_read,

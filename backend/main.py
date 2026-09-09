@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from infra.database.connection import init_db, close_db, checkpoint_db
 from api.routers import (
+    assist,
     filesystem,
     genres,
     ingest,
@@ -80,6 +81,7 @@ app.include_router(wordplay.router)
 app.include_router(performance_metadata.router)
 app.include_router(play.router)
 app.include_router(waveform_detail.router)
+app.include_router(assist.router)
 
 # MCP サーバーを /mcp にマウント (外部の MCP クライアントが Streamable HTTP で接続する)
 app.mount("/", mcp_app_holder)

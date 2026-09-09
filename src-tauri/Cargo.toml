@@ -28,8 +28,17 @@ serde_json = "1"
 tauri-plugin-devtools = "2.0.1"
 tauri-plugin-http = "2.5.4"
 tauri-plugin-process = "2.3.1"
+# Native outbound file drag, so a candidate can be dropped straight onto a
+# rekordbox deck. Upstream CrabNebula plugin (Apache-2.0 OR MIT); the JS side is
+# invoked directly through `plugin:drag|start_drag` rather than through the
+# separately licensed npm wrapper.
+tauri-plugin-drag = "2.1.1"
 midir = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 hidapi = { version = "2.6.7", features = ["macos-shared-device"] }
+
+# macOS external Copy drags also advertise Generic for JUCE drop targets.
+[patch.crates-io]
+drag = { path = "vendor/drag" }
