@@ -683,6 +683,7 @@ void Host::completed(int index, quint64 generation, QJsonObject metadata, QStrin
     event("deck.state", deck_);
 }
 void Host::sample() {
+    if (!backend_->available()) return; // session.hello starts the engine asynchronously.
     QJsonObject positions; QJsonArray clockPoints; unsigned dropped = 0;
     for (int index = 0; index < 4; ++index) {
         if (!slots_[index].scratchGesture.isEmpty() && clock_.elapsed() - slots_[index].scratchLastInputMs >= 1500) releaseScratch(index);

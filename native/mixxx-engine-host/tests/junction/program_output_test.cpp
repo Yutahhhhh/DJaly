@@ -26,8 +26,8 @@ void deviceTone(unsigned sourceRate,double skewPpm,unsigned blocks=300,bool spli
 }
 }
 JTEST("program-output","explicit device required") {ProgramOutput p;QString error;CHECK(!p.open(-1,&error));CHECK(!error.isEmpty());}
-JTEST("program-output-device","BlackHole native local 44100 and wire 48000 waveform gain and finalize") {if(!std::getenv("JUNCTION_AUDIO_DEVICE_TEST"))return;deviceTone(44100,0);deviceTone(48000,0);deviceTone(48000,200);}
+JTEST("program-output-device","BlackHole native local 44100 and wire 48000 waveform gain and finalize") {if(!std::getenv("JUNCTION_AUDIO_DEVICE_TEST"))jtest::skip("JUNCTION_AUDIO_DEVICE_TEST is not enabled");deviceTone(44100,0);deviceTone(48000,0);deviceTone(48000,200);}
 
-JTEST("program-output-long-device","BlackHole thirty-second realtime 200ppm clock skew") {if(!std::getenv("JUNCTION_AUDIO_LONG_TEST"))return;deviceTone(48000,200,3000);}
+JTEST("program-output-long-device","BlackHole thirty-second realtime 200ppm clock skew") {if(!std::getenv("JUNCTION_AUDIO_LONG_TEST"))jtest::skip("JUNCTION_AUDIO_LONG_TEST is not enabled");deviceTone(48000,200,3000);}
 
-JTEST("program-output-splice-device","BlackHole old native overlap to new wire epoch at H") {if(!std::getenv("JUNCTION_AUDIO_DEVICE_TEST"))return;deviceTone(44100,0,300,true);}
+JTEST("program-output-splice-device","BlackHole old native overlap to new wire epoch at H") {if(!std::getenv("JUNCTION_AUDIO_DEVICE_TEST"))jtest::skip("JUNCTION_AUDIO_DEVICE_TEST is not enabled");deviceTone(44100,0,300,true);}

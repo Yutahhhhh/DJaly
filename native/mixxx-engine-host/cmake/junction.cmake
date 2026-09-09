@@ -14,6 +14,8 @@ set(JUNCTION_DIR "${CMAKE_CURRENT_LIST_DIR}/../src/junction")
 # drop a file from the real Mixxx target and only fail at link time.
 set(JUNCTION_CORE_SOURCES
   "${JUNCTION_DIR}/runtime.cpp"
+  "${JUNCTION_DIR}/manual_exchange.cpp"
+  "${JUNCTION_DIR}/network_settings.cpp"
   "${JUNCTION_DIR}/validation_capture.cpp"
   "${JUNCTION_DIR}/media_transport.cpp"
   "${JUNCTION_DIR}/asset_cache.cpp"
@@ -30,7 +32,8 @@ set(JUNCTION_CORE_SOURCES
 add_library(djaly-junction-core STATIC ${JUNCTION_CORE_SOURCES})
 set_target_properties(djaly-junction-core PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(djaly-junction-core PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../src")
-target_link_libraries(djaly-junction-core PUBLIC Qt6::Core)
+find_package(OpenSSL REQUIRED)
+target_link_libraries(djaly-junction-core PUBLIC Qt6::Core OpenSSL::Crypto)
 
 # --- libopus: the music codec for the producer uplink (03 section 5) --------
 find_path(JUNCTION_OPUS_INCLUDE opus/opus.h HINTS /opt/homebrew/opt/opus/include /usr/local/opt/opus/include)
@@ -81,7 +84,8 @@ endforeach()
 if(APPLE)
   find_library(JUNCTION_IOKIT_FRAMEWORK IOKit REQUIRED)
   find_library(JUNCTION_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
-  target_link_libraries(djaly-junction-core PUBLIC "${JUNCTION_IOKIT_FRAMEWORK}" "${JUNCTION_COREFOUNDATION_FRAMEWORK}")
+  find_library(JUNCTION_SECURITY_FRAMEWORK Security REQUIRED)
+  target_link_libraries(djaly-junction-core PUBLIC "${JUNCTION_SECURITY_FRAMEWORK}" "${JUNCTION_IOKIT_FRAMEWORK}" "${JUNCTION_COREFOUNDATION_FRAMEWORK}")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/soundtouch-checkpoint.cmake")

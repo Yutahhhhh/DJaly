@@ -30,6 +30,7 @@
     "test:backend": "backend/.venv/bin/pytest",
     "junction:signal:dev": "pnpm --dir services/junction-signaling build && pnpm --dir services/junction-signaling dev",
     "junction:test:contract": "pnpm --dir services/junction-signaling build && pnpm --dir services/junction-signaling test && node --experimental-strip-types --test src/services/junction/control-boundary.test.mjs",
+    "junction:test:manual": "node --test native/mixxx-engine-host/tests/junction/manual-runtime.test.mjs",
     "junction:test:integration": "pnpm --dir services/junction-signaling build && node --test native/mixxx-engine-host/tests/junction/runtime.test.mjs",
     "junction:test:audio": "JUNCTION_AUDIO_DEVICE_TEST=1 native/mixxx-engine-host/build-junction/junction-core-tests program-output",
     "junction:test:ui": "tsc --noEmit && node --experimental-strip-types --test src/services/junction/control-boundary.test.mjs",

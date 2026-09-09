@@ -9,6 +9,11 @@ public:
     QString phase="playing";
     std::optional<HandoffCommitMessage> committed;
     static bool localOnly(const QString& op);
+    /// Non-mutating queries. A peer that is still waiting for admission (or is
+    /// simply not the current performer) must still be able to draw waveforms
+    /// and read diagnostics, so these bypass the performer gate. They never
+    /// touch shared performance state and never advance the control sequence.
+    static bool readOnlyQuery(const QString& op);
     QString authorize(const QString& op,const QJsonObject& ticket,quint64 frame) const;
     QString prepare(const QString& target);
     QString fence(quint64 frame,quint64 watermark);

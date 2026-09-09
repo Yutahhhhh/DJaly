@@ -4,8 +4,12 @@ bool Authority::localOnly(const QString& op) {
     static const QSet<QString> allowed={"engine.ping","state.snapshot","audio.devices.list","audio.config.get","sampler.state","sampler.bank","sampler.pfl","mixer.channel.pfl","mixer.headphone.gain","mixer.headphone.mix","deck.timing.trace","recording.directory.set","recording.format.set","recording.start","recording.stop"};
     return allowed.contains(op);
 }
+bool Authority::readOnlyQuery(const QString& op) {
+    static const QSet<QString> allowed={"engine.clock.probe","waveform.ensure","waveform.manifest","meters.subscribe","deck.timing.trace","state.snapshot"};
+    return allowed.contains(op);
+}
 QString Authority::authorize(const QString& op,const QJsonObject& ticket,quint64 frame) const {
-    if(sessionId.isEmpty() || localOnly(op)) return {};
+    if(sessionId.isEmpty() || localOnly(op) || readOnlyQuery(op)) return {};
     if(ticket["sessionId"].toString()!=sessionId || ticket["actorPeerId"].toString()!=local) return "共有セッションの操作情報が更新されています";
     const auto requested=parseU64(ticket["epoch"]);
     if(!requested || *requested!=epoch) return "交代前の操作は適用できません";

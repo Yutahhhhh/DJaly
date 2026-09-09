@@ -46,3 +46,9 @@ JTEST("validation", "fractional sample alignment preserves the correlation level
  for(auto& value:shifted)value*=1.1;CHECK(!compareAudio(original,shifted).ready);
  CHECK(!compareAudio(original,original,-1).ready);CHECK(!compareAudio(original,original,100000).ready);
 }
+
+JTEST("authority","waiting DJ can query waveform and timing without mutation authority"){
+ auto a=authority();a.local="waiting-dj";
+ for(const auto* op:{"waveform.ensure","waveform.manifest","engine.clock.probe","deck.timing.trace"})CHECK(a.authorize(op,{},100).isEmpty());
+ CHECK(!a.authorize("deck.seek",ticket(a,a.epoch),100).isEmpty());CHECK(!a.authorize("deck.load",ticket(a,a.epoch),100).isEmpty());
+}
