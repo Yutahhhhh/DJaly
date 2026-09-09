@@ -1,0 +1,13 @@
+set(JUNCTION_ST_ROOT "${CMAKE_CURRENT_LIST_DIR}/../build-deps/soundtouch")
+if(NOT EXISTS "${JUNCTION_ST_ROOT}/build/libSoundTouch.a")
+  message(FATAL_ERROR "Build the pinned SoundTouch checkpoint dependency with scripts/build-soundtouch-checkpoint.sh")
+endif()
+add_library(djaly-soundtouch-state STATIC "${CMAKE_CURRENT_LIST_DIR}/../src/junction/soundtouch_state.cpp")
+set_target_properties(djaly-soundtouch-state PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+target_include_directories(djaly-soundtouch-state PUBLIC "${JUNCTION_ST_ROOT}/include" "${CMAKE_CURRENT_LIST_DIR}/../src"
+ PRIVATE "${JUNCTION_ST_ROOT}/source/include" "${JUNCTION_ST_ROOT}/source/source/SoundTouch")
+target_link_libraries(djaly-soundtouch-state PUBLIC Qt6::Core "${JUNCTION_ST_ROOT}/build/libSoundTouch.a")
+if(TARGET SoundTouch::SoundTouch)
+  set_target_properties(SoundTouch::SoundTouch PROPERTIES IMPORTED_LOCATION "${JUNCTION_ST_ROOT}/build/libSoundTouch.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${JUNCTION_ST_ROOT}/include")
+endif()

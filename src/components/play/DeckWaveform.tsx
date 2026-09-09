@@ -1,3 +1,8 @@
+import { useNativeWaveform } from "./useNativeWaveform";
+import { waveformRenderer } from "@/services/waveform/renderer";
+import { deckRealtimeStore } from "@/services/dj-engine/deck-realtime-store";
+import { assetWaveform } from '@/services/junction/asset-resolver';
+import type { AssetWaveform } from '@/types/dj-engine';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useTrackVisuals } from "./useTrackVisuals";
@@ -10,6 +15,7 @@ import type { LoopRegion, ScratchPhase } from "@/types/dj-engine";
 
 export type WaveformLayout = "horizontal" | "vertical";
 type Props = {
+  assetId?: string; remoteWaveform?: AssetWaveform;
   trackId: number | null; positionMs: number; durationMs: number;
   layout: WaveformLayout; side: "left" | "right"; color: "cyan" | "fuchsia";
   onSeek?: (ms: number) => void; mode?: "overview" | "scroll";
@@ -17,7 +23,7 @@ type Props = {
   label?: string; compact?: boolean; playing?: boolean; rate?: number;
   beatTimesMs?: number[]; beatNumbers?: number[]; gridAvailable?: boolean;
   onGridShift?: (deltaMs: number) => void;
-  onScratch?: (command: { phase: ScratchPhase; positionMs: number; gestureId: string }) => Promise<unknown>;
+  onScratch?: (command: { phase: ScratchPhase; positionMs: number; gestureId: string; capturedAt?: number; keepalive?: boolean }) => Promise<unknown>;
   onScratchError?: (error: unknown) => void;
   scratching?: boolean;
   loopRegion?: LoopRegion | null;
@@ -33,18 +39,20 @@ const WAVE_LOW = "#1a7bf0", WAVE_MID = "#ffa02c", WAVE_HIGH = "#e9f1ff";
 const WAVE_TILT_MID = 0.85, WAVE_TILT_HIGH = 0.5;
 
 type DragGesture = {
-  pointer: number; coordinate: number; origin: number; moved: boolean;
+  lastMotionAt: number; layout: WaveformLayout; pointer: number; coordinate: number; origin: number; moved: boolean;
   kind: "overview" | "grid" | "scratch";
   length: number; span: number; positionMs: number; gestureId: string; errorReported: boolean;
   /** 0 より大きければ、このジェスチャーはスクラッチではなくプリロール調整に切り替わっている。 */
 };
 
-export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, durationMs, layout, side, color, onSeek, mode = "overview", bpm, beatgridOffsetMs = 0, beatsPerBar = 4, hotCues = NO_CUES, label, compact, playing = false, rate = 1, beatTimesMs, beatNumbers, gridAvailable = true, onGridShift, onScratch, onScratchError, scratching = false, loopRegion = null }: Props) {
+export const DeckWaveform = memo(function DeckWaveform({ assetId, remoteWaveform, trackId, positionMs, durationMs, layout, side, color, onSeek, mode = "overview", bpm, beatgridOffsetMs = 0, beatsPerBar = 4, hotCues = NO_CUES, label, compact, playing = false, rate = 1, beatTimesMs, beatNumbers, gridAvailable = true, onGridShift, onScratch, onScratchError, scratching = false, loopRegion = null }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sizeRef = useRef({ width: 0, height: 0 });
   const paintRef = useRef<() => void>(() => undefined);
   const continuousRef = useRef(false);
+  const visibleRef = useRef(true);
   const invalidateRef = useRef<() => void>(() => undefined);
+  const overviewRaster = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
   const envelopes = useRef({ low: new Float32Array(0), mid: new Float32Array(0), high: new Float32Array(0) });
   const { data, loading } = useTrackVisuals(mode === "overview" ? trackId : null);
   const detail = useWaveformDetail(mode === "scroll" || mode === "overview" ? trackId : null, compact ? 400 : undefined);
@@ -53,7 +61,7 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
     const zoom = (event: Event) => {
       const action = (event as CustomEvent<{ control: string; value: number }>).detail;
       if (action.control !== "zoom" || !action.value) return;
-      const levels = [0.5, 1, 2, 4, 8, 16, 32];
+      const levels = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
       setZoomSeconds(current => levels[Math.max(0, Math.min(levels.length - 1, levels.indexOf(current) - Math.sign(action.value)))]);
     };
     if (mode === "scroll") window.addEventListener("djaly:controller-library", zoom);
@@ -69,7 +77,11 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
   const pendingSeek = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeekAt = useRef(0);
   const span = mode === "scroll" ? zoomSeconds * 1000 : durationMs;
-  const bands = detail.data;
+  const [physicalPixels,setPhysicalPixels]=useState(2000);
+  const nativeWaveform = useNativeWaveform(label, positionMs, span, mode === "overview",physicalPixels);
+  useEffect(()=>{const size=sizeRef.current;setPhysicalPixels((layout==='vertical'?size.height:size.width)*(window.devicePixelRatio||1));},[layout]);
+  const remoteBands = useMemo(() => assetWaveform(remoteWaveform), [remoteWaveform]);
+  const bands = remoteBands ?? detail.data;
   const peaks = bands ? bands.peaks : mode === "scroll" ? undefined : data?.waveform_peaks;
   const clamp = (position: number) => Math.max(mode === "scroll" ? -60_000 : 0, Math.min(durationMs, position));
   // 表示ゲイン。上位 2% に入る高さをレーンの天井付近へ合わせる。基準を最大値
@@ -124,12 +136,12 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
     telemetry.current = { position: positionMs, receivedAt: performance.now() };
     if (pendingSeek.current) clearTimeout(pendingSeek.current);
     return () => { releaseDrag.current(); if (pendingSeek.current) clearTimeout(pendingSeek.current); };
-  }, [trackId]);
+  }, [trackId,assetId]);
 
   const floor = mode === "scroll" ? Number.NEGATIVE_INFINITY : 0;
-  const visualPosition = () => drag.current?.kind === "scratch" || scratching
+  const visualPosition = () => deckRealtimeStore.position(label, performance.now())?.positionMs ?? (drag.current?.kind === "scratch" || scratching
     ? Math.max(floor, Math.min(durationMs, telemetry.current.position))
-    : waveformPlayhead(telemetry.current, optimistic.current, performance.now(), playing, rate, durationMs, floor);
+    : waveformPlayhead(telemetry.current, optimistic.current, performance.now(), playing, rate, durationMs, floor));
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -162,7 +174,11 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
       else { ctx.moveTo(0, axis); ctx.lineTo(width, axis); }
       ctx.stroke();
 
-      if (peaks?.length) {
+      const rasterKey = [nativeWaveform.tiles, peaks, bands, width, height, ratio, layout, side, compact, color, gain, durationMs];
+      const cached = mode === "overview" && overviewRaster.current?.key.every((value, i) => value === rasterKey[i]);
+      if (cached) ctx.drawImage(overviewRaster.current!.canvas, 0, 0, width, height);
+      if (nativeWaveform.tiles.length && !cached) waveformRenderer.draw(ctx, nativeWaveform.tiles, startMs, span, width, height, vertical, side);
+      if (!nativeWaveform.tiles.length && peaks?.length && !cached) {
         const density = bands ? bands.bins_per_second / 1000 : peaks.length / durationMs;
         const scale = bands ? bands.amplitude_scale : 1;
         const columns = Math.max(1, Math.ceil(length * ratio));
@@ -245,6 +261,12 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
         if (bands) { fillBand(low, WAVE_LOW); fillBand(mid, WAVE_MID); fillBand(high, WAVE_HIGH); }
         else fillBand(low, color === "cyan" ? WAVE_LOW : "#ffac48");
       }
+      if (mode === "overview" && !cached) {
+        const raster = document.createElement("canvas");
+        raster.width = pixelWidth; raster.height = pixelHeight;
+        raster.getContext("2d")?.drawImage(canvas, 0, 0);
+        overviewRaster.current = { key: rasterKey, canvas: raster };
+      }
       // Overview: dim the part already played so the remaining time reads at a glance.
       if (mode === "overview" && !compact && position > 0) {
         const played = Math.max(0, Math.min(length, position / durationMs * length));
@@ -283,8 +305,10 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
           const thickness = Math.max(2, to - from);
           if (vertical) ctx.fillRect(0, from, width, thickness); else ctx.fillRect(from, 0, thickness, height);
           const edge = on ? "#f5b95c" : "#f5b95c66";
+          if(!on)ctx.setLineDash([3,3]);
           if (from >= 0) line(from, edge, on ? 2 : 1);
           if (to <= length) line(to, edge, on ? 2 : 1);
+          ctx.setLineDash([]);
           if (!compact) {
             const beatMs = bpm && bpm > 0 ? 60_000 / bpm : 0;
             const beats = beatMs ? (loopRegion.endMs - loopRegion.startMs) / beatMs : 0;
@@ -309,6 +333,7 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
         const exact = Boolean(beatTimesMs?.length);
         const first = exact ? lowerBeat(beatTimesMs!, Math.max(0, startMs)) : Math.ceil((Math.max(0, startMs) - beatgridOffsetMs) / beatMs);
         const last = exact ? lowerBeat(beatTimesMs!, Math.min(durationMs, startMs + span)) - 1 : Math.floor((Math.min(durationMs, startMs + span) - beatgridOffsetMs) / beatMs);
+        let lastBarLabel=-Infinity;
         for (let beat = first; beat <= last && beat - first < 512; beat++) {
           const at = ((exact ? beatTimesMs![beat] : beat * beatMs + beatgridOffsetMs) - startMs) / span * length;
           const downbeat = exact ? (beatNumbers?.[beat] ?? beat % beatsPerBar + 1) === 1 : beat % beatsPerBar === 0;
@@ -330,20 +355,29 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
             ctx.fill();
             ctx.font = "bold 10px ui-monospace, monospace"; ctx.fillStyle = "#dce6f1";
             const bar = exact ? bars[beat] : Math.floor(beat / beatsPerBar) + 1;
-            if (vertical) ctx.fillText(String(bar), side === "left" ? 3 : width - 24, at - 3);
-            else ctx.fillText(String(bar), at + 4, 11);
+            if(at-lastBarLabel>=32){
+              if (vertical) ctx.fillText(String(bar), side === "left" ? 3 : width - 24, at - 3);
+              else ctx.fillText(String(bar), at + 4, height-2);
+              lastBarLabel=at;
+            }
           }
         }
       }
+      const cueGroups:{at:number;indices:number[]}[]=[];
+      hotCues.map((time,index)=>({time,index})).filter(item=>item.time!==null&&item.time>=startMs&&item.time<=startMs+span).sort((a,b)=>a.time!-b.time!).forEach(({time,index})=>{
+        const at=(time!-startMs)/span*length,last=cueGroups[cueGroups.length-1];
+        if(last&&at-last.at<22)last.indices.push(index);else cueGroups.push({at,indices:[index]});
+      });
       hotCues.forEach((time, index) => {
         if (time === null || time < startMs || time > startMs + span) return;
         const at = (time - startMs) / span * length;
         const cueColor = CUE_COLORS[index % CUE_COLORS.length];
         line(at, cueColor, 1.5);
-        const letter = String.fromCharCode(65 + index);
-        const tab = compact ? 9 : 12;
+        const group=cueGroups.find(group=>group.indices[0]===index);if(!group)return;
+        const letter = group.indices.length>1?`${String.fromCharCode(65+index)}+${group.indices.length-1}`:String.fromCharCode(65 + index);
+        const tab = group.indices.length>1?28:16;
         ctx.fillStyle = cueColor;
-        ctx.font = `bold ${compact ? 7 : 9}px ui-monospace, monospace`;
+        ctx.font = `bold 10px ui-monospace, monospace`;
         ctx.textBaseline = "middle";
         ctx.textAlign = "center";
         // ラベルはキュー位置を中心に置く。先頭を起点にすると重心が半分ずれて、
@@ -382,7 +416,7 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
       }
     };
     paintRef.current = draw;
-    continuousRef.current = !compact && trackId !== null && (playing || dragging);
+    continuousRef.current = !compact && (trackId !== null || Boolean(assetId)) && (playing || dragging);
     invalidateRef.current();
   });
 
@@ -390,23 +424,29 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
     const canvas = canvasRef.current;
     const container = canvas?.parentElement;
     if (!canvas || !container) return;
-    const loop = createWaveformRenderLoop(() => paintRef.current(), () => continuousRef.current && !document.hidden);
+    const loop = createWaveformRenderLoop(() => paintRef.current(), () => visibleRef.current && continuousRef.current && !document.hidden);
     invalidateRef.current = loop.invalidate;
     // Observe the CSS container, never the canvas whose backing size we mutate.
     // No layout reads/writes or rasterization inside ResizeObserver delivery.
     const observer = new ResizeObserver(([entry]) => {
       sizeRef.current = { width: entry.contentRect.width, height: entry.contentRect.height };
+      setPhysicalPixels((layout === "vertical" ? entry.contentRect.height : entry.contentRect.width)*(window.devicePixelRatio||1));
       loop.invalidate();
     });
     observer.observe(container);
+    const visibility = new IntersectionObserver(([entry]) => {
+      visibleRef.current = entry.isIntersecting;
+      if (entry.isIntersecting) loop.invalidate();
+    });
+    visibility.observe(container);
     window.addEventListener("resize", loop.invalidate);
     document.addEventListener("visibilitychange", loop.invalidate);
     return () => {
-      observer.disconnect(); loop.dispose(); invalidateRef.current = () => undefined;
+      visibility.disconnect(); observer.disconnect(); loop.dispose(); invalidateRef.current = () => undefined;
       window.removeEventListener("resize", loop.invalidate);
       document.removeEventListener("visibilitychange", loop.invalidate);
     };
-  }, []);
+  }, [layout]);
 
   const seekLive = (position: number, final = false) => {
     const now = performance.now();
@@ -423,8 +463,8 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
     gesture.errorReported = true;
     onScratchError?.(error);
   };
-  const sendScratch = (gesture: DragGesture, phase: ScratchPhase) => {
-    void onScratch?.({ phase, positionMs: gesture.positionMs, gestureId: gesture.gestureId })
+  const sendScratch = (gesture: DragGesture, phase: ScratchPhase, capturedAt = performance.now(), keepalive = false) => {
+    void onScratch?.({ phase, positionMs: gesture.positionMs, gestureId: gesture.gestureId, capturedAt, keepalive })
       .catch((error) => reportScratch(gesture, error));
   };
   const stopHeartbeat = () => {
@@ -458,7 +498,7 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
 
   return <div className={cn("dj-waveform", `dj-waveform--${layout}`, compact && "dj-waveform--compact")}>
     <canvas ref={canvasRef} style={{ touchAction: interactive ? "none" : undefined, cursor: interactive ? dragging ? "grabbing" : mode === "scroll" ? "grab" : "crosshair" : undefined }} aria-label={label ? `Deck ${label} ${mode} waveform` : "Track waveform"} role={interactive ? "slider" : "img"} tabIndex={interactive && durationMs ? 0 : undefined} aria-valuemin={interactive ? mode === "scroll" ? Math.min(-60_000, positionMs) : 0 : undefined} aria-valuemax={interactive ? durationMs : undefined} aria-valuenow={interactive ? mode === "overview" ? Math.max(0, positionMs) : positionMs : undefined}
-      onKeyDown={(event) => { if (!onSeek || !durationMs || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; event.preventDefault(); seekLive(clamp(visualPosition() + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -1000 : 1000)), true); }}
+      onKeyDown={(event) => { if (!onSeek || !durationMs || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; event.preventDefault(); seekLive(clamp(visualPosition() + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1) * (event.shiftKey ? 10 : 1000)), true); }}
       onPointerDown={(event) => {
         if (!interactive || !durationMs || event.button !== 0) return;
         const grid = mode === "scroll" && Boolean(onGridShift && !event.altKey);
@@ -469,7 +509,7 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
         const origin = layout === "horizontal" ? rect.left : rect.top;
         const length = layout === "horizontal" ? rect.width : rect.height;
         const kind: DragGesture["kind"] = mode === "overview" ? "overview" : grid ? "grid" : "scratch";
-        const gesture: DragGesture = { pointer: event.pointerId, coordinate, origin, moved: mode === "overview", kind, length, span, positionMs: 0, gestureId: crypto.randomUUID(), errorReported: false };
+        const gesture: DragGesture = { lastMotionAt: performance.now(), layout, pointer: event.pointerId, coordinate, origin, moved: mode === "overview", kind, length, span, positionMs: 0, gestureId: crypto.randomUUID(), errorReported: false };
         drag.current = gesture; setDragging(true);
         if (kind === "grid") onGridShift?.(0);
         else if (kind === "overview") seekLive(clamp((coordinate - origin) / length * durationMs), true);
@@ -477,23 +517,28 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
           optimistic.current = null;
           sendScratch(gesture, "begin");
           scratchHeartbeat.current = setInterval(() => {
-            if (drag.current === gesture) sendScratch(gesture, "move");
+            if (drag.current === gesture && performance.now() - gesture.lastMotionAt >= 250) sendScratch(gesture, "move", performance.now(), true);
           }, 250);
         }
       }}
       onPointerMove={(event) => {
         const gesture = drag.current; if (!gesture || gesture.pointer !== event.pointerId) return;
-        const coordinate = layout === "horizontal" ? event.clientX : event.clientY;
-        if (gesture.length <= 0 || coordinate === gesture.coordinate) return;
+        const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
+        if (!samples.length) samples.push(event.nativeEvent);
+        for (const sample of samples) {
+        const coordinate = gesture.layout === "horizontal" ? sample.clientX : sample.clientY;
+        if (gesture.length <= 0 || coordinate === gesture.coordinate) continue;
         const delta = coordinate - gesture.coordinate;
         gesture.coordinate = coordinate;
-        if (gesture.kind === "grid") { onGridShift?.(delta / gesture.length * gesture.span * (event.shiftKey ? 0.1 : 1)); return; }
+        if (gesture.kind === "grid") { onGridShift?.(delta / gesture.length * gesture.span * (sample.shiftKey ? 0.1 : 1)); continue; }
         if (gesture.kind === "scratch") {
           gesture.positionMs = Math.max(-60_000, Math.min(60_000, gesture.positionMs - delta / gesture.length * gesture.span));
-          gesture.moved = true; sendScratch(gesture, "move"); return;
+          gesture.lastMotionAt = performance.now();
+          gesture.moved = true; sendScratch(gesture, "move", sample.timeStamp); continue;
         }
         gesture.moved = true;
         seekLive(clamp((coordinate - gesture.origin) / gesture.length * durationMs));
+        }
       }}
       onPointerUp={(event) => {
         const gesture = drag.current; if (!gesture || gesture.pointer !== event.pointerId) return;
@@ -502,10 +547,12 @@ export const DeckWaveform = memo(function DeckWaveform({ trackId, positionMs, du
       }}
       onLostPointerCapture={() => releaseDrag.current()}
       onPointerCancel={() => releaseDrag.current()} />
-    {label && <span className={cn("dj-wave-label", color === "cyan" ? "dj-blue" : "dj-orange")}>{label}</span>}
-    {mode === "scroll" && <select className="dj-wave-zoom" aria-label={`Deck ${label ?? side} waveform zoom`} title="表示範囲 / 青:低域・橙:中域・白:高域" value={zoomSeconds} onChange={(event) => setZoomSeconds(Number(event.target.value))}>{[0.5, 1, 2, 4, 8, 16, 32].map((seconds) => <option key={seconds} value={seconds}>{seconds}s</option>)}</select>}
-    {!peaks?.length && <span className="dj-wave-empty" style={{ pointerEvents: detail.error ? "auto" : "none" }}>
-      {(mode === "scroll" ? detail.loading : loading) ? "Loading waveform…" : detail.error ? <button onClick={detail.retry} title={detail.error}>詳細波形を再試行</button> : trackId ? "波形未解析" : compact ? "—" : "No track loaded"}
+    {dragging&&<span className="dj-wave-grip" aria-hidden="true">⋮⋮</span>}
+    {label && <span title={hotCues.map((time,i)=>time===null?null:`${String.fromCharCode(65+i)}: ${(time/1000).toFixed(3)}s`).filter(Boolean).join(" / ")} className={cn("dj-wave-label", color === "cyan" ? "dj-blue" : "dj-orange")}>{label}</span>}
+    {mode === "scroll" && <select className="dj-wave-zoom" aria-label={`Deck ${label ?? side} waveform zoom`} title="表示範囲 / 青:低域・橙:中域・白:高域" value={zoomSeconds} onChange={(event) => setZoomSeconds(Number(event.target.value))}>{[0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32].map((seconds) => <option key={seconds} value={seconds}>{seconds}s</option>)}</select>}
+    {nativeWaveform.error&&<button className="dj-wave-retry" onClick={nativeWaveform.retry} title={nativeWaveform.error}>波形を再試行</button>}
+    {!peaks?.length && !nativeWaveform.tiles.length && <span className="dj-wave-empty" style={{ pointerEvents: detail.error ? "auto" : "none" }}>
+      {(mode === "scroll" ? detail.loading : loading) ? "Loading waveform…" : detail.error ? <button onClick={detail.retry} title={detail.error}>詳細波形を再試行</button> : assetId ? "共有音源の波形を準備中" : trackId ? "波形未解析" : compact ? "—" : "No track loaded"}
     </span>}
   </div>;
 });

@@ -1,4 +1,5 @@
 #pragma once
+#include "deck_telemetry.h"
 
 #include <algorithm>
 #include <atomic>
@@ -11,10 +12,15 @@
 #include "engine/channels/enginedeck.h"
 #include "engine/enginebuffer.h"
 
-// Main-thread commands cross into the audio callback through a bounded mailbox.
-// All values are atomic: an interrupted writer makes the callback reuse its last
-// coherent request, never spin, lock, allocate, or read a partially written one.
+// Main-thread commands cross through a fixed SPSC trajectory ring.
+// The callback consumes at most 64 records and never waits or allocates.
+// Overflow aborts the affected generation; a fresh touch may start a new one.
 class ScratchDeck final : public EngineDeck {
+    struct Request { unsigned sequence,generation;bool enabled,finish,keepalive;double samples,sampleRate,at; quint64 loadGeneration,inputSequence; };
+    deckclock::Ring<Request,1024> requests_;
+    std::atomic<unsigned> overflowGeneration_{0};
+    unsigned blockedGeneration_=0;
+    quint64 appliedNativeInput_=0;
 public:
     ScratchDeck(const ChannelHandleAndGroup& handleGroup, UserSettingsPointer settings,
             EngineMixer* mixer, EffectsManager* effects, ChannelOrientation orientation)
@@ -31,17 +37,17 @@ public:
         ControlDoublePrivate::getControl(ConfigKey(handleGroup.name(), "scratch2_enable"))->blockSignals(true);
     }
 
-    void requestScratch(bool enabled, bool begin, double samples, double sourceSampleRate, bool finish = true) {
-        sequence_.fetch_add(1);
+    void requestScratch(bool enabled, bool begin, double samples, double sourceSampleRate, bool finish = true, double capturedNativeUs = 0, bool keepalive = false, quint64 inputSequence = 0) {
         if (begin) generation_.fetch_add(1);
-        requestedEnabled_.store(enabled);
-        requestedSamples_.store(samples);
-        requestedSampleRate_.store(sourceSampleRate);
-        requestedFinish_.store(finish);
-        // 速度推定に使うので、トレース無効でも入力時刻は常に残す。
-        requestedAt_.store(monotonicMs());
-        sequence_.fetch_add(1);
+        const unsigned sequence = sequence_.fetch_add(2) + 2;
+        const Request request{sequence, generation_.load(), enabled, finish, keepalive, samples, sourceSampleRate,
+            capturedNativeUs > 0 ? capturedNativeUs / 1000.0 : monotonicMs(), clockGeneration_.load(),inputSequence};
+        if (!requests_.push(request, enabled && !begin ? 64 : 0)) overflowGeneration_.store(request.generation);
     }
+
+    double junctionPositionFrames() const noexcept { return exactFrames_.load(std::memory_order_acquire); }
+    double junctionSpeed() const noexcept { return exactSpeed_.load(std::memory_order_acquire); }
+    quint64 junctionAudioBlocks() const noexcept { return exactBlocks_.load(std::memory_order_acquire); }
     bool scratching() const { return observedScratching_.load(); }
 
     QJsonObject audioDiagnostics() const {
@@ -69,17 +75,43 @@ public:
         return {{"rows", rows}, {"dropped", static_cast<double>(traceDropped_.load())}};
     }
 
+    void setLoadGeneration(quint64 generation) { clockGeneration_.store(generation); }
+    QJsonObject clockPoints() {
+        QJsonArray points; deckclock::Point p;
+        while (clockPoints_.pop(p)) points.append(QJsonObject{
+            {"schema", 2}, {"sequence", double(p.sequence)}, {"audioConfigEpoch", double(p.config)},
+            {"outputFrameEnd", double(p.outputEnd)}, {"outputFrames", int(p.frames)},
+            {"outputSampleRateHz", p.outputRate}, {"sourceFrameStart", p.start}, {"sourceFrameEnd", p.end},
+            {"sourceSampleRateHz", p.sourceRate}, {"nativeMonoUs", p.nativeUs},
+            {"loadGeneration", double(p.generation)}, {"trajectoryEpoch", double(p.trajectory)},
+            {"velocityRatioMean", p.velocity}, {"velocityRatioEnd", QJsonValue::Null},
+            {"transportPlaying", p.playing}, {"scratching", p.scratching},
+            {"appliedInputSeq", double(p.applied)}, {"inputOrigin",p.nativeInput?"native-midi":"control"},
+            {"timestampReference", "deck-postprocess-observed"},
+            {"discontinuity", p.boundary ? QJsonValue(p.boundary == 2 ? "loop-wrap" : "seek") : QJsonValue(QJsonValue::Null)},
+            {"interpolationSafe", p.boundary == 0}});
+        return {{"points", points}, {"dropped", int(clockPoints_.dropped())}};
+    }
     void process(CSAMPLE* output, const int bufferSize) override {
+        clockBoundary_.kind = 0;
+        deckclock::currentBoundary = &clockBoundary_;
         bool grabbed = false;
-        const auto sequence = sequence_.load();
-        if (sequence != consumedSequence_ && !(sequence & 1)) {
-            const auto generation = generation_.load();
-            const auto enabled = requestedEnabled_.load();
-            const auto samples = requestedSamples_.load();
-            const auto sampleRate = requestedSampleRate_.load();
-            const auto finish = requestedFinish_.load();
-            const auto requestedAt = requestedAt_.load();
-            if (sequence == sequence_.load()) {
+        const auto overflow = overflowGeneration_.exchange(0);
+        if (overflow) { blockedGeneration_ = overflow; enabled_ = false; baselineValid_ = false; releaseRamp_ = false; }
+        if(appliedLoadGeneration_!=clockGeneration_.load(std::memory_order_acquire)){enabled_=false;baselineValid_=false;releaseRamp_=false;}
+        Request request;
+        for (unsigned consumed = 0; consumed < 64 && requests_.pop(request); ++consumed) {
+            if(request.loadGeneration!=clockGeneration_.load(std::memory_order_acquire))continue;
+            if (blockedGeneration_ && request.generation <= blockedGeneration_ && request.enabled) continue;
+            const auto sequence = request.sequence;
+            const auto generation = request.generation;
+            const auto enabled = request.enabled;
+            const auto samples = request.samples;
+            const auto sampleRate = request.sampleRate;
+            const auto finish = request.finish;
+            const auto requestedAt = request.at;
+            const auto keepalive = request.keepalive;
+            {
                 consumedSequence_ = sequence;
                 inputAgeMs_ = 0;
                 if (generation != currentGeneration_) {
@@ -95,7 +127,9 @@ public:
                     motionAtMs_ = requestedAt;
                 }
                 enabled_ = enabled;
-                if (samples != samples_) {
+                if (keepalive) {
+                    // Contact lease refresh is not an observed stop.
+                } else if (samples != samples_) {
                     // 入力が届いた実時刻の差で手の速度を測る。ハートビートは
                     // 位置を変えないので間隔に混ぜない。異常に長い間隔（曲の
                     // 頭出し待ちなど）は速度ではないので推定を捨てる。
@@ -122,6 +156,8 @@ public:
                 }
                 samples_ = samples;
                 sourceSampleRate_ = sampleRate;
+                appliedLoadGeneration_ = request.loadGeneration;
+                appliedNativeInput_ = request.inputSequence;
                 finish_ = finish;
                 requestAtMs_ = requestedAt;
             }
@@ -232,6 +268,7 @@ public:
         beforeFrames_ = getEngineBuffer()->getExactPlayPos().value();
         requestAgeMs_ = traceEnabled_ ? monotonicMs() - requestAtMs_ : 0;
         EngineDeck::process(output, bufferSize);
+        deckclock::currentBoundary = nullptr;
         const bool scratching = getEngineBuffer()->getScratching();
         observedScratching_.store(scratching);
         if (scratching) {
@@ -251,9 +288,20 @@ public:
 
     void postProcess(const int bufferSize) override {
         EngineDeck::postProcess(bufferSize);
+        const auto exact = getEngineBuffer()->getExactPlayPos();
+        exactFrames_.store(exact.isValid() ? exact.value() : 0, std::memory_order_release);
+        exactSpeed_.store(getEngineBuffer()->getSpeed(), std::memory_order_release);
+        exactBlocks_.fetch_add(1, std::memory_order_release);
         const double callbackMs = bufferSize * 500.0 / std::max(1.0, m_sampleRate.get());
         const bool scratching = getEngineBuffer()->getScratching();
         traceAudioMs_ += callbackMs;
+        if (exact.isValid() && sourceSampleRate_ > 0) {
+            const double mean = clockBoundary_.kind ? 0 : (exact.value() - beforeFrames_) * 1000.0 / sourceSampleRate_ / callbackMs;
+            clockPoints_.push({++clockSequence_, deckclock::audioConfigEpoch, deckclock::outputFrameEnd,
+                appliedLoadGeneration_, clockBoundary_.epoch, appliedNativeInput_ ? appliedNativeInput_ : consumedSequence_ / 2,
+                beforeFrames_, exact.value(), sourceSampleRate_, m_sampleRate.get(), deckclock::monotonicUs(), mean,
+                unsigned(bufferSize / 2), clockBoundary_.kind, play_->get() > 0, scratching, appliedNativeInput_ != 0});
+        }
         if (traceEnabled_) {
             const auto write = traceWrite_.load();
             if (write - traceRead_.load(std::memory_order_acquire) < trace_.size()) {
@@ -269,6 +317,12 @@ public:
     }
 
 private:
+    deckclock::Ring<deckclock::Point, 256> clockPoints_;
+    deckclock::Boundary clockBoundary_;
+    std::atomic<quint64> clockGeneration_{0};
+    quint64 clockSequence_ = 0, appliedLoadGeneration_ = 0;
+    std::atomic<double> exactFrames_{0}, exactSpeed_{0};
+    std::atomic<quint64> exactBlocks_{0};
     static double monotonicMs() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     struct TraceRow { double audioMs, positionMs, speed, callbackMs, commandedSpeed, targetMs, requestAgeMs; bool held, scratching; };
     const bool traceEnabled_ = qEnvironmentVariableIntValue("DJALY_MIXXX_TIMING_TRACE") == 1;
@@ -283,10 +337,10 @@ private:
     ControlObject* const play_;
     ControlObject* const tempo_;
     std::atomic<unsigned> sequence_{0}, generation_{0};
-    std::atomic<bool> requestedEnabled_{false}, observedScratching_{false}, requestedFinish_{true};
+    std::atomic<bool> observedScratching_{false};
     std::atomic<unsigned> diagnosticBuffers_{0}, diagnosticSilent_{0};
     std::atomic<double> diagnosticPeak_{0}, diagnosticSpeed_{0}, diagnosticPosition_{0}, diagnosticAge_{0};
-    std::atomic<double> requestedSamples_{0}, requestedSampleRate_{44100}, requestedAt_{0};
+
     unsigned currentGeneration_ = 0, consumedSequence_ = 0;
     bool enabled_ = false, baselineValid_ = false, finish_ = true, releaseRamp_ = false;
     double samples_ = 0, sourceSampleRate_ = 44100, inputAgeMs_ = 0, motionAgeMs_ = 0, baselineFrames_ = 0;

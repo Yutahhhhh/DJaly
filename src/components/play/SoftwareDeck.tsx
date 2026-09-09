@@ -1,3 +1,4 @@
+import { localTrackId } from '@/services/junction/asset-resolver';
 import { DeckPerformanceControls } from "./DeckPerformanceControls";
 import { SamplerPads } from "./SamplerPads";
 import { djEngineClient } from "@/services/dj-engine/client";
@@ -79,7 +80,7 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
   const [loopMode, setLoopMode] = useState<LoopMode>("auto");
   const [tempoRange, setTempoRange] = useState<TempoRange>(() => { const saved = Number(localStorage.getItem(`djaly.tempoRange.${id}`)) as TempoRange; return TEMPO_RANGES.includes(saved) ? saved : TEMPO_RANGES[2]; });
   const [fxMix, setFxMix] = useState(.8);
-  const trackId = deck?.track?.trackId && /^\d+$/.test(deck.track.trackId) ? Number(deck.track.trackId) : null;
+  const trackId = localTrackId(deck?.track);
   const { data } = useTrackVisuals(trackId);
   const duration = deck?.track?.durationMs ?? 0;
   const position = deck?.positionMs ?? 0;
@@ -143,8 +144,8 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
       <button className="dj-deck-number" aria-label={`Select deck ${id}`} aria-pressed={active} onClick={onActivate}>{id}</button>
       <div className="dj-cover">{data?.artwork ? <img src={artworkUrl(data.artwork)} alt="" /> : <Disc3 />}</div>
       <div className="dj-track-name">
-        <strong title={deck?.track?.title || ""}>{deck?.track?.title || "曲をドラッグしてロード"}</strong>
-        <span>{deck?.track?.artist || "ライブラリで曲を選び、ダブルクリック"}</span>
+        <strong title={deck?.track?.title || ""}>{deck?.track?.title || (deck?.track?.assetId ? "共有音源" : "曲をドラッグしてロード")}</strong>
+        <span>{deck?.track?.artist || (deck?.track?.assetId ? "" : "ライブラリで曲を選び、ダブルクリック")}</span>
       </div>
       <div className="dj-track-time">
         <strong className="dj-num">{deck?.track ? `−${formatTime(duration - position)}` : "−−:−−"}</strong>
@@ -170,7 +171,7 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
       </div>
     </div>
     <div className="dj-overview">
-      <DeckWaveform trackId={trackId} positionMs={position} durationMs={duration} layout="horizontal" side={left ? "left" : "right"} color={left ? "cyan" : "fuchsia"} hotCues={deck?.hotCues} playing={deck?.status === "playing"} rate={deck?.rate ?? 1} bpm={deck?.track?.bpm} loopRegion={deck?.loopRegion} onSeek={disabled ? undefined : onSeekAbsolute} />
+      <DeckWaveform assetId={deck?.track?.assetId} remoteWaveform={deck?.track?.waveform} trackId={trackId} positionMs={position} durationMs={duration} layout="horizontal" side={left ? "left" : "right"} color={left ? "cyan" : "fuchsia"} hotCues={deck?.hotCues} playing={deck?.status === "playing"} rate={deck?.rate ?? 1} bpm={deck?.track?.bpm} loopRegion={deck?.loopRegion} onSeek={disabled ? undefined : onSeekAbsolute} />
     </div>
     <div className="dj-deck-controls">
       <div className="dj-perf">

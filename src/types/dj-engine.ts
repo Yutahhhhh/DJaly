@@ -89,6 +89,8 @@ export type DjEngineOp = (typeof DJ_ENGINE_OPS)[keyof typeof DJ_ENGINE_OPS];
 
 export type ScratchPhase = "begin" | "move" | "end";
 export interface ScratchCommand {
+  capturedNativeUs?: number;
+  keepalive?: boolean;
   deck: DeckId;
   phase: ScratchPhase;
   /** Cumulative displacement in source-track milliseconds; begin is zero. */
@@ -124,7 +126,14 @@ export const EQ_BANDS = ["low", "mid", "high"] as const;
 export type EqBand = (typeof EQ_BANDS)[number];
 
 /** DJaly からエンジンへ渡す曲記述子。正本は DJaly 側の DB。 */
+export interface AssetWaveform {
+  bins_per_second: number; duration_ms: number; amplitude_scale: number;
+  peaks: number[]; low: number[]; mid: number[]; high: number[];
+}
 export interface TrackDescriptor {
+  assetId?: string;
+  waveform?: AssetWaveform;
+  localTrackId?: number | null;
   musicalKey?: string;
   trackId: string;
   path: string;
@@ -142,6 +151,9 @@ export interface TrackDescriptor {
 }
 
 export interface LoadedTrack {
+  assetId?: string;
+  waveform?: AssetWaveform;
+  localTrackId?: number | null;
   trackId: string;
   path: string;
   title: string | null;
@@ -187,6 +199,7 @@ export interface DeckState {
   loopRegion: LoopRegion | null;
   lastError: string | null;
   loadId: number | null;
+  loadGeneration?: number;
 }
 
 /**

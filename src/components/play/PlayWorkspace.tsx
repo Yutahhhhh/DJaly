@@ -1,3 +1,6 @@
+import { localTrackId } from '@/services/junction/asset-resolver';
+import { junctionLeaseKey } from '@/services/junction/state';
+import { junctionState } from '@/services/junction/state';
 import { BeatFxPanel } from "./BeatFxPanel";
 import { memoryAction } from "@/services/dj-engine/memory-cues";
 import { sampler } from "@/services/dj-engine/sampler";
@@ -50,6 +53,10 @@ export function PlayWorkspace() {
   const { status, state, error, busy, client, start, stop, connect } = useDjEngine();
   useEffect(() => { const timer = setInterval(() => void sampler.poll(), 250); return () => { clearInterval(timer); }; }, []);
   const [deckCount, setDeckCount] = useState<2 | 4>(() => localStorage.getItem("djaly.deckCount") === "4" ? 4 : 2);
+  const [expandedPair,setExpandedPair]=useState<'AB'|'CD'|null>(null);
+  const [waveContrast,setWaveContrast]=useState(()=>Number(localStorage.getItem('djaly.waveContrast'))||1);
+  const [waveMonochrome,setWaveMonochrome]=useState(()=>localStorage.getItem('djaly.waveMonochrome')==='true');
+  useEffect(()=>{const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setExpandedPair(null);};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[]);
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
   const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("djaly.djOutputDevice") ?? "");
   const [recordingDir, setRecordingDir] = useState<string>("");
@@ -114,7 +121,7 @@ export function PlayWorkspace() {
     // A reconnect may attach to an already configured engine; preserve its live routing.
     if (snapshot.audio.microphone.deviceId) return;
     const saved = savedMicrophoneSettings();
-    if (saved?.deviceId) void client.setMicrophone(saved).catch(cause => setCommandError(`マイク設定を復元できませんでした: ${cause instanceof Error ? cause.message : String(cause)}`));
+    if (saved?.deviceId && !junctionState.active()) void client.setMicrophone(saved).catch(cause => setCommandError(`マイク設定を復元できませんでした: ${cause instanceof Error ? cause.message : String(cause)}`));
   }, [client, connected, snapshot?.sessionId, snapshot?.audio.applied, snapshot?.audio.microphone?.available]);
   // 保存先は起動時の環境変数だけでなく、繋がっている間も送り直す。エンジンは
   // 録音のたびに読み直すので、設定を変えたら次の録音から効く。
@@ -201,6 +208,7 @@ export function PlayWorkspace() {
     exiting.current = false;
     return () => {
     exiting.current = true;
+    if (junctionState.active()) return;
     sessionStorage.removeItem("djaly.playSession");
     sessionStorage.removeItem("djaly.playHistoryRuntime");
     sessionStorage.removeItem("djaly.recordingKey");
@@ -214,6 +222,11 @@ export function PlayWorkspace() {
   }, [finalizeHistory, finalizeRecording]);
 
   const loadTrack = useCallback((deck: DeckId, track: Track) => {
+    const junction = junctionState.get();
+    if (junction?.active && junction.localPeerId !== junction.performerPeerId) {
+      setCommandError("別のDJがプレイ中です。Junctionの手元試聴で準備し、引き継ぎ後にデッキへロードしてください。");
+      return;
+    }
     const loadRequest = ++deckLoadRequests.current[deck];
     if (track.key) setTrackKeys(old => old[track.id] === track.key ? old : { ...old, [track.id]: track.key });
     cuePoints.current[deck] = 0;
@@ -251,14 +264,17 @@ export function PlayWorkspace() {
       }
       await finalizeHistory(deck, "replaced");
       if (loadRequest !== deckLoadRequests.current[deck]) return;
+      const loadLease = junctionLeaseKey();
       await client.load(deck, descriptor);
+      const loadGeneration = client.getDeckGeneration(deck);
       const deadline = performance.now() + 15000;
       while (true) {
-        if (loadRequest !== deckLoadRequests.current[deck]) { await client.unload(deck); return; }
+        if (loadRequest !== deckLoadRequests.current[deck]) return;
+        if (loadLease !== junctionLeaseKey() || loadGeneration !== client.getDeckGeneration(deck)) return;
         const state = (await client.refreshSnapshot()).decks[deck];
         if (state.status === "error") throw new Error(state.lastError ?? "曲のロードに失敗しました");
         if (state.track?.trackId === descriptor.trackId && state.status !== "loading") break;
-        if (performance.now() >= deadline) { await client.unload(deck); throw new Error("曲のロードがタイムアウトしました。再試行してください。"); }
+        if (performance.now() >= deadline) { if (loadRequest === deckLoadRequests.current[deck] && loadLease === junctionLeaseKey() && loadGeneration === client.getDeckGeneration(deck)) await client.unload(deck); throw new Error("曲のロードがタイムアウトしました。再試行してください。"); }
         await new Promise(resolve => window.setTimeout(resolve, 50));
       }
       const loadedAt = new Date().toISOString();
@@ -287,6 +303,7 @@ export function PlayWorkspace() {
     // 登録・削除はエンジンを先に動かす。保存の往復を待ってから鳴らすと、
     // 押してから反応するまでに往復が二重に乗る。
     const result = await (clear ? client.clearHotCue(deck, slot) : client.setHotCue(deck, slot));
+    if (client.getState().snapshot?.decks[deck].track?.assetId || localTrackId(client.getState().snapshot?.decks[deck].track) === null) return;
     await gridOperations.current.run(Number(trackId), async () => {
       if (!stillLoaded(deck)) return;
       const baseline = await performanceMetadataService.get(Number(trackId));
@@ -323,7 +340,7 @@ export function PlayWorkspace() {
     const result = await performanceMetadataService.importAllRekordboxCues();
     setTrackMetadata({});
     setCueRevision(value => value + 1);
-    const ids = [...new Set(DECK_IDS.map(id => Number(client.getState().snapshot?.decks[id].track?.trackId)).filter(id => Number.isSafeInteger(id) && id > 0))];
+    const ids = [...new Set(DECK_IDS.map(id => (localTrackId(client.getState().snapshot?.decks[id].track) ?? -1)).filter(id => Number.isSafeInteger(id) && id > 0))];
     const failures: DeckId[] = [];
     for (const trackId of ids) await gridOperations.current.run(trackId, async () => {
       const session = client.getSessionId();
@@ -360,7 +377,8 @@ export function PlayWorkspace() {
   const saveCurrentLoop = (deck: DeckId) => run(async () => {
     const state = client.getState().snapshot?.decks[deck];
     if (!state?.track || !state.loopRegion) return;
-    const trackId = Number(state.track.trackId);
+    const trackId = localTrackId(state.track);
+    if (trackId === null) return;
     const region = { ...state.loopRegion };
     await gridOperations.current.run(trackId, async () => {
       const baseline = await performanceMetadataService.get(trackId);
@@ -376,12 +394,14 @@ export function PlayWorkspace() {
   const recallLoop = (deck: DeckId, loopId: string) => run(async () => {
     const trackId = client.getState().snapshot?.decks[deck].track?.trackId;
     if (!trackId) return;
-    const loop = trackMetadata[Number(trackId)]?.loops.find(item => item.id === loopId);
+    const localId = localTrackId(client.getState().snapshot?.decks[deck].track);
+    if (localId === null) return;
+    const loop = trackMetadata[localId]?.loops.find(item => item.id === loopId);
     if (!loop) return;
     const load = deckLoadRequests.current[deck];
-    const session = client.getSessionId();
+    const session = client.getSessionId(), lease = junctionLeaseKey();
     await client.setLoop(deck, loop.start_ms, loop.end_ms);
-    if (load !== deckLoadRequests.current[deck] || session !== client.getSessionId() || client.getState().snapshot?.decks[deck].track?.trackId !== trackId) return;
+    if (lease !== junctionLeaseKey() || load !== deckLoadRequests.current[deck] || session !== client.getSessionId() || client.getState().snapshot?.decks[deck].track?.trackId !== trackId) return;
     await client.enableLoop(deck, true);
   });
 
@@ -443,7 +463,7 @@ export function PlayWorkspace() {
 
   const changeDeckCount = useCallback((count: 2 | 4) => {
     if (count === deckCount) return;
-    if (count === 2) {
+    if (count === 2 && !junctionState.active()) {
       if (activeDeck === "C" || activeDeck === "D") setActiveDeck("A");
       for (const deck of ["C", "D"] as const) {
         void run(async () => {
@@ -461,6 +481,7 @@ export function PlayWorkspace() {
 
   const stopEngine = useCallback(() => {
     void run(async () => {
+      if (junctionState.active()) throw new Error("先にJunctionセッションを終了してください。");
       try { await finalizeRecording(); } finally { await stop(); }
       await Promise.allSettled(DECK_IDS.map((deck) => finalizeHistory(deck, "engine_stop")));
     });
@@ -495,6 +516,7 @@ export function PlayWorkspace() {
   }, [activeDeck, seekRelative, togglePlay, visibleDecks]);
 
   const applyAudioOutput = async (device: string, microphone?: MicrophoneSettings) => {
+    if (junctionState.active()) throw new Error("Junction中の配信先はセッション設定から変更してください。");
     applyingAudio.current = true;
     try {
       if (device !== outputDevice || !client.getState().snapshot?.audio.applied) {
@@ -523,6 +545,7 @@ export function PlayWorkspace() {
   };
 
   const prepareRecordingPreview = async () => {
+    if (junctionState.active()) throw new Error("Junction中は録音プレビューを利用できません。手元の試聴をご利用ください。");
     usePlayerStore.getState().pause();
     if (!client.getSessionId()) return;
     const current = client.getState().snapshot;
@@ -549,7 +572,7 @@ export function PlayWorkspace() {
     if (gridSaving.current) return;
     if (gridEdit?.deck === deck) { closeGridEditor(); return; }
     const track = client.getState().snapshot?.decks[deck]?.track;
-    if (!track || !/^\d+$/.test(track.trackId)) return;
+    if (!track || track.assetId || !/^\d+$/.test(track.trackId)) return;
     const request = ++gridOpenRequest.current;
     void run(async () => {
       const metadata = await performanceMetadataService.get(Number(track.trackId));
@@ -607,7 +630,7 @@ export function PlayWorkspace() {
     return { ...deck, track: { ...deck.track, bpm: gridPreview.bpm, beatgridOffsetMs: gridPreview.first_beat_ms, beatsPerBar: gridPreview.beats_per_bar, beatTimesMs: gridPreview.beat_times_ms ?? undefined, beatNumbers: gridPreview.beat_numbers ?? undefined } };
   };
 
-  const seed = Number(snapshot?.decks[activeDeck]?.track?.trackId);
+  const seed = localTrackId(snapshot?.decks[activeDeck]?.track) ?? -1;
   const recordingSupported = Boolean(snapshot?.engine.capabilities.includes("recording"));
   const capabilities = snapshot?.engine.capabilities ?? [];
   const canMix = connected && (capabilities.includes("mixer.basic") || capabilities.includes("mixer.gain"));
@@ -615,15 +638,15 @@ export function PlayWorkspace() {
     const current = client.getState().snapshot?.decks[deck];
     if (current?.track) void run(() => client.seek(deck, ms, current.track!.durationMs));
   }, [client, run]);
-  const scratch = useCallback((deck: DeckId, command: { phase: "begin" | "move" | "end"; positionMs: number; gestureId: string }) => {
+  const scratch = useCallback((deck: DeckId, command: { phase: "begin" | "move" | "end"; positionMs: number; gestureId: string; capturedAt?: number; keepalive?: boolean }) => {
     if (command.phase === "begin") setCommandError(null);
-    return client.scratch(deck, command.phase, command.positionMs, command.gestureId);
+    return client.scratch(deck, command.phase, command.positionMs, command.gestureId, command.capturedAt, command.keepalive);
   }, [client]);
   const waveform = (id: DeckId, layout: WaveformLayout) => {
     const deck = displayedDeck(id);
-    return <DeckWaveform key={id} label={id} trackId={deck?.track?.trackId && /^\d+$/.test(deck.track.trackId) ? Number(deck.track.trackId) : null}
+    return <DeckWaveform key={id} label={id} assetId={deck?.track?.assetId} remoteWaveform={deck?.track?.waveform} trackId={localTrackId(deck?.track)}
       positionMs={deck?.positionMs ?? 0} durationMs={deck?.track?.durationMs ?? 0} layout={layout} side={id === "A" || id === "C" ? "left" : "right"}
-      color={id === "A" || id === "C" ? "cyan" : "fuchsia"} mode="scroll" playing={deck?.status === "playing"} rate={deck?.rate ?? 1} bpm={deck?.track?.bpm} beatgridOffsetMs={deck?.track?.beatgridOffsetMs} beatsPerBar={deck?.track?.beatsPerBar}
+      color={id === "A" || id === "C" ? "cyan" : "fuchsia"} mode={expandedPair&&!expandedPair.includes(id)?"overview":"scroll"} playing={deck?.status === "playing"} rate={deck?.rate ?? 1} bpm={deck?.track?.bpm} beatgridOffsetMs={deck?.track?.beatgridOffsetMs} beatsPerBar={deck?.track?.beatsPerBar}
       beatTimesMs={deck?.track?.beatTimesMs} beatNumbers={deck?.track?.beatNumbers}
       gridAvailable={Boolean(deck?.track?.beatgridOffsetMs !== undefined || deck?.track?.beatTimesMs?.length)}
       onGridShift={gridEdit?.deck === id && !gridSaving.current ? (deltaMs) => setGridShift(old => ({ sequence: (old?.sequence ?? 0) + 1, deltaMs })) : undefined}
@@ -635,12 +658,13 @@ export function PlayWorkspace() {
   // Lanes accept the same drag payload as the decks, so a row can be dropped on
   // whichever waveform the eye is already on.
   const lane = (id: DeckId, layout: WaveformLayout) => <div key={id}
-    className={cn("dj-lane", laneDrop === id && "dj-lane--drop")}
+    className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"), laneDrop === id && "dj-lane--drop")}
     style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}
     onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-djaly-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setLaneDrop(id); } }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setLaneDrop((current) => current === id ? null : current); }}
     onDrop={(event) => { event.preventDefault(); setLaneDrop(null); try { const track = JSON.parse(event.dataTransfer.getData("application/x-djaly-track")) as Track; if (track.id && track.filepath && track.duration > 0) loadTrack(id, track); } catch { /* Ignore foreign drag data. */ } }}>
     {waveform(id, layout)}
+    <button className="dj-wave-expand" aria-label={`デッキ ${id} のペアを拡大`} aria-pressed={!!expandedPair?.includes(id)} onClick={()=>setExpandedPair(current=>current?.includes(id)?null:(id==='A'||id==='B'?'AB':'CD'))}>拡大</button>
   </div>;
   // シンク先は「いま master になっているデッキ」。無ければ相方のデッキ。
   // 一覧のプレビュー波形に出すホットキュー。編集したトラックはこちらが最新。
@@ -676,7 +700,7 @@ export function PlayWorkspace() {
     return leader ?? decks.find((deck) => deck !== id);
   };
 
-  const cueColorsFor = (id:DeckId) => Array.from({length:16},(_,slot)=>trackMetadata[Number(snapshot?.decks[id]?.track?.trackId)]?.cue_points.find(cue=>cue.slot===slot)?.color??null);
+  const cueColorsFor = (id:DeckId) => Array.from({length:16},(_,slot)=>trackMetadata[(localTrackId(snapshot?.decks[id]?.track) ?? -1)]?.cue_points.find(cue=>cue.slot===slot)?.color??null);
   const softwareDeck = (id: DeckId) => <SoftwareDeck key={id} id={id} deck={displayedDeck(id)} active={activeDeck === id} connected={connected} cueColors={cueColorsFor(id)}
     onGridEdit={() => openGridEditor(id)}
     onGridClose={closeGridEditor}
@@ -689,8 +713,8 @@ export function PlayWorkspace() {
     onQuantize={(enabled) => void run(() => client.setQuantize(id, enabled))}
     onFx={(effect, enabled, mix, depth) => void run(() => client.setFx(id, effect, enabled, mix, depth))}
     onSaveLoop={() => void saveCurrentLoop(id)}
-    savedLoops={trackMetadata[Number(snapshot?.decks[id]?.track?.trackId)]?.loops}
-    trackKey={trackKeys[Number(snapshot?.decks[id]?.track?.trackId)]}
+    savedLoops={trackMetadata[(localTrackId(snapshot?.decks[id]?.track) ?? -1)]?.loops}
+    trackKey={trackKeys[(localTrackId(snapshot?.decks[id]?.track) ?? -1)]}
     onRecallLoop={(loopId) => void recallLoop(id, loopId)}
     onActivate={() => setActiveDeck(id)} onDropTrack={(track) => loadTrack(id, track)} onToggle={() => togglePlay(id)}
     onCue={() => void run(async () => {
@@ -737,12 +761,16 @@ export function PlayWorkspace() {
     error: setCommandError,
   });
 
-  return <main className={cn("dj-workspace", compactDecks && "dj-workspace--compact", deckCount === 4 && "dj-workspace--four", waveformLayout === "vertical" && "dj-workspace--vertical")}>
+  return <main style={{'--wave-contrast':waveContrast,'--wave-grayscale':waveMonochrome?1:0} as CSSProperties} className={cn("dj-workspace", expandedPair&&"dj-workspace--wave-expanded", compactDecks && "dj-workspace--compact", deckCount === 4 && "dj-workspace--four", waveformLayout === "vertical" && "dj-workspace--vertical")}>
     <header className="dj-global-bar">
       <div className="dj-performance-label"><Disc3 /><strong>PERFORMANCE</strong></div>
       <PanelToolbar visible={panels} onToggle={togglePanel} />
       <div className="dj-segmented" aria-label="デッキ表示サイズ">{([false, true] as const).map((compact) => <button key={String(compact)} title={compact ? "コンパクト表示（ブラウザを広く）" : "通常表示"} aria-pressed={compactDecks === compact} className={compactDecks === compact ? "is-on" : ""} onClick={() => { setCompactDecks(compact); localStorage.setItem("djaly.compactDecks", String(compact)); }}>{compact ? "コンパクト" : "通常"}</button>)}</div>
       <div className="dj-segmented" aria-label="Deck count">{([2, 4] as const).map((count) => <button key={count} title={`${count} デッキ`} aria-pressed={deckCount === count} className={deckCount === count ? "is-on" : ""} onClick={() => changeDeckCount(count)}>{count}</button>)}</div>
+      <details className="dj-wave-settings"><summary>表示設定</summary><div>
+        <label>波形コントラスト <input type="range" min="1" max="2" step="0.1" value={waveContrast} onChange={event=>{setWaveContrast(Number(event.target.value));localStorage.setItem('djaly.waveContrast',event.target.value);}} /></label>
+        <label><input type="checkbox" checked={waveMonochrome} onChange={event=>{setWaveMonochrome(event.target.checked);localStorage.setItem('djaly.waveMonochrome',String(event.target.checked));}} />波形を単色で表示</label>
+      </div></details>
       <div className="dj-segmented" aria-label="波形レイアウト">{(["horizontal", "vertical"] as const).map((layout) => <button key={layout} title={layout === "horizontal" ? "横波形（デッキ上部に重ねて表示）" : "縦波形（デッキ中央に並べて表示）"} aria-label={layout === "horizontal" ? "横波形" : "縦波形（デッキ中央）"} aria-pressed={waveformLayout === layout} className={waveformLayout === layout ? "is-on" : ""} onClick={() => { setWaveformLayout(layout); localStorage.setItem("djaly.waveformLayout", layout); }}>{layout === "horizontal" ? <Rows3 /> : <Columns3 />}</button>)}</div>
       <div className="dj-engine-status"><i className={connected && snapshot?.audio.applied ? "is-connected" : ""} /><span>{connected ? snapshot?.engine.simulated ? "SIMULATOR · 音声出力なし" : snapshot?.audio.applied ? "AUDIO CONNECTED" : "音声出力を確認中" : busy ? "音声エンジンを起動中…" : "AUDIO OFFLINE"}</span></div>
       <div className="dj-global-actions">

@@ -1,0 +1,26 @@
+services:
+  signaling:
+    build: ..
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      MAX_CONNECTIONS: 1024
+      MAX_BUFFERED_BYTES: 262144
+      TURN_URLS: ${TURN_URLS:?Set TURN_URLS}
+      TURN_SECRET: ${TURN_SECRET:?Set a random TURN_SECRET of at least 32 characters}
+      TURN_TTL_SECONDS: 600
+    expose: ["8787"]
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      SIGNAL_DOMAIN: ${SIGNAL_DOMAIN:?Set a real domain pointing to this server}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

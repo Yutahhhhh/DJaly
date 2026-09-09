@@ -71,3 +71,46 @@ pub async fn dj_engine_send(
     let supervisor = state.inner().clone();
     run_blocking(move || supervisor.send(&session_id, &op, params.unwrap_or(Value::Null))).await
 }
+
+#[derive(serde::Deserialize)]
+pub enum JunctionOperation {
+    #[serde(rename = "snapshot")] Snapshot,
+    #[serde(rename = "create")] Create,
+    #[serde(rename = "join")] Join,
+    #[serde(rename = "leave")] Leave,
+    #[serde(rename = "end")] End,
+    #[serde(rename = "invite.rotate")] InviteRotate,
+    #[serde(rename = "peer.approve")] PeerApprove,
+    #[serde(rename = "handoff.request")] HandoffRequest,
+    #[serde(rename = "handoff.cancel")] HandoffCancel,
+    #[serde(rename = "handoff.accept")] HandoffAccept,
+    #[serde(rename = "recovery.resume")] RecoveryResume,
+    #[serde(rename = "program.configure")] ProgramConfigure,
+    #[serde(rename = "program.record.start")] RecordStart,
+    #[serde(rename = "program.record.stop")] RecordStop,
+    #[serde(rename = "private.load")] PrivateLoad,
+    #[serde(rename = "private.play")] PrivatePlay,
+    #[serde(rename = "private.pause")] PrivatePause,
+    #[serde(rename = "private.seek")] PrivateSeek,
+}
+impl JunctionOperation {
+    fn wire(&self) -> &'static str {
+        match self {
+            Self::Snapshot => "snapshot", Self::Create => "create", Self::Join => "join",
+            Self::Leave => "leave", Self::End => "end", Self::InviteRotate => "invite.rotate",
+            Self::PeerApprove => "peer.approve", Self::HandoffRequest => "handoff.request",
+            Self::HandoffCancel => "handoff.cancel", Self::HandoffAccept => "handoff.accept",
+            Self::RecoveryResume => "recovery.resume",
+            Self::ProgramConfigure => "program.configure", Self::RecordStart => "program.record.start",
+            Self::RecordStop => "program.record.stop", Self::PrivateLoad => "private.load",
+            Self::PrivatePlay => "private.play", Self::PrivatePause => "private.pause", Self::PrivateSeek => "private.seek",
+        }
+    }
+}
+/// Local typed gateway only: all session authority belongs to the native runtime.
+#[tauri::command]
+pub async fn junction_command(state: State<'_, Arc<EngineSupervisor>>, session_id: String,
+    op: JunctionOperation, params: Option<Value>) -> Result<EngineReply, String> {
+    let supervisor = state.inner().clone();
+    run_blocking(move || supervisor.send(&session_id, &format!("junction.{}", op.wire()), params.unwrap_or(serde_json::json!({})))).await
+}

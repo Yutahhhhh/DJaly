@@ -1,10 +1,13 @@
+import { checkJunctionActive } from '@/services/junction/client';
 import { useEffect } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { check } from '@tauri-apps/plugin-updater';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { relaunch } from '@tauri-apps/plugin-process';
 
 export function Updater() {
   useEffect(() => {
+    if (!isTauri()) return;
     const checkUpdate = async () => {
       try {
         const update = await check();
@@ -24,6 +27,7 @@ export function Updater() {
           );
 
           if (yes) {
+            if (await checkJunctionActive()) return;
             await update.downloadAndInstall((event) => {
               switch (event.event) {
                 case 'Started':
@@ -40,6 +44,7 @@ export function Updater() {
               }
             });
 
+            if (await checkJunctionActive()) return;
             await relaunch();
           }
         }

@@ -1,4 +1,8 @@
+import { useJunction } from '@/hooks/useJunction';
+import { JunctionBar } from '@/components/junction/JunctionBar';
+import { junctionState } from '@/services/junction/state';
 import { useState, useEffect, useRef } from "react";
+import { DocsView } from "@/components/docs/DocsView";
 import { Sidebar } from "@/components/sidebar";
 import { MusicLibrary } from "@/components/music-library";
 import { SettingsView } from "@/components/settings-view";
@@ -23,6 +27,7 @@ import { AssistWorkspace } from "@/components/assist/AssistWorkspace";
 import { ModeToggle, PlayWorkspace, type AppMode } from "@/components/play";
 
 function App() {
+  const junction = useJunction();
   const [appMode, setAppMode] = useState<AppMode>(() => {
     const saved = sessionStorage.getItem("djaly.appMode");
     return isAppMode(saved) ? saved : "analysis";
@@ -104,6 +109,7 @@ function App() {
 
   const changeMode = (mode: AppMode) => {
     if (mode === appMode || releasingPerformanceAudio) return;
+    if (mode === "assist" && junctionState.active()) { setReleaseError("Junctionから退出またはセッションを終了してからAssistへ切り替えてください。"); return; }
     if (mode !== "analysis") pause();
     if (appMode === "play" || mode === "assist") setReleasingPerformanceAudio(true);
     setReleaseError(null);
@@ -137,6 +143,8 @@ function App() {
         return <McpView />;
       case "wordplay":
         return <WordplayView />;
+      case "docs":
+        return <DocsView />;
       case "settings":
         return <SettingsView />;
       default:
@@ -151,15 +159,17 @@ function App() {
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#080b11]">
           <div className="z-[80] flex h-10 shrink-0 items-center border-b border-slate-700 bg-[#11151d] px-3 shadow-md">
             <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Djaly<span className="hidden sm:inline"> Workspace</span></span>
+            <JunctionBar />
             <div className="ml-auto"><ModeToggle mode={appMode} onChange={changeMode} disabled={releasingPerformanceAudio} /></div>
           </div>
         <div className="min-h-0 flex-1">
+        {(appMode === "play" || junction?.active) && <div className={appMode === "play" && !releasingPerformanceAudio && !releaseError ? "h-full" : "hidden"}><PlayWorkspace /></div>}
         {releasingPerformanceAudio || releaseError ? <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-sm text-slate-300" role="status">
           {releasingPerformanceAudio ? <p>オーディオとコントローラーを解放しています…</p> : <>
             <p className="whitespace-pre-wrap text-amber-200">{releaseError}</p>
             <button className="rounded border border-slate-600 px-4 py-2 hover:bg-slate-800" onClick={() => setReleaseRetry((value) => value + 1)}>再試行</button>
           </>}
-        </div> : appMode === "play" ? <PlayWorkspace /> : appMode === "assist" ? <AssistWorkspace /> : <div className="h-full w-full bg-background text-foreground flex overflow-hidden">
+        </div> : appMode === "play" ? null : appMode === "assist" ? <AssistWorkspace /> : <div className="h-full w-full bg-background text-foreground flex overflow-hidden">
         <Sidebar
           activeView={activeView}
           onNavigate={setActiveView}

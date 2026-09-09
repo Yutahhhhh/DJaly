@@ -1,3 +1,4 @@
+import { checkJunctionActive } from './junction/client';
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { djEngineClient } from "@/services/dj-engine/client";
 import { DECK_IDS } from "@/types/dj-engine";
@@ -38,6 +39,7 @@ async function flushRecording(problems: string[]): Promise<void> {
  * engine down would make going back cost a full restart.
  */
 export async function suspendPerformanceAudio(): Promise<ReleaseOutcome> {
+  if (await checkJunctionActive()) return {audioReleased: true, midiReleased: true, problems: []};
   const problems: string[] = [];
   await flushRecording(problems);
   if (!djEngineClient.getSessionId()) {
@@ -70,6 +72,7 @@ export async function suspendPerformanceAudio(): Promise<ReleaseOutcome> {
  * and confirmed before assist mode is shown.
  */
 export async function releasePerformanceHardware(): Promise<ReleaseOutcome> {
+  if (await checkJunctionActive()) return {audioReleased: false, midiReleased: false, problems: ["Junctionから退出またはセッションを終了してください。"]};
   const problems: string[] = [];
   await flushRecording(problems);
 

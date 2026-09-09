@@ -3,7 +3,7 @@ import type { DeckId, EngineSnapshot, MetersPayload } from "../../types/dj-engin
 
 const DECKS: DeckId[] = ["A", "B", "C", "D"];
 export type MidiAction = { control: string; deck?: DeckId; value: number; pressed?: boolean; shift?: boolean; slot?: number; mode?: number; surface?: "platter" | "side"; vinyl?: boolean; search?: boolean };
-/** Addresses verified against docs/ddj1000-midi-map.json (official MIDI table).
+/** Addresses verified against native/dj-engine-host/tests-node/fixtures/ddj1000-midi-map.json (official MIDI table).
  * Channel numbers here are zero-based. SRT mappings are deliberately excluded. */
 export class Ddj1000Decoder {
   private msb = new Map<number, number>();

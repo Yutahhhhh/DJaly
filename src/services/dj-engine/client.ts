@@ -1,3 +1,6 @@
+import { deckRealtimeStore } from "./deck-realtime-store";
+import { routePerformanceCommand } from '../performance-command-router';
+import { captureJunctionLease, junctionLeaseKey, junctionState } from '../junction/state';
 /**
  * ネイティブ DJ エンジン（Phase 0 シミュレータ）のクライアントアダプタ。
  *
@@ -99,16 +102,18 @@ function isTauriAvailable(): boolean {
 
 type StateListener = (state: EngineClientState) => void;
 type StatusListener = (status: EngineStatus) => void;
-type ContinuousControl = { op: string; params: Record<string, unknown>; session: string | null; deck?: DeckId; generation?: number };
+type ContinuousControl = { op: string; params: Record<string, unknown>; session: string | null; deck?: DeckId; generation?: number; leaseKey: string };
 
 export class DjEngineClient {
   private clientState: EngineClientState = createInitialClientState();
   private sessionId: string | null = null;
-  private seekQueues = new Map<DeckId, LatestCommandQueue<{ params: Record<string, unknown>; session: string | null; generation: number; trackId: string | undefined }>>();
+  private clockProbing = false;
+  private clockTimer: ReturnType<typeof setInterval> | null = null;
+  private seekQueues = new Map<DeckId, LatestCommandQueue<{ params: Record<string, unknown>; session: string | null; generation: number; trackId: string | undefined; leaseKey: string }>>();
   private seekGeneration: Record<DeckId, number> = { A: 0, B: 0, C: 0, D: 0 };
   private controlQueues = new Map<string, LatestCommandQueue<ContinuousControl>>();
   private scratchQueues = new Map<DeckId, ScratchCommandQueue>();
-  private scratchGestures = new Map<string, { deck: DeckId; session: string | null; generation: number; trackId: string | undefined; positionMs: number }>();
+  private scratchGestures = new Map<string, { deck: DeckId; session: string | null; generation: number; trackId: string | undefined; positionMs: number; leaseKey: string; lease: ReturnType<typeof captureJunctionLease> }>();
   private stateListeners = new Set<StateListener>();
   private statusListeners = new Set<StatusListener>();
   private unsubscribers: UnlistenFn[] = [];
@@ -214,6 +219,24 @@ export class DjEngineClient {
         throw new Error("エンジンから不正な状態スナップショットを受信しました");
       }
       this.sessionId = connection.sessionId;
+      deckRealtimeStore.reset(connection.snapshot.engineId);
+      if (this.clockTimer) clearInterval(this.clockTimer);
+      const probe = async () => {
+        const session = this.sessionId;
+        const t0 = performance.now();
+        try {
+          const data = await this.send("engine.clock.probe") as {engineEpoch:string; receivedNativeUs:number; sentNativeUs:number};
+          if (session === this.sessionId && data.engineEpoch === connection.snapshot.engineId)
+            deckRealtimeStore.mapping.probe(t0, data.receivedNativeUs, data.sentNativeUs, performance.now());
+        } catch { /* Legacy hosts keep the existing position path. */ }
+      };
+      if (connection.snapshot.engine.capabilities.includes("deck.clock.v2")) {
+        void (async () => { for (let i=0;i<5;i++) await probe(); })();
+        this.clockTimer = setInterval(() => void probe(), 30_000);
+      }
+      // Resolve native lifetime before any React subscriber can restore saved controls.
+      const junction = await invoke<EngineReply>("junction_command", {sessionId: this.sessionId, op: "snapshot", params: {}});
+      if (junction.ok && junction.data && typeof (junction.data as {active?: unknown}).active === "boolean") junctionState.set(junction.data as import("../../types/junction").JunctionSnapshot);
       this.clearScratchState();
       this.clientState = this.applyBufferedSnapshot(
         createInitialClientState(),
@@ -228,6 +251,8 @@ export class DjEngineClient {
 
   /** イベント購読を解除する。エンジンは止めない。 */
   async detach(): Promise<void> {
+    if (this.clockTimer) clearInterval(this.clockTimer);
+    this.clockTimer = null; deckRealtimeStore.reset();
     const unsubscribers = this.unsubscribers;
     this.unsubscribers = [];
     this.attaching = null;
@@ -279,7 +304,7 @@ export class DjEngineClient {
     const reply = await invoke<EngineReply>("dj_engine_send", {
       sessionId,
       op,
-      params,
+      params: routePerformanceCommand(op, params, (params._junction as ReturnType<typeof captureJunctionLease>) ?? captureJunctionLease()),
     });
     if (reply.ok) {
       return reply.data;
@@ -307,17 +332,23 @@ export class DjEngineClient {
   }
 
   async load(deck: DeckId, track: TrackDescriptor): Promise<unknown> {
+    const leaseKey = junctionLeaseKey();
+    const params = routePerformanceCommand(DJ_ENGINE_OPS.deckLoad, buildLoadParams(deck, track));
     await this.releaseScratch(deck);
+    if (leaseKey !== junctionLeaseKey()) throw new Error("演奏担当が変わりました。操作を再試行してください。");
     ++this.seekGeneration[deck]; this.seekQueues.get(deck)?.clear();
     this.scratchQueues.get(deck)?.clear();
-    return this.send(DJ_ENGINE_OPS.deckLoad, buildLoadParams(deck, track));
+    return this.send(DJ_ENGINE_OPS.deckLoad, params);
   }
 
   async unload(deck: DeckId): Promise<unknown> {
+    const leaseKey = junctionLeaseKey();
+    const params = routePerformanceCommand(DJ_ENGINE_OPS.deckUnload, {deck});
     await this.releaseScratch(deck);
+    if (leaseKey !== junctionLeaseKey()) throw new Error("演奏担当が変わりました。操作を再試行してください。");
     ++this.seekGeneration[deck]; this.seekQueues.get(deck)?.clear();
     this.scratchQueues.get(deck)?.clear();
-    return this.send(DJ_ENGINE_OPS.deckUnload, { deck });
+    return this.send(DJ_ENGINE_OPS.deckUnload, params);
   }
 
   play(deck: DeckId): Promise<unknown> {
@@ -333,21 +364,26 @@ export class DjEngineClient {
   }
 
   seek(deck: DeckId, positionMs: number, durationMs?: number): Promise<unknown> {
-    const params = buildSeekParams(deck, positionMs, durationMs);
+    const params = routePerformanceCommand(DJ_ENGINE_OPS.deckSeek, buildSeekParams(deck, positionMs, durationMs));
     let queue = this.seekQueues.get(deck);
     if (!queue) {
       queue = new LatestCommandQueue(async (target) => {
-        if (target.session !== this.sessionId || target.generation !== this.seekGeneration[deck]
+        if (target.leaseKey !== junctionLeaseKey() || target.session !== this.sessionId || target.generation !== this.seekGeneration[deck]
           || target.trackId !== this.clientState.snapshot?.decks[deck]?.track?.trackId) return;
         return this.send(DJ_ENGINE_OPS.deckSeek, target.params);
       });
       this.seekQueues.set(deck, queue);
     }
-    return queue.enqueue({ params, session: this.sessionId, generation: this.seekGeneration[deck], trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId });
+    return queue.enqueue({ params, leaseKey: junctionLeaseKey(), session: this.sessionId, generation: this.seekGeneration[deck], trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId });
   }
 
-  scratch(deck: DeckId, phase: ScratchPhase, positionMs: number, gestureId: string): Promise<unknown> {
+  scratch(deck: DeckId, phase: ScratchPhase, positionMs: number, gestureId: string, capturedAt = performance.now(), keepalive = false): Promise<unknown> {
     const command = buildScratchParams(deck, phase, positionMs, gestureId);
+    const mapped = deckRealtimeStore.mapping.at(capturedAt);
+    if (mapped && this.clientState.snapshot?.engine.capabilities.includes("deck.clock.v2")) {
+      command.capturedNativeUs = mapped.nativeUs;
+      command.keepalive = keepalive;
+    }
     let context = this.scratchGestures.get(gestureId);
     if (phase === "begin") {
       context = {
@@ -355,7 +391,7 @@ export class DjEngineClient {
         session: this.sessionId,
         generation: this.seekGeneration[deck],
         trackId: this.clientState.snapshot?.decks[deck]?.track?.trackId,
-        positionMs,
+        positionMs, leaseKey: junctionLeaseKey(), lease: captureJunctionLease(),
       };
       this.scratchGestures.set(gestureId, context);
     } else if (!context || context.deck !== deck) {
@@ -368,9 +404,9 @@ export class DjEngineClient {
     if (!queue) {
       queue = new ScratchCommandQueue(async (queued: ScratchCommand) => {
         const guard = this.scratchGestures.get(queued.gestureId);
-        if (!guard || guard.session !== this.sessionId || guard.generation !== this.seekGeneration[deck]
+        if (!guard || guard.leaseKey !== junctionLeaseKey() || guard.session !== this.sessionId || guard.generation !== this.seekGeneration[deck]
           || guard.trackId !== this.clientState.snapshot?.decks[deck]?.track?.trackId) return;
-        return this.send(DJ_ENGINE_OPS.deckScratch, { ...queued });
+        return this.send(DJ_ENGINE_OPS.deckScratch, { ...queued, ...(guard.lease ? {_junction: guard.lease} : {}) });
       });
       this.scratchQueues.set(deck, queue);
     }
@@ -448,7 +484,7 @@ export class DjEngineClient {
    * エフェクトが一瞬しか掛からない（＝掛かっていないように聞こえる）。
    */
   async setFx(deck: DeckId, effect: PadEffect, enabled: boolean, mix: number, depth?: number): Promise<unknown> {
-    const params = this.withTrack(deck, buildFxParams(deck, effect, enabled, mix, depth));
+    const params = routePerformanceCommand(DJ_ENGINE_OPS.mixerFxSet, this.withTrack(deck, buildFxParams(deck, effect, enabled, mix, depth)));
     try {
       return await this.send(DJ_ENGINE_OPS.mixerFxSet, params);
     } catch (cause) {
@@ -483,15 +519,16 @@ export class DjEngineClient {
   }
 
   private continuous(key: string, op: string, params: Record<string, unknown>, deck?: DeckId): Promise<unknown> {
+    params = routePerformanceCommand(op, params);
     let queue = this.controlQueues.get(key);
     if (!queue) {
       queue = new LatestCommandQueue(async target => {
-        if (target.session !== this.sessionId || target.deck !== undefined && target.generation !== this.seekGeneration[target.deck]) return;
+        if (target.leaseKey !== junctionLeaseKey() || target.session !== this.sessionId || target.deck !== undefined && target.generation !== this.seekGeneration[target.deck]) return;
         return await this.send(target.op, target.params);
       });
       this.controlQueues.set(key, queue);
     }
-    return queue.enqueue({ op, params, session: this.sessionId, deck, generation: deck === undefined ? undefined : this.seekGeneration[deck] });
+    return queue.enqueue({ op, params, leaseKey: junctionLeaseKey(), session: this.sessionId, deck, generation: deck === undefined ? undefined : this.seekGeneration[deck] });
   }
 
   startRecording(): Promise<unknown> {
@@ -556,6 +593,23 @@ export class DjEngineClient {
       const unsubscribeEvent = await listen<unknown>(EVENT_CHANNEL, (message) => {
         const payload = message.payload;
         if (!isEngineEventMessage(payload)) return;
+        if (payload.event === "deck.clock.v2") {
+          deckRealtimeStore.ingest(payload.data, payload.engineId);
+          if (!deckRealtimeStore.mapping.at(performance.now()) && !this.clockProbing && payload.engineId === this.clientState.snapshot?.engineId) {
+            this.clockProbing = true;
+            if(!this.clientState.snapshot?.engine.capabilities.includes("waveform.tiles.v2"))void this.refreshSnapshot().catch(()=>{});
+            const session = this.sessionId, t0 = performance.now();
+            void this.send("engine.clock.probe").then(value => {
+              const probe = value as {engineEpoch:string;receivedNativeUs:number;sentNativeUs:number};
+              if (session === this.sessionId && probe.engineEpoch === payload.engineId)
+                deckRealtimeStore.mapping.probe(t0,probe.receivedNativeUs,probe.sentNativeUs,performance.now());
+            }).catch(() => {}).finally(() => {this.clockProbing=false;});
+          }
+        }
+        if (payload.event === "deck.state" && ["loading","empty","error"].includes((payload.data as {status?:string})?.status ?? "")) {
+          const deck = (payload.data as {deck?:string})?.deck;
+          if (deck) deckRealtimeStore.invalidate(deck);
+        }
         if (this.snapshotEventBuffer) {
           this.snapshotEventBuffer.push(payload);
           return;

@@ -7,11 +7,23 @@
 #include <memory>
 #include <optional>
 
+namespace junction { class Runtime; }
+
 // Main-thread boundary. Implementations must marshal controls through Mixxx's
 // control machinery; JSON and these callbacks never run in an audio callback.
 class PlaybackBackend {
 public:
     virtual ~PlaybackBackend() = default;
+    std::function<void(int,quint64,QJsonObject)> graphDeckRestoring;
+    std::function<QJsonObject(int)> junctionTrackPresentation;
+    virtual void attachJunction(junction::Runtime*) {}
+    virtual QJsonObject junctionGraph() const { return {}; }
+    virtual bool validateDspAsset(const QString&) const { return false; }
+    virtual QString restoreJunctionGraph(const QJsonObject&) { return "Graph restore unavailable"; }
+    virtual bool junctionGraphReady() const { return false; }
+    virtual QString alignJunctionGraph(quint64) { return "Graph alignment unavailable"; }
+    virtual QString privatePreviewCommand(const QString&,const QJsonObject&) { return "Private preview unavailable"; }
+    virtual QJsonObject privatePreviewState() const { return {}; }
     virtual bool available() const = 0;
     virtual QString implementation() const { return "unavailable"; }
     virtual void start() {}
@@ -35,8 +47,10 @@ public:
     virtual void unload(int deck) = 0;
     virtual void play(int deck, bool enabled) = 0;
     virtual void seek(int deck, double positionMs) = 0;
-    virtual void scratch(int, const QString&, double) {}
+    virtual void scratch(int, const QString&, double, double = 0, bool = false, quint64 = 0) {}
     virtual bool scratching(int) const { return false; }
+    virtual QJsonObject waveformCommand(const QString&, const QJsonObject&) { return {{"error","UNAVAILABLE"}}; }
+    virtual QJsonObject clockPoints(int) { return {}; }
     virtual QJsonObject timingTrace(int) { return {}; }
     virtual void tempo(int, double) {}
     virtual void pitchbend(int, double) {}

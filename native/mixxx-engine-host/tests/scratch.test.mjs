@@ -298,11 +298,12 @@ test('native waveform scratch: paused/playing motion PCM, hold/release, gesture 
     await hold(0, 200, 'jitter-spin');
     await command('deck.timing.trace', { deck: 'A' });
     const spinStart = performance.now();
-    let spinPosition = 0;
+    let spinPosition = 0, jitterSeed = 0x444a414c;
     while (performance.now() - spinStart < 900) {
       spinPosition = (performance.now() - spinStart) * -6;
       await scratch('move', spinPosition, 'jitter-spin');
-      await delay(5 + Math.random() * 65);
+      jitterSeed = (Math.imul(jitterSeed, 1664525) + 1013904223) >>> 0;
+      await delay(5 + jitterSeed / 4294967296 * 65);
     }
     const spin = (await command('deck.timing.trace', { deck: 'A' })).rows
       .filter(row => row.held && row.scratching).slice(30, -5).map(row => Math.abs(row.speed));

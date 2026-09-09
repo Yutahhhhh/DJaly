@@ -184,6 +184,7 @@ impl EngineSupervisor {
 
         let output_device = normalize_output_device(output_device)?;
         let mut command = Command::new(&binary_path);
+        command.env("DJALY_WAVEFORM_CACHE", crate::waveform::cache_root()?);
         command
             .arg(format!("--tick-ms={TICK_MS}"))
             .stdin(Stdio::piped())
@@ -391,8 +392,21 @@ impl EngineSupervisor {
         Ok(status)
     }
 
+    pub fn junction_active(&self) -> Result<bool, String> {
+        let session = { let state = lock(&self.state); state.as_ref().and_then(|r| r.session_id.clone()) };
+        let Some(session) = session else { return Ok(false); };
+        let reply = self.dispatch("junction.snapshot", json!({}), Some(&session))?;
+        if reply.get("ok").and_then(Value::as_bool) == Some(false) {
+            let code = reply.pointer("/error/code").and_then(Value::as_str).unwrap_or("");
+            if code == "unknown_op" || code == "unsupported_operation" { return Ok(false); }
+            return Err("Junctionの利用状態を確認できません".into());
+        }
+        Ok(reply.pointer("/data/active").and_then(Value::as_bool).unwrap_or(false))
+    }
+
     pub fn stop(&self) -> Result<EngineStatus, String> {
         let _lifecycle = lock(&self.lifecycle);
+        if self.junction_active()? { return Err("Junctionから退出またはセッションを終了してからエンジンを停止してください".into()); }
         self.stop_internal();
         Ok(self.status())
     }

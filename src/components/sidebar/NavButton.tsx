@@ -17,6 +17,8 @@ export function NavButton({ icon, label, isActive, onClick, isOpen }: NavButtonP
         "w-full justify-start gap-4 px-4",
         !isOpen && "justify-center px-2"
       )}
+      aria-label={label}
+      aria-current={isActive ? "page" : undefined}
       onClick={onClick}
     >
       {icon}

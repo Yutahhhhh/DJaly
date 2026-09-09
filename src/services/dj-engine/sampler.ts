@@ -1,3 +1,4 @@
+import { junctionState } from '../junction/state';
 import { djEngineClient } from "./client";
 export type SamplerSlot = { slot: number; path: string; name: string; status: "empty" | "loading" | "ready" | "playing" | "error"; error: string; durationMs: number; revision: number };
 export type SamplerState = { slots: SamplerSlot[]; bank: number; gain: number; pfl: boolean; error?: string };
@@ -43,7 +44,7 @@ export const sampler = {
     if (!djEngineClient.getState().snapshot?.engine.capabilities.includes("sampler")) return;
     polling = true;
     try {
-      if (session !== nextSession) {
+      if (session !== nextSession && !junctionState.active()) {
         session = nextSession; publish(EMPTY);
         const paths = saved();
         for (let slot = 0; slot < paths.length; slot++) {

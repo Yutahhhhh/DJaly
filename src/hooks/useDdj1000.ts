@@ -1,3 +1,5 @@
+import { junctionLeaseKey } from '@/services/junction/state';
+import { localTrackId } from '@/services/junction/asset-resolver';
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { djEngineClient } from "@/services/dj-engine/client";
@@ -10,6 +12,7 @@ import { coloredPadFeedback } from "@/services/midi/pad-colors";
 import { jogFrame, isJogScreenMidi, type JogAssets } from "@/services/midi/ddj1000-display";
 import { loadJogAssets } from "@/services/midi/ddj1000-display-assets";
 export type MidiStatus = { enabled: boolean; connected: boolean; generation: number; device: string | null; received: number; sent: number; error: string | null;
+  nativePerformance?: {active:boolean;cues:number[];ranges:number[]};
   display?: { midiOpen: boolean; hidOpen: boolean; authenticated: boolean; reportsSent: number; error: string | null } };
 const OFF: MidiStatus = { enabled: false, connected: false, generation: 0, device: null, received: 0, sent: 0, error: null };
 export function useDdj1000(actions: ControllerActions) {
@@ -48,6 +51,7 @@ export function useDdj1000(actions: ControllerActions) {
     let displayWriting = false;
     const displayAssets = new Map<string, { token: string; assets?: JogAssets }>();
     const reset = () => { decoder.reset(); runtime.reset(); sent.clear(); initialized = false; };
+    let performanceConfigured = "";
     const poll = async () => {
       if (!live || polling) return; polling = true;
       try {
@@ -55,6 +59,22 @@ export function useDdj1000(actions: ControllerActions) {
         if (!live) return;
         if (connection.generation !== next.generation || connection.connected !== next.connected) reset();
         connection = next; setStatus(next);
+        const snapshot = djEngineClient.getState().snapshot;
+        if (next.nativePerformance?.active) for (const [i,deck] of (["A","B","C","D"] as const).entries()) {
+          const range=next.nativePerformance.ranges?.[i];
+          if([6,10,16,75].includes(range)&&range!==Number(localStorage.getItem(`djaly.tempoRange.${deck}`))){
+            runtime.setTempoRange(deck,range);latest.current.library({control:'tempoRange',deck,value:range});
+          }
+          const cue = next.nativePerformance.cues[i]; if (Number.isFinite(cue)) latest.current.cuePoints[deck] = cue;
+        }
+        if (snapshot?.engine.capabilities.includes("performance.midi.v2") && djEngineClient.getSessionId()) {
+          const ranges = (["A","B","C","D"] as const).map(deck => Number(localStorage.getItem(`djaly.tempoRange.${deck}`)) || 16);
+          const token = `${djEngineClient.getSessionId()}:${sensitivityRef.current}:${ranges.join(',')}`;
+          if (token !== performanceConfigured) {
+            await invoke("dj_midi_performance_config", {sessionId:djEngineClient.getSessionId(),sensitivity:sensitivityRef.current,ranges,cues:(["A","B","C","D"] as const).map(deck=>latest.current.cuePoints[deck])});
+            performanceConfigured = token;
+          }
+        }
         if (enabled && next.connected && !initialized) {
           // DDJ-1000 PC APP CONNECT: request the current hardware controls.
           // Install the listener and generation first, or the reply is lost.
@@ -68,12 +88,18 @@ export function useDdj1000(actions: ControllerActions) {
     const inputTimer = setInterval(() => {
       if (!live || !enabled || !connection.connected || reading) return;
       reading = true;
-      void invoke<{ generation: number; messages: number[][] }[]>("dj_midi_read").then(events => {
-        if (!live) return;
+      const inputLease = junctionLeaseKey();
+      void invoke<{ generation: number; messages: number[][]; nativePerformance?: boolean }[]>("dj_midi_read").then(events => {
+        if (!live || inputLease !== junctionLeaseKey()) return;
         runtime.jogSensitivity = sensitivityRef.current;
         for (const event of events) {
           if (!connection.connected || event.generation !== connection.generation) continue;
-          for (const bytes of event.messages) for (const action of decoder.feed(bytes)) runtime.dispatch(action);
+          for (const bytes of event.messages) for (const action of decoder.feed(bytes)) {
+            // Every packet carries its execution owner; buffered UI observation
+            // cannot re-execute native edges after a route change.
+            if (event.nativePerformance && ["jog","searchJog","nudge","touch","vinyl","keylock","tempoRange","tempo","crossfader","gain","trim","eqHigh","eqMid","eqLow","play","cue","start"].includes(action.control)) continue;
+            runtime.dispatch(action);
+          }
         }
       }).catch(e => {
         if (live) { reset(); connection = OFF; setStatus({ ...OFF, error: String(e) }); }
@@ -89,8 +115,8 @@ export function useDdj1000(actions: ControllerActions) {
         let entry = displayAssets.get(id);
         if (!entry || entry.token !== token) {
           entry = { token }; displayAssets.set(id, entry);
-          const target = entry, trackId = Number(deck?.track?.trackId);
-          if (token && Number.isFinite(trackId) && trackId > 0) void loadJogAssets(trackId).then(assets => {
+          const target = entry, trackId = localTrackId(deck?.track);
+          if (token && trackId !== null) void loadJogAssets(trackId).then(assets => {
             if (live && displayAssets.get(id) === target) target.assets = assets;
           }).catch(e => { if (live && displayAssets.get(id) === target) latest.current.error(`ジョグ画面の画像取得: ${String(e)}`); });
         }

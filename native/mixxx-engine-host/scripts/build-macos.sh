@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+[[ "$(uname -m)" == arm64 && "$(brew --prefix)" == /opt/homebrew ]] || { echo "The release host requires ARM64 Homebrew at /opt/homebrew." >&2; exit 1; }
 host_root="$(cd "$(dirname "$0")/.." && pwd)"
 mixxx_commit=3ebac449e7e5fe2a0186596657696e87ce8b0e56
 gsl_commit=a3534567187d2edc428efd3f13466ff75fe5805c
@@ -16,12 +18,18 @@ fetch_pinned() {
 }
 fetch_pinned https://github.com/mixxxdj/mixxx.git "$mixxx_commit" "$host_root/upstream"
 fetch_pinned https://github.com/microsoft/GSL.git "$gsl_commit" "$host_root/build-deps/gsl"
+bash "$host_root/scripts/build-junction-deps.sh"
 brew_prefix="$(brew --prefix)"
 protobuf_prefix="$(brew --prefix protobuf)"
 abseil_prefix="$(brew --prefix abseil)"
 mkdir -p "$host_root/logs"
 cmake -S "$host_root/upstream" -B "$host_root/build-upstream" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$brew_prefix" \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_PREFIX_PATH="$brew_prefix" \
+  -DPKG_CONFIG_EXECUTABLE=/opt/homebrew/bin/pkg-config -DCMAKE_IGNORE_PREFIX_PATH=/usr/local \
+  -DOPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl@3 \
+  -DOPENSSL_INCLUDE_DIR=/opt/homebrew/opt/openssl@3/include \
+  -DOPENSSL_CRYPTO_LIBRARY=/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib \
+  -DOPENSSL_SSL_LIBRARY=/opt/homebrew/opt/openssl@3/lib/libssl.dylib \
   -DCMAKE_PROJECT_mixxx_INCLUDE="$host_root/cmake/inject-host.cmake" \
   -DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON \
   "-DCMAKE_CXX_FLAGS=-I$host_root/build-deps/gsl/include -I$protobuf_prefix/include -I$abseil_prefix/include" \

@@ -1,9 +1,10 @@
+import { presentationScheduler } from "./presentation-scheduler.ts";
 /** Coalesce resize/telemetry/interaction into one paint per display frame. */
 export function createWaveformRenderLoop(
   draw: () => void,
   continuous: () => boolean,
-  request: (callback: FrameRequestCallback) => number = requestAnimationFrame,
-  cancel: (id: number) => void = cancelAnimationFrame,
+  request: (callback: FrameRequestCallback) => number = presentationScheduler.request,
+  cancel: (id: number) => void = presentationScheduler.cancel,
 ) {
   let pending: number | null = null;
   let disposed = false;
