@@ -34,7 +34,13 @@ public:
     void reset(){abort();token_=QUuid::createUuid().toString(QUuid::WithoutBraces);if(socket_)socket_->abort();}
 private:
     struct Deck {quint64 generation=0;bool touching=false,vinyl=true,preview=false;int adjust=0;double loopStart=0,loopEnd=0,seekPosition=0,seekAt=0;double displacement=0,lastMotion=0,lastCapture=0,speed=0,releaseAt=0,cue=0,range=.16,bendUntil=0;};
-    void abort(){for(int i=0;i<4;i++){if(decks_[i].touching||decks_[i].releaseAt)backend_->scratch(i,"abort",0);if(decks_[i].preview)backend_->play(i,false);backend_->pitchbend(i,0);decks_[i]={};}held_.fill(false);msb_.fill(-1);running_=0;dataCount_=0;authed_=false;}
+    // 自分が握っていないデッキへ介入しない。ネイティブの解放はネイティブのsequenceを伴い、
+    // 新しいポインタ操作のジェスチャーやUIが設定したpitchbendを巻き込まない。
+    void abort(){for(int i=0;i<4;i++){auto& d=decks_[i];const bool owned=d.touching||d.releaseAt;
+        if(owned&&sequence_)backend_->scratch(i,"abort",0,0,false,sequence_);
+        if(d.preview)backend_->play(i,false);
+        if(owned||d.bendUntil)backend_->pitchbend(i,0);
+        d={};}held_.fill(false);msb_.fill(-1);running_=0;dataCount_=0;authed_=false;}
     void finish(int i){auto& d=decks_[i];if(d.touching||d.releaseAt)backend_->scratch(i,"end",d.displacement,deckclock::monotonicUs(),false,sequence_);d.touching=false;d.releaseAt=0;}
     void publish(){
         if(!socket_||!authed_)return;
@@ -149,7 +155,10 @@ private:
         if(!authed_)return;const double now=deckclock::monotonicUs();
         if(!allowed_()||now-lastInput_>1500000){socket_->abort();return;}
         for(int i=0;i<4;i++){auto& d=decks_[i];const auto generation=quint64(state_(i)["loadGeneration"].toDouble());
-            if(generation!=d.generation){if(d.generation){backend_->scratch(i,"abort",0);backend_->pitchbend(i,0);const auto range=d.range;d={};d.range=range;}d.generation=generation;}
+            if(generation!=d.generation){if(d.generation){const bool owned=d.touching||d.releaseAt;
+                if(owned&&sequence_)backend_->scratch(i,"abort",0,0,false,sequence_);
+                if(owned||d.bendUntil)backend_->pitchbend(i,0);
+                const auto range=d.range;d={};d.range=range;}d.generation=generation;}
             if(d.releaseAt&&now>=d.releaseAt)finish(i);
             if(d.bendUntil&&now>=d.bendUntil){backend_->pitchbend(i,0);d.bendUntil=0;}
             if(d.touching&&!d.releaseAt&&now-d.lastMotion>200000&&now-lastHeartbeat_>200000)backend_->scratch(i,"move",d.displacement,now,true,sequence_);

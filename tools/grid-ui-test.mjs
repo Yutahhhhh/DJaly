@@ -18,11 +18,11 @@ try {
   await page.mouse.move(box.x+box.width/2+60,box.y+box.height/2,{steps:10});await page.mouse.up();
   await page.waitForFunction(()=>JSON.parse(document.querySelector('#result').textContent).first>100);
   const shifted=await result(); assert.equal(shifted.seekCount,0);
-  await page.getByRole('button',{name:'+.01',exact:true}).click();
+  await page.getByTitle('拍の間隔を狭める（細かく）', {exact:true}).click();
   assert(Math.abs((await result()).beats[10]-shifted.beats[10])<1e-6,'anchor must follow grid shift before BPM edits');
-  await page.getByRole('button',{name:'↶ 戻す'}).click();
-  await page.getByRole('button',{name:'↶ 戻す'}).click();assert.equal((await result()).first,100);
-  await page.getByRole('button',{name:'+.01',exact:true}).click();
+  await page.getByRole('button',{name:'元に戻す',exact:true}).click();
+  await page.getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal((await result()).first,100);
+  await page.getByTitle('拍の間隔を狭める（細かく）', {exact:true}).click();
   assert((await result()).beats.includes(5100),'selected anchor must not move');
   await page.keyboard.down('Alt'); await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+30,box.y+box.height/2,{steps:5});await page.mouse.up();await page.keyboard.up('Alt');
   assert.equal((await result()).seekCount,0);
@@ -34,7 +34,7 @@ try {
   await page.getByRole('button',{name:'rekordboxから読込'}).click();
   await page.getByText('rekordbox',{exact:true}).waitFor();
   await page.screenshot({path:'/tmp/djaly-grid-source-editor.png'});
-  await page.getByRole('button',{name:'▶ 再生',exact:true}).click();
+  await page.getByRole('button',{name:'▶',exact:true}).click();
   const beforeResize=(await result()).position;
   for(const width of [940,1600,1024,1400]){
     await page.setViewportSize({width,height:800});
@@ -42,7 +42,7 @@ try {
     assert.equal(overflow,false,`editor row overflow at ${width}`);
   }
   await page.waitForFunction(start=>JSON.parse(document.querySelector('#result').textContent).position>start+200,beforeResize);
-  await page.getByRole('button',{name:'Ⅱ 一時停止',exact:true}).click();
+  await page.getByRole('button',{name:'Ⅱ',exact:true}).click();
   assert(await canvas.evaluate(c=>c.width<=8192 && c.height<=8192));
   await page.getByRole('button',{name:'縦横切替'}).click();await page.getByRole('button',{name:'密度切替'}).click();
   await page.screenshot({path:'/tmp/djaly-grid-source-editor-vertical.png'});

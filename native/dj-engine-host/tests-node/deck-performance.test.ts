@@ -4,6 +4,7 @@ import { ClockMapping, presentPoint } from '../../../src/services/dj-engine/tran
 import { parseClockPoint, type DeckClockPoint } from '../../../src/types/deck-performance.ts';
 import { createPresentationScheduler } from '../../../src/components/play/presentation-scheduler.ts';
 import { parseTile, crc32, chooseLod } from '../../../src/services/waveform/protocol.ts';
+import { DeckRealtimeStore } from '../../../src/services/dj-engine/deck-realtime-store.ts';
 const point:DeckClockPoint={schema:2,engineEpoch:'host',audioConfigEpoch:1,deck:'A',loadGeneration:2,trajectoryEpoch:3,sequence:4,outputFrameEnd:256,outputFrames:256,outputSampleRateHz:44100,sourceFrameStart:10000,sourceFrameEnd:10256,sourceSampleRateHz:48000,nativeMonoUs:1e6,timestampReference:'deck-postprocess-observed',velocityRatioMean:1,velocityRatioEnd:null,transportPlaying:true,scratching:false,appliedInputSeq:0,discontinuity:null,interpolationSafe:true};
 test('clock domains retain RTT uncertainty, expire after suspend, reject invalid probes',()=>{
  const mapping=new ClockMapping();assert.equal(mapping.probe(100,1101000,1101000,102),true);
@@ -17,6 +18,16 @@ test('source rate, reverse, scratch horizon and explicit loop boundary',()=>{
  assert.equal(presentPoint(point,2000000).confidence,'stale');
  assert.equal(parseClockPoint({...point,outputFrameEnd:Number.MAX_SAFE_INTEGER+1}),null);
  assert.equal(parseClockPoint({...point,sourceFrameEnd:-48})?.sourceFrameEnd,-48);
+});
+test('presentation history follows reverse motion and never interpolates across a seek or load',()=>{
+ const store=new DeckRealtimeStore();store.reset('host');store.mapping.probe(999,999000,999000,999);
+ store.ingest({points:[point,{...point,sequence:5,nativeMonoUs:1010000,sourceFrameEnd:9776,velocityRatioMean:-1}]},'host');
+ assert.equal(store.position('A',1010,5)?.sourceFrame,10016);
+ store.ingest({points:[{...point,sequence:6,nativeMonoUs:1020000,sourceFrameEnd:480,trajectoryEpoch:4,discontinuity:'seek',interpolationSafe:false}]},'host');
+ assert.equal(store.position('A',1020,5)?.sourceFrame,9776);
+ store.ingest({points:[{...point,sequence:7,nativeMonoUs:1030000,loadGeneration:3,sourceFrameEnd:0}]},'host');
+ assert.equal(store.position('A',1030,25)?.sourceFrame,0);
+ store.invalidate('A');assert.equal(store.position('A',1030),null);
 });
 test('workspace schedules one frame and preserves invalidation during draw',()=>{
  const frames:FrameRequestCallback[]=[];const scheduler=createPresentationScheduler(f=>{frames.push(f);return frames.length;},()=>{});
