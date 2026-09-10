@@ -63,14 +63,18 @@ int main(int argc, char** argv) {
         for (int batch = 0; batch < 16; ++batch) {
             DWORD available = 0, count = 0;
             if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) {
+                const DWORD error = GetLastError();
                 input.stop();
-                if (GetLastError() == ERROR_BROKEN_PIPE) eof(); else app.exit(2);
+                if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED) eof();
+                else { qWarning("stdin pipe peek failed: %lu", error); app.exit(2); }
                 return;
             }
             if (!available) return;
             if (!ReadFile(pipe, buffer, qMin<DWORD>(available, sizeof(buffer)), &count, nullptr)) {
+                const DWORD error = GetLastError();
                 input.stop();
-                if (GetLastError() == ERROR_BROKEN_PIPE) eof(); else app.exit(2);
+                if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED) eof();
+                else { qWarning("stdin pipe read failed: %lu", error); app.exit(2); }
                 return;
             }
             if (!count) { input.stop(); eof(); return; }

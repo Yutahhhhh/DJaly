@@ -85,7 +85,13 @@ jobs:
           python -m pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity -q
       - name: Analyze real generated audio using Windows runtime
         run: python backend/analysis_diagnostic.py
+      - uses: actions/cache/restore@v4
+        id: backend-cache
+        with:
+          path: backend/dist/plumdeck-server.exe
+          key: windows-backend-${{ hashFiles('backend/**/*.py', 'backend/requirements.txt', 'backend/*.spec', 'backend/**/*.pb', 'backend/**/*.json') }}
       - name: Package backend
+        if: steps.backend-cache.outputs.cache-hit != 'true'
         working-directory: backend
         run: python -m PyInstaller --clean --noconfirm plumdeck-server.spec
       - name: Validate bundled decoder and model without developer PATH
@@ -96,6 +102,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
       - name: Start packaged API and initialize MCP
         run: python scripts/smoke-backend.py backend/dist/plumdeck-server.exe
+      - uses: actions/cache/save@v4
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        with:
+          path: backend/dist/plumdeck-server.exe
+          key: ${{ steps.backend-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-backend
