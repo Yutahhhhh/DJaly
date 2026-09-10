@@ -1,7 +1,7 @@
 {
   "name": "djaly",
   "private": true,
-  "version": "0.4.8",
+  "version": "0.4.9",
   "type": "module",
   "scripts": {
     "docker:start": "colima start djaly --cpu 5 --memory 8",
