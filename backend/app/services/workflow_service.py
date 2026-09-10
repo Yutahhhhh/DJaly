@@ -11,8 +11,6 @@ import hashlib
 import json
 import math
 import os
-import platform
-import plistlib
 import shutil
 import sqlite3
 import subprocess
@@ -37,6 +35,7 @@ from domain.models.track import Track
 from domain.services.set_duration import calculate_set_duration
 from infra.database.schema import ALL_TABLES, CURRENT_SCHEMA_VERSION
 import infra.database.connection as db_connection
+from infra import removable_devices
 
 
 BACKUP_FORMAT_VERSION = 1
@@ -649,25 +648,8 @@ class UsbHandoffService:
         return rows
 
     def devices(self) -> list[dict[str, Any]]:
-        if platform.system() != "Darwin":
-            return []
-        rows: list[dict[str, Any]] = []
-        for mount in sorted(Path("/Volumes").iterdir() if Path("/Volumes").is_dir() else []):
-            try:
-                result = subprocess.run(["/usr/sbin/diskutil", "info", "-plist", str(mount)],
-                                        check=True, capture_output=True, timeout=5)
-                info = plistlib.loads(result.stdout)
-            except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException):
-                continue
-            if info.get("Internal") or not info.get("MountPoint"):
-                continue
-            persistent = str(info.get("VolumeUUID") or info.get("DiskUUID") or info.get("DeviceIdentifier"))
-            row = {"id": persistent, "device_identifier": info.get("DeviceIdentifier"),
-                   "volume_uuid": info.get("VolumeUUID"), "label": info.get("VolumeName") or mount.name,
-                   "mount_path": info.get("MountPoint"), "filesystem": info.get("FilesystemType"),
-                   "capacity_bytes": info.get("TotalSize"), "free_bytes": info.get("FreeSpace"),
-                   "read_only": not bool(info.get("Writable", False)), "connected": True}
-            rows.append(row)
+        rows = removable_devices.devices()
+        for row in rows:
             self.session.exec(text("""
                 INSERT INTO usb_devices (id,device_identifier,volume_uuid,label,mount_path,filesystem,
                   capacity_bytes,free_bytes,read_only,connected,last_seen_at)
@@ -692,13 +674,12 @@ class UsbHandoffService:
         if not current:
             raise ValueError("接続中のUSBが見つかりません")
         try:
-            result = subprocess.run(["/usr/sbin/diskutil", "eject", current["mount_path"]],
-                                    check=True, capture_output=True, text=True, timeout=30)
+            detail = removable_devices.eject(current)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ValueError(f"USBを取り外せませんでした: {exc}") from exc
         self.session.exec(text("UPDATE usb_devices SET connected=false,mount_path=NULL WHERE id=:id"), params={"id": device_id})
         self.session.commit()
-        return {"id": device_id, "ejected": True, "detail": result.stdout.strip()}
+        return {"id": device_id, "ejected": True, "detail": detail}
 
     def mark_checked(self, export_id: str, evidence: dict[str, Any]) -> dict[str, Any]:
         row = self.session.exec(text("SELECT * FROM usb_exports WHERE id=:id"), params={"id": export_id}).first()
@@ -829,7 +810,21 @@ def create_backup(session: Session, destination: str, include_media: bool,
         with WORKFLOW_LOCK, db_connection.database_activity, db_connection.db_lock, db_connection.exclusive_database():
             session.exec(text("CHECKPOINT"))
             db_snapshot = stage / "plumdeck.duckdb"
-            shutil.copy2(db_connection.DB_PATH, db_snapshot)
+            # DuckDB owns an exclusive file handle on Windows. Export through
+            # the existing database connection while the maintenance gate is
+            # held, preserving schema/data/sequences without reopening the file.
+            database = session.exec(text("SELECT current_database()")).one()[0].replace('"', '""')
+            quoted_snapshot = str(db_snapshot).replace("'", "''")
+            session.exec(text(f"ATTACH '{quoted_snapshot}' AS plumdeck_backup_snapshot"))
+            try:
+                session.exec(text(f'COPY FROM DATABASE "{database}" TO plumdeck_backup_snapshot'))
+                session.commit()
+                session.exec(text("CHECKPOINT plumdeck_backup_snapshot"))
+                session.commit()
+            finally:
+                session.rollback()
+                session.exec(text("DETACH plumdeck_backup_snapshot"))
+                session.commit()
             analysis_path = Path(str(db_connection.DB_PATH) + ".analysis-jobs.sqlite3")
             if analysis_path.is_file():
                 _snapshot_sqlite(analysis_path, stage / "analysis-jobs.sqlite3")

@@ -1,6 +1,10 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+function Invoke-PlumdeckSnapshot {
 try {
+$process = Get-Process -Name rekordbox -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if (!$process) { @{running=$false; nodes=@(); paths=@()} | ConvertTo-Json -Compress; return }
+if (-not ('PlumdeckObservation' -as [type])) {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @'
@@ -64,8 +68,7 @@ public static class PlumdeckObservation {
     }
 }
 '@
-$process = Get-Process -Name rekordbox -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (!$process) { @{running=$false; nodes=@(); paths=@()} | ConvertTo-Json -Compress; exit }
+}
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
 $scale = [Math]::Max(1, [PlumdeckObservation]::GetDpiForWindow($process.MainWindowHandle)/96.0)
 $right = $root.Current.BoundingRectangle.Right / $scale
@@ -112,5 +115,6 @@ try { $paths=@([PlumdeckObservation]::AudioPaths($process.Id)) } catch { $pathsE
 
 } catch {
     @{running=$false;error=$_.Exception.Message;nodes=@();paths=@()} | ConvertTo-Json -Depth 4 -Compress
-    exit 1
 }
+}
+while ($null -ne [Console]::ReadLine()) { Invoke-PlumdeckSnapshot }

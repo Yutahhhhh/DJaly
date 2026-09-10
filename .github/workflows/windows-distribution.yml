@@ -78,6 +78,7 @@ jobs:
         run: |
           python -m pytest --confcutdir=backend/tests/portable_audio backend/tests/portable_audio -q
           python -m pytest --confcutdir=backend/tests/portability backend/tests/portability -q
+          python -m pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity -q
       - name: Analyze real generated audio using Windows runtime
         run: python backend/analysis_diagnostic.py
       - name: Package backend
