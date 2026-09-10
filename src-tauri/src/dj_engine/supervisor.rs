@@ -913,7 +913,7 @@ fn resolve_binary() -> Result<PathBuf, String> {
 
     #[cfg(not(debug_assertions))]
     {
-        Err("音声エンジンが同梱されていません。お使いのOSに対応したPerformance版をインストールしてください。".to_string())
+        Err("音声エンジンが同梱されていません。アプリを再インストールしてください。".to_string())
     }
     #[cfg(debug_assertions)]
     {
@@ -924,6 +924,11 @@ fn resolve_binary() -> Result<PathBuf, String> {
             .parent()
             .map(|parent| parent.to_path_buf())
             .unwrap_or_else(|| manifest_dir.clone());
+        #[cfg(target_os = "windows")]
+        {
+            let staged = repo_root.join("native/mixxx-engine-host/stage/PlumdeckMixxxHost/plumdeck-mixxx-engine-host.exe");
+            if staged.is_file() { return Ok(staged); }
+        }
         let staged_host = repo_root
             .join("native")
             .join("mixxx-engine-host")

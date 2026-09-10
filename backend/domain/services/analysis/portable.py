@@ -40,9 +40,11 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         decoded = subprocess.run(
             [converter, "-nostdin", "-v", "error", "-threads", "1", "-i", str(filepath),
              "-vn", "-ac", "1", "-ar", str(constants.SAMPLE_RATE), "-f", "f32le", "pipe:1"],
-            capture_output=True, timeout=300, check=True,
+            capture_output=True, timeout=300, check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if decoded.returncode:
+            raise RuntimeError("音声をデコードできません: " + decoded.stderr.decode("utf-8", errors="replace")[-2000:])
         audio = np.frombuffer(decoded.stdout, dtype="<f4").copy()
         if not audio.size or not np.isfinite(audio).all():
             raise ValueError("Audio is empty or contains non-finite samples")

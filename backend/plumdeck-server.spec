@@ -32,9 +32,8 @@ hiddenimports = [
 ]
 
 # Collect packages that genuinely use dynamic imports/resources. NumPy is
-# handled by PyInstaller's built-in hook. scipy/sklearn/tensorflow are not
-# runtime dependencies of plumdeck and collecting them here only produced stale
-# hidden-import warnings and unnecessary discovery work.
+# handled by PyInstaller's built-in hook. Windows analysis libraries are
+# collected separately below because macOS uses Essentia instead.
 for package in [
     'uvicorn', 'starlette', 'fastapi', 'h11', 'essentia',
     'mcp', 'mcp_types', 'sse_starlette', 'jsonschema',

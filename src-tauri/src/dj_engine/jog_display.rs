@@ -50,10 +50,10 @@ impl JogDisplay {
             decks: Arc::new(vec![]),
             status: DisplayStatus::default(),
         }));
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             let state = shared.clone();
-            std::thread::spawn(move || mac::worker(state));
+            std::thread::spawn(move || hardware::worker(state));
         }
         Self { shared }
     }
@@ -320,8 +320,8 @@ fn load_jobs(ch: usize, deck: &DeckDisplay) -> Vec<DisplayWrite> {
     }
     jobs
 }
-#[cfg(target_os = "macos")]
-mod mac {
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod hardware {
     use super::*;
     use midir::{MidiInput, MidiOutput};
     use std::{collections::VecDeque, sync::mpsc};
@@ -354,6 +354,7 @@ mod mac {
                 break;
             }
             std::thread::sleep(Duration::from_micros(500));
+            #[cfg(target_os = "macos")]
             unsafe {
                 core_foundation::runloop::CFRunLoop::run_in_mode(
                     core_foundation::runloop::kCFRunLoopDefaultMode,

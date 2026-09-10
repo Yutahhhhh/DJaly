@@ -45,6 +45,9 @@ tao = "0.34"
 core-foundation = "0.10"
 hidapi = { version = "2.6.7", features = ["macos-shared-device"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+hidapi = "2.6.7"
+
 # macOS external Copy drags also advertise Generic for JUCE drop targets.
 [patch.crates-io]
 drag = { path = "vendor/drag" }

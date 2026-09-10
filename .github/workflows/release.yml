@@ -19,14 +19,14 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --config src-tauri/tauri.mixxx.conf.json'
             sidecar_target: 'aarch64-apple-darwin'
-          - platform: 'windows-latest'
-            args: ''
+          - platform: 'windows-2022'
+            args: '--config src-tauri/tauri.windows.conf.json'
             sidecar_target: 'x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 30
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -64,10 +64,10 @@ jobs:
 
       - name: install FFmpeg (macOS)
         if: matrix.platform == 'macos-latest'
-        run: brew install ffmpeg
+        run: brew install ffmpeg cmake ninja pkgconf qtbase qt5compat qtsvg qtdeclarative qttranslations portaudio libsndfile libsamplerate rubberband sound-touch chromaprint libebur128 taglib protobuf abseil opus libnice openssl@3 flac libogg libvorbis speex mpg123
 
       - name: install FFmpeg (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: pwsh
         run: choco install ffmpeg -y --no-progress
 
@@ -96,7 +96,7 @@ jobs:
           mkdir -p ../src-tauri/bin
 
           EXTENSION=""
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+          if [[ "${{ matrix.platform }}" == "windows-2022" ]]; then
             EXTENSION=".exe"
           fi
 
@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
 
           EXTENSION=""
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+          if [[ "${{ matrix.platform }}" == "windows-2022" ]]; then
             EXTENSION=".exe"
           fi
 
@@ -148,6 +148,31 @@ jobs:
 
           echo "Packaged backend smoke test passed."
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.platform == 'windows-2022'
+        with:
+          arch: x64
+
+      - name: Build and stage Windows audio engine
+        if: matrix.platform == 'windows-2022'
+        run: |
+          python -m pip install cmake ninja
+          python native/mixxx-engine-host/scripts/build-windows.py
+
+      - name: Build and stage macOS audio engine
+        if: matrix.platform == 'macos-latest'
+        run: |
+          bash native/mixxx-engine-host/scripts/build-macos.sh
+          bash native/mixxx-engine-host/scripts/stage-macos.sh
+
+      - name: Verify packaged analysis
+        if: matrix.platform == 'windows-2022'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & .\src-tauri\bin\plumdeck-server-x86_64-pc-windows-msvc.exe --diagnose-analysis
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
+
       - name: build tauri app
         run: pnpm exec tauri build ${{ matrix.args }}
         env:
@@ -163,7 +188,7 @@ jobs:
           compgen -G 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg' > /dev/null
 
       - name: verify Windows bundles
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: bash
         run: |
           set -euo pipefail
@@ -184,7 +209,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: upload artifacts (windows)
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-2022'
         uses: softprops/action-gh-release@v3
         with:
           draft: false

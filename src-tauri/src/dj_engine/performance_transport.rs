@@ -1,12 +1,78 @@
 //! Bounded local channel independent of WebView rendering and notification ACKs.
+#[cfg(unix)]
+use std::os::unix::net::UnixStream as LocalStream;
+#[cfg(windows)]
+use windows_pipe::LocalStream;
+
+#[cfg(windows)]
+mod windows_pipe {
+    use std::{cell::Cell, fs::{File, OpenOptions}, io::{self, Read, Write},
+        os::windows::io::AsRawHandle, time::{Duration, Instant}};
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetNamedPipeHandleState(handle: *mut std::ffi::c_void, mode: *const u32,
+            count: *const u32, timeout: *const u32) -> i32;
+    }
+    pub struct LocalStream {
+        file: File,
+        timeout: Cell<Option<Duration>>,
+        nonblocking: Cell<bool>,
+    }
+    impl LocalStream {
+        pub fn connect(path: &str) -> io::Result<Self> {
+            // Only this machine's named pipes; never open an arbitrary file or UNC share.
+            if !path.starts_with(r"\\.\pipe\") {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "Expected local named pipe"));
+            }
+            let file = OpenOptions::new().read(true).write(true).open(path)?;
+            let mode = 1u32; // PIPE_NOWAIT | PIPE_READMODE_BYTE
+            if unsafe { SetNamedPipeHandleState(file.as_raw_handle(), &mode,
+                std::ptr::null(), std::ptr::null()) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { file, timeout: Cell::new(None), nonblocking: Cell::new(false) })
+        }
+        pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            self.timeout.set(timeout); Ok(())
+        }
+        pub fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+            // PIPE_NOWAIT bounds every write, including the handshake.
+            Ok(())
+        }
+        pub fn set_nonblocking(&self, value: bool) -> io::Result<()> {
+            self.nonblocking.set(value); Ok(())
+        }
+    }
+    impl Read for LocalStream {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            let start = Instant::now();
+            loop {
+                match self.file.read(bytes) {
+                    Err(e) if e.raw_os_error() == Some(232) => {
+                        if self.nonblocking.get() {
+                            return Err(io::ErrorKind::WouldBlock.into());
+                        }
+                        if self.timeout.get().is_some_and(|t| start.elapsed() >= t) {
+                            return Err(io::ErrorKind::TimedOut.into());
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    result => return result,
+                }
+            }
+        }
+    }
+    impl Write for LocalStream {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> { self.file.write(bytes) }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+}
+
 use serde::{Deserialize, Serialize};
 
-#[cfg(unix)]
 use serde_json::{json, Value};
-#[cfg(unix)]
 use std::{
     io::{Read, Write},
-    os::unix::net::UnixStream,
     time::{Duration, Instant},
 };
 
@@ -28,9 +94,8 @@ pub struct Observation {
     pub ranges: [f64; 4],
 }
 
-#[cfg(unix)]
 pub struct Transport {
-    stream: UnixStream,
+    stream: LocalStream,
     input: Vec<u8>,
     generations: [u32; 4],
     generation_since: [Instant; 4],
@@ -41,7 +106,6 @@ pub struct Transport {
     pub observation: Observation,
 }
 
-#[cfg(unix)]
 impl Transport {
     pub fn connect(config: &Config) -> Result<Self, String> {
         if !config.sensitivity.is_finite()
@@ -55,7 +119,7 @@ impl Transport {
         {
             return Err("Invalid performance settings".into());
         }
-        let mut stream = UnixStream::connect(&config.path).map_err(|e| e.to_string())?;
+        let mut stream = LocalStream::connect(&config.path).map_err(|e| e.to_string())?;
         stream
             .set_read_timeout(Some(Duration::from_millis(200)))
             .map_err(|e| e.to_string())?;
@@ -206,37 +270,13 @@ impl Transport {
     }
 }
 
-// The native Mixxx performance host currently communicates over a Unix domain
-// socket and is staged by the macOS-only performance build. Keep the regular
-// Windows plumdeck application buildable and make this optional acceleration path
-// explicitly unavailable instead of compiling Unix APIs on Windows.
-#[cfg(not(unix))]
-pub struct Transport {
-    pub observation: Observation,
-}
-
-#[cfg(not(unix))]
-impl Transport {
-    pub fn connect(_config: &Config) -> Result<Self, String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-
-    pub fn poll(&mut self) -> Result<(), String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-
-    pub fn send(&mut self, _bytes: &[u8], _captured: std::time::Instant) -> Result<(), String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     #[test]
     fn queued_midi_is_not_relabelled_after_track_replacement() {
-        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (stream, mut peer) = LocalStream::pair().unwrap();
         let origin = Instant::now() - Duration::from_secs(1);
         let mut transport = Transport {
             stream,

@@ -19,7 +19,11 @@ public:
     PerformanceInput(PlaybackBackend* backend, State state, std::function<bool()> allowed, QObject* parent=nullptr)
       :QObject(parent),backend_(backend),state_(std::move(state)),allowed_(std::move(allowed)) {
         server_.setSocketOptions(QLocalServer::UserAccessOption);
+#ifdef Q_OS_WIN
+        server_.listen("plumdeck-midi-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+#else
         server_.listen(directory_.filePath("input.sock"));
+#endif
         connect(&server_,&QLocalServer::newConnection,this,[this]{
             auto* socket=server_.nextPendingConnection();
             if(socket_) {socket->abort();socket->deleteLater();return;}
