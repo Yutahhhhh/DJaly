@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "targets": ["msi"],
     "resources": {
       "../native/mixxx-engine-host/stage/PlumdeckMixxxHost/": "engine/"
     }
