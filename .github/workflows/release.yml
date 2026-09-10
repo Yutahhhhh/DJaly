@@ -55,6 +55,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
 
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -65,6 +67,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          cache-on-failure: true
 
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -97,8 +100,7 @@ jobs:
           set -euo pipefail
           cd backend
           # Keep CI packaging identical to local releases. The spec includes
-          # Essentia/MusiCNN assets and all MCP server dependencies available
-          # on the target platform.
+          # FFmpeg, Essentia/MusiCNN on supported platforms and MCP dependencies.
           python -m PyInstaller --clean --noconfirm djaly-server.spec
 
           mkdir -p ../src-tauri/bin
@@ -113,6 +115,49 @@ jobs:
           test -f ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
           ls -la ../src-tauri/bin/
 
+      - name: smoke test packaged backend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXTENSION=""
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            EXTENSION=".exe"
+          fi
+
+          SIDECAR="src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION"
+          PORT=48123
+          LOG_FILE="${RUNNER_TEMP}/djaly-sidecar-smoke.log"
+
+          DJALY_PORT="$PORT" "$SIDECAR" >"$LOG_FILE" 2>&1 &
+          SIDECAR_PID=$!
+
+          cleanup() {
+            kill "$SIDECAR_PID" 2>/dev/null || true
+            wait "$SIDECAR_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          READY=0
+          for attempt in {1..45}; do
+            if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/" | grep -q 'Djaly Backend API is running'; then
+              READY=1
+              break
+            fi
+            if ! kill -0 "$SIDECAR_PID" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ "$READY" -ne 1 ]]; then
+            echo "Packaged backend failed to become ready:"
+            cat "$LOG_FILE"
+            exit 1
+          fi
+
+          echo "Packaged backend smoke test passed."
+
       - name: build tauri app
         run: pnpm exec tauri build ${{ matrix.args }}
         env:
@@ -124,8 +169,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -d 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Djaly.app'
           compgen -G 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg' > /dev/null
-          compgen -G 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz' > /dev/null
 
       - name: verify Windows bundles
         if: matrix.platform == 'windows-latest'
@@ -135,6 +180,9 @@ jobs:
           compgen -G 'src-tauri/target/release/bundle/msi/*.msi' > /dev/null
           compgen -G 'src-tauri/target/release/bundle/nsis/*.exe' > /dev/null
 
+      # CI publishes the installable bundles. Updater metadata/signatures are
+      # intentionally kept separate until the updater signing key is configured
+      # as GitHub Actions secrets; PR validation never requires signing secrets.
       - name: upload artifacts (macos)
         if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
         uses: softprops/action-gh-release@v3
@@ -142,7 +190,6 @@ jobs:
           draft: false
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
