@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from pathlib import Path
 from uuid import uuid4
@@ -14,8 +15,18 @@ from rekordbox_mcp.db.connection import db6_tables
 from rekordbox_mcp.db.repository import RekordboxRepository
 from rekordbox_mcp.domain.models import OperationMode, Playlist
 
-PLUMDECK_DB = Path("/Users/horiyuuta/Library/Application Support/plumdeck/plumdeck.duckdb")
-REKORDBOX_DB = Path("/Users/horiyuuta/Library/Pioneer/rekordbox/master.db")
+PLUMDECK_DB = Path(
+    os.environ.get(
+        "PLUMDECK_DB_PATH",
+        Path.home() / "Library/Application Support/plumdeck/plumdeck.duckdb",
+    )
+).expanduser()
+REKORDBOX_DB = Path(
+    os.environ.get(
+        "REKORDBOX_DB_PATH",
+        Path.home() / "Library/Pioneer/rekordbox/master.db",
+    )
+).expanduser()
 ROOT_NAME = "GENRES"
 SPLIT_AT = 900
 MIN_SUBGENRE_TRACKS = 20
