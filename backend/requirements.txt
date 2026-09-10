@@ -3,7 +3,7 @@ uvicorn
 sqlmodel
 duckdb
 duckdb-engine
-essentia-tensorflow
+essentia-tensorflow; sys_platform != "win32"
 tinytag
 pydantic
 python-multipart
