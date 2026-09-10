@@ -10,9 +10,10 @@ const temporary=process.platform==='win32'?await mkdtemp(join(tmpdir(),'Plumdeck
 if(temporary) await cp(dirname(original),join(temporary,'engine'),{recursive:true});
 const binary=temporary?join(temporary,'engine',basename(original)):original;
 const env={...process.env};
-if(process.platform==='win32') env.PATH=`${env.SystemRoot}\\System32;${env.SystemRoot}`;
+if(process.platform==='win32') env.PATH=`${process.env.SystemRoot}\\System32;${process.env.SystemRoot}`;
 const child=spawn(binary,[],{env,cwd:temporary||dirname(binary),windowsHide:true,stdio:['pipe','pipe','pipe']});
-const exited=new Promise(resolve=>child.on('exit',resolve));
+const exited=new Promise(resolve=>child.on('close',resolve));
+child.on('error',error=>{console.error(error)});
 let diagnostics='', session, id=0;
 const pending=new Map();
 child.stderr.on('data',b=>{diagnostics=(diagnostics+b).slice(-8000)});

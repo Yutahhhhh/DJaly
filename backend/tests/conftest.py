@@ -1,4 +1,5 @@
 import os
+import importlib.util
 import pytest
 import sys
 import tempfile
@@ -88,20 +89,13 @@ def mock_external_deps(mocker):
     """
     外部ライブラリをグローバルにモック化する。
     """
-    # Essentia (音響解析ライブラリ) のモック
-    mocker.patch("essentia.standard.MonoLoader")
-    mocker.patch("essentia.standard.RhythmExtractor2013")
-    mocker.patch("essentia.standard.KeyExtractor")
-    mocker.patch("essentia.standard.RMS")
-    mocker.patch("essentia.standard.Danceability")
-    mocker.patch("essentia.standard.SpectralCentroidTime")
-    mocker.patch("essentia.standard.ZeroCrossingRate")
-    mocker.patch("essentia.standard.Spectrum")
-    mocker.patch("essentia.standard.Windowing")
-    mocker.patch("essentia.standard.RollOff")
-    mocker.patch("essentia.standard.Flux")
-    mocker.patch("essentia.standard.TensorflowPredictMusiCNN")
-    mocker.patch("essentia.standard.LoudnessEBUR128")
+    # Non-audio service tests also run where Essentia is not installed.
+    if importlib.util.find_spec("essentia") is not None:
+        for algorithm in ("MonoLoader", "RhythmExtractor2013", "KeyExtractor", "RMS",
+                          "Danceability", "SpectralCentroidTime", "ZeroCrossingRate",
+                          "Spectrum", "Windowing", "RollOff", "Flux",
+                          "TensorflowPredictMusiCNN", "LoudnessEBUR128"):
+            mocker.patch(f"essentia.standard.{algorithm}", create=True)
 
     # メタデータ抽出ライブラリのモック
     mocker.patch("tinytag.TinyTag.get")

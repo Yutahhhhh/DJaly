@@ -84,7 +84,9 @@ def main():
     ldc = DEPS / "libdatachannel"
     fetch("https://github.com/paullouisageneau/libdatachannel.git", LDC, ldc)
     run("git", "-C", ldc, "submodule", "update", "--init", "--recursive", "--depth", "1")
-    pkg = next(iter((vcpkg / "downloads" / "tools").glob("pkgconf*/pkgconf.exe")), None)
+    candidates = list((vcpkg / "downloads" / "tools").rglob("pkgconf.exe"))
+    candidates.sort(key=lambda p: ("mingw64" not in p.parts, len(p.parts)))
+    pkg = next(iter(candidates), None)
     if pkg is None:
         pkg = shutil.which("pkg-config")
     if not pkg:

@@ -56,10 +56,19 @@ def find_analysis(filepath: str, database: Path | None = None) -> tuple[Path, st
         connection = connect_readonly(database)
         try:
             # Exact path identity, never title/artist guessing; parameterized and WAL-aware.
-            rows = connection.execute(
-                "SELECT ID, AnalysisDataPath FROM djmdContent "
-                "WHERE FolderPath = ? AND rb_local_deleted = 0", (filepath,),
-            ).fetchall()
+            if sys.platform == "win32":
+                from infra.rekordbox_library import same_path
+                candidates = connection.execute(
+                    "SELECT ID, AnalysisDataPath, FolderPath FROM djmdContent "
+                    "WHERE replace(FolderPath, char(92), '/') COLLATE NOCASE = ? AND rb_local_deleted = 0",
+                    (filepath.replace("\\", "/"),),
+                ).fetchall()
+                rows = [row[:2] for row in candidates if same_path(filepath, str(row[2]))]
+            else:
+                rows = connection.execute(
+                    "SELECT ID, AnalysisDataPath FROM djmdContent "
+                    "WHERE FolderPath = ? AND rb_local_deleted = 0", (filepath,),
+                ).fetchall()
         finally:
             connection.close()
         if not rows:

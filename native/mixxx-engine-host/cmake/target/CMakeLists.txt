@@ -133,6 +133,27 @@ if(PLUMDECK_XRUN_MATCH EQUAL -1)
   message(FATAL_ERROR "Pinned PortAudio xrun hook no longer matches")
 endif()
 string(REPLACE "m_pSoundManager->underflowHappened(" "deckclock::xruns.fetch_add(1, std::memory_order_relaxed), m_pSoundManager->underflowHappened(" PLUMDECK_PORTAUDIO "${PLUMDECK_PORTAUDIO}")
+if(WIN32)
+  # Keep the engine/hand-off clock at 44.1 kHz while WASAPI converts to the
+  # Windows shared mixer format (commonly 48 kHz). ASIO remains untouched.
+  set(PLUMDECK_WASAPI_NEEDLE "    PaStream *pStream;")
+  string(FIND "${PLUMDECK_PORTAUDIO}" "${PLUMDECK_WASAPI_NEEDLE}" PLUMDECK_WASAPI_MATCH)
+  if(PLUMDECK_WASAPI_MATCH EQUAL -1)
+    message(FATAL_ERROR "Pinned WASAPI stream configuration hook no longer matches")
+  endif()
+  string(REPLACE "${PLUMDECK_WASAPI_NEEDLE}" "
+    PaWasapiStreamInfo plumdeckWasapi{};
+    if (m_deviceTypeId == paWASAPI) {
+        plumdeckWasapi.size = sizeof(plumdeckWasapi);
+        plumdeckWasapi.hostApiType = paWASAPI;
+        plumdeckWasapi.version = 1;
+        plumdeckWasapi.flags = paWinWasapiAutoConvert;
+        if (pOutputParams) pOutputParams->hostApiSpecificStreamInfo = &plumdeckWasapi;
+        if (pInputParams) pInputParams->hostApiSpecificStreamInfo = &plumdeckWasapi;
+    }
+${PLUMDECK_WASAPI_NEEDLE}" PLUMDECK_PORTAUDIO "${PLUMDECK_PORTAUDIO}")
+  string(PREPEND PLUMDECK_PORTAUDIO "#include <pa_win_wasapi.h>\n")
+endif()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/plumdeck_sounddeviceportaudio.cpp" "#include \"${PLUMDECK_ROOT}/src/deck_telemetry.h\"\n${PLUMDECK_PORTAUDIO}")
 get_target_property(PLUMDECK_MIXXX_SOURCES mixxx-lib SOURCES)
 list(FILTER PLUMDECK_MIXXX_SOURCES EXCLUDE REGEX "soundio/sounddeviceportaudio\\.cpp$")

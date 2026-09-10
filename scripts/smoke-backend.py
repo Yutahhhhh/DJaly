@@ -19,7 +19,8 @@ def main():
         env = {**os.environ, "USER_DATA_DIR": directory, "DB_PATH": str(Path(directory) / "library.duckdb"),
                "PLUMDECK_PORT": str(port), "ENV": "prod"}
         if sys.platform == "win32":
-            env["PATH"] = os.pathsep.join([str(Path(env["SystemRoot"]) / "System32"), env["SystemRoot"]])
+            system_root = os.environ["SystemRoot"]
+            env["PATH"] = os.pathsep.join([str(Path(system_root) / "System32"), system_root])
         with tempfile.TemporaryFile() as log:
             child = subprocess.Popen([executable], env=env, stdout=log, stderr=log,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
