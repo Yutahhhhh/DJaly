@@ -1028,7 +1028,7 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
                 _snapshot_sqlite(queue_path, queue_rollback)
             replacement = db_path.with_name(f".{db_path.name}.restore")
             shutil.copy2(staged_db, replacement)
-            from infra.database.restore_recovery import begin_restore, finish_restore
+            from infra.database.restore_recovery import begin_restore, finish_restore, sync_restored_files
             begin_restore(db_path, rollback, queue_existed)
             try:
                 os.replace(replacement, db_path)
@@ -1038,6 +1038,7 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
                 queue_path.unlink(missing_ok=True)
                 if jobs.exists():
                     _snapshot_sqlite(jobs, queue_path)
+                sync_restored_files(db_path)
                 db_connection.reopen_db(str(db_path))
                 finish_restore(db_path)
             except Exception:
@@ -1048,6 +1049,7 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
                     Path(str(queue_path) + suffix).unlink(missing_ok=True)
                 if queue_existed:
                     _snapshot_sqlite(queue_rollback, queue_path)
+                sync_restored_files(db_path)
                 db_connection.reopen_db(str(db_path))
                 finish_restore(db_path)
                 raise

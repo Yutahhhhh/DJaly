@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 def _sync(path: Path) -> None:
-    with path.open("rb") as file:
+    # Windows FlushFileBuffers (used by os.fsync) requires a writable handle.
+    with path.open("r+b") as file:
         os.fsync(file.fileno())
 
 
@@ -22,19 +23,36 @@ def begin_restore(db_path: Path, rollback: Path, queue_existed: bool) -> None:
     temp = marker.with_suffix(".partial")
     temp.write_text(json.dumps({"rollback": rollback.name, "queue_existed": queue_existed}), encoding="utf-8")
     _sync(temp)
-    os.replace(temp, marker)
-    descriptor = os.open(marker.parent, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    if os.name == "nt":
+        # Windows cannot fsync a directory through a POSIX descriptor. Request
+        # write-through for the atomic marker rename through the native API.
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        move = kernel.MoveFileExW
+        move.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+        move.restype = wintypes.BOOL
+        if not move(str(temp), str(marker), 0x1 | 0x8):
+            raise ctypes.WinError(ctypes.get_last_error())
+    else:
+        os.replace(temp, marker)
+        descriptor = os.open(marker.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
-def finish_restore(db_path: Path) -> None:
+def sync_restored_files(db_path: Path) -> None:
+    """Persist the replacement pair before DuckDB reopens its exclusive handle."""
     _sync(db_path)
     queue = Path(str(db_path) + ".analysis-jobs.sqlite3")
     if queue.exists():
         _sync(queue)
+
+
+def finish_restore(db_path: Path) -> None:
+    """Clear recovery only after the persisted pair was successfully reopened."""
     marker_path(db_path).unlink(missing_ok=True)
 
 
@@ -57,5 +75,6 @@ def recover_pending_restore(db_path: Path) -> bool:
         Path(str(queue) + suffix).unlink(missing_ok=True)
     if state["queue_existed"]:
         shutil.copy2(queue_rollback, queue)
+    sync_restored_files(db_path)
     finish_restore(db_path)
     return True
