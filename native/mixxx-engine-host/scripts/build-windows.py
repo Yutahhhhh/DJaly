@@ -142,6 +142,7 @@ def main():
     shutil.copy2(upstream / "LICENSE", stage / "LICENSE-Mixxx")
     os.environ["PATH"] = str(stage) + os.pathsep + os.environ["PATH"]
     run("ctest", "--test-dir", ROOT / "build-seam", "--output-on-failure")
+    run("node", ROOT / "scripts/smoke-bundle.mjs", stage / "plumdeck-mixxx-engine-host.exe")
 
 
 if __name__ == "__main__":
