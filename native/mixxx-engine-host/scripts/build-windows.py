@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,73 @@ def configure(source, build, *options):
 def build(directory, *targets):
     run("cmake", "--build", directory, "--parallel", os.environ.get("PLUMDECK_BUILD_JOBS", "4"),
         *(["--target", *targets] if targets else []))
+
+
+def imported_dlls(binary):
+    """Return normal and delay-loaded PE imports reported by the MSVC toolchain."""
+    output = subprocess.check_output(
+        ["dumpbin", "/DEPENDENTS", str(binary)], text=True, errors="replace"
+    )
+    return sorted(set(re.findall(r"^\s+([^\s]+\.dll)\s*$", output, re.IGNORECASE | re.MULTILINE)))
+
+
+def stage_runtime_closure(executable, stage, search_roots, plugin_seeds):
+    """Copy the executable's recursive DLL closure plus explicitly loaded Qt plugins."""
+    candidates = {}
+    for root in search_roots:
+        if not root or not root.is_dir():
+            continue
+        for dll in root.rglob("*.dll"):
+            candidates.setdefault(dll.name.lower(), dll)
+
+    queue = []
+    staged = {}
+
+    def copy(source, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        staged[source.name.lower()] = destination
+        queue.append(destination)
+
+    copy(executable, stage / executable.name)
+    for relative, source in plugin_seeds:
+        copy(source, stage / relative)
+
+    unresolved = set()
+    while queue:
+        binary = queue.pop()
+        for dependency in imported_dlls(binary):
+            key = dependency.lower()
+            if key in staged:
+                continue
+            source = candidates.get(key)
+            if source is None:
+                unresolved.add(dependency)
+                continue
+            copy(source, stage / source.name)
+
+    # Windows system DLLs are intentionally unresolved. The relocated smoke test
+    # runs with only System32 and this directory available, so any missing
+    # redistributable dependency still fails the build.
+    if unresolved:
+        print("Runtime DLLs supplied by Windows:", ", ".join(sorted(unresolved, key=str.lower)))
+
+
+def copy_notices(source, destination):
+    """Retain redistributable notices without shipping CMake files, docs or locales."""
+    if not source.is_dir():
+        return
+    names = ("license", "copying", "copyright", "notice")
+    for notice in source.rglob("*"):
+        if not notice.is_file():
+            continue
+        lower = notice.name.lower()
+        if not (lower.startswith(names) or lower.endswith(".spdx.json")):
+            continue
+        relative = notice.relative_to(source)
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(notice, target)
 
 
 def main():
@@ -131,36 +199,46 @@ def main():
     build(ROOT / "build-upstream", "plumdeck-mixxx-engine-host")
     configure(ROOT, ROOT / "build-seam", f"-DCMAKE_PREFIX_PATH={all_prefixes}")
     build(ROOT / "build-seam")
-    # Stage a complete relocatable directory. Copy all runtime DLLs from the
-    # pinned prefixes; no PATH entry on the end user's machine is needed.
+    # Stage a complete relocatable directory. The dependency archives contain
+    # every Mixxx/Qt development DLL and more than 100 MiB of GUI resources;
+    # this headless host must ship only its recursive PE closure and the Qt
+    # plugins it loads by name.
     stage = ROOT / "stage" / "PlumdeckMixxxHost"
+    shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "build-upstream/plumdeck-mixxx-engine-host.exe", stage)
-    for location in (prefix / "bin", extra / "bin", ldc / "install/bin"):
-        for dll in location.glob("*.dll"):
-            shutil.copy2(dll, stage)
-    deploy = next(prefix.rglob("windeployqt.exe"))
-    run(deploy, "--release", "--no-translations", "--compiler-runtime", stage / "plumdeck-mixxx-engine-host.exe")
-    offscreen = next(prefix.rglob("qoffscreen.dll"))
-    (stage / "platforms").mkdir(exist_ok=True)
-    shutil.copy2(offscreen, stage / "platforms/qoffscreen.dll")
-    shutil.copytree(upstream / "res", stage / "res", dirs_exist_ok=True)
-    shutil.copytree(extra / "share", stage / "licenses/junction", dirs_exist_ok=True)
-    shutil.copytree(prefix / "share", stage / "licenses/mixxx-dependencies", dirs_exist_ok=True)
+    executable = ROOT / "build-upstream/plumdeck-mixxx-engine-host.exe"
+    plugins = [
+        (Path("platforms/qoffscreen.dll"), next(prefix.rglob("qoffscreen.dll"))),
+        (Path("sqldrivers/qsqlite.dll"), next(prefix.rglob("qsqlite.dll"))),
+        (Path("tls/qschannelbackend.dll"), next(prefix.rglob("qschannelbackend.dll"))),
+    ]
+    search_roots = [prefix / "bin", extra / "bin", ldc / "install/bin"]
+    # windeployqt previously copied vc_redist.x64.exe into the application but
+    # nothing executed it. Copy the imported VC runtime DLLs app-locally instead.
+    redist = os.environ.get("VCToolsRedistDir")
+    if redist:
+        search_roots.append(Path(redist) / "x64")
+    stage_runtime_closure(executable, stage, search_roots, plugins)
+
+    # The host creates no window, skin, library or controller subsystem. Effects
+    # and the settings schema are the only upstream runtime resources it uses.
+    shutil.copytree(upstream / "res/effects", stage / "res/effects")
+    shutil.copy2(upstream / "res/schema.xml", stage / "res/schema.xml")
+
+    copy_notices(extra / "share", stage / "licenses/junction")
+    copy_notices(prefix / "share", stage / "licenses/mixxx-dependencies")
     shutil.copy2(upstream / "LICENSE", stage / "LICENSE-Mixxx")
     # These libraries are built outside the Mixxx/vcpkg prefixes. Retain their
     # notices as well, including libdatachannel's bundled dependencies.
     for name, source in (("SoundTouch", st / "source"), ("RubberBand", rb / "source"),
                          ("libdatachannel", ldc)):
-        for notice in source.rglob("*"):
-            relative = notice.relative_to(source)
-            if any(part.startswith(("build", "install", ".git")) for part in relative.parts):
-                continue
-            if notice.is_file() and notice.name.lower().startswith(("license", "copying", "copyright", "notice")):
-                destination = stage / "licenses" / name / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(notice, destination)
+        copy_notices(source, stage / "licenses" / name)
     shutil.copy2(ROOT / "dependency-versions.json", stage / "dependency-versions.json")
+    staged_files = [path for path in stage.rglob("*") if path.is_file()]
+    staged_bytes = sum(path.stat().st_size for path in staged_files)
+    print(f"Staged Windows native engine: {len(staged_files)} files, {staged_bytes / 1024 / 1024:.1f} MiB")
+    if len(staged_files) > 500 or staged_bytes > 160 * 1024 * 1024:
+        raise RuntimeError("Windows native stage unexpectedly contains development or GUI payloads")
     os.environ["PATH"] = str(stage) + os.pathsep + os.environ["PATH"]
     run("ctest", "--test-dir", ROOT / "build-seam", "--output-on-failure")
     run("node", ROOT / "scripts/smoke-bundle.mjs", stage / "plumdeck-mixxx-engine-host.exe")
