@@ -6,15 +6,46 @@ import sys
 import tempfile
 import time
 
+SYSTEM32 = Path(os.environ["SystemRoot"]) / "System32"
+MSIEXEC = SYSTEM32 / "msiexec.exe"
+POWERSHELL = SYSTEM32 / "WindowsPowerShell/v1.0/powershell.exe"
 
-def run_tree(command, timeout):
-    """Run a command and forcibly terminate its whole process tree if it overruns."""
+
+def dump_installer_state(log):
+    """Best-effort snapshot when an msiexec call refuses to return."""
+    try:
+        subprocess.run([str(SYSTEM32 / "tasklist.exe"), "/v", "/fi", "imagename eq msiexec.exe"], timeout=30)
+    except Exception as error:  # noqa: BLE001 - diagnostics only
+        print(f"tasklist failed: {error}", file=sys.stderr)
+    script = (
+        f"if (Test-Path -LiteralPath '{log}') {{ Get-Content -LiteralPath '{log}' -Tail 250 }} "
+        "else { 'no install.log was created' }; "
+        "Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='MsiInstaller';"
+        "StartTime=(Get-Date).AddMinutes(-30)} -ErrorAction SilentlyContinue | "
+        "Select-Object -First 30 TimeCreated,Id,LevelDisplayName,Message | Format-List"
+    )
+    try:
+        subprocess.run([str(POWERSHELL), "-NoProfile", "-NonInteractive", "-Command", script], timeout=90)
+    except Exception as error:  # noqa: BLE001 - diagnostics only
+        print(f"state dump failed: {error}", file=sys.stderr)
+
+
+def run_msi(command, timeout, log=None):
+    """Run a pre-quoted msiexec command line and force-kill its tree on overrun.
+
+    The command is passed as a single string so msiexec receives exactly the
+    quoting we intend: property values such as INSTALLDIR="C:\\dir with spaces"
+    must keep the quotes *around the value*, which a subprocess argument list
+    cannot express (it quotes the whole "INSTALLDIR=..." token instead, and
+    msiexec then splits the value on the first space).
+    """
     process = subprocess.Popen(command)
     try:
         return process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32/taskkill.exe"),
-            "/PID", str(process.pid), "/T", "/F"], capture_output=True)
+        if log is not None:
+            dump_installer_state(log)
+        subprocess.run([str(SYSTEM32 / "taskkill.exe"), "/PID", str(process.pid), "/T", "/F"], capture_output=True)
         raise
     finally:
         if process.poll() is None:
@@ -23,19 +54,16 @@ def run_tree(command, timeout):
 
 def main():
     repository = Path(__file__).resolve().parents[1]
-    installer = next((repository / "src-tauri/target/release/bundle/msi").glob("*.msi"))
-    msiexec = str(Path(os.environ["SystemRoot"]) / "System32/msiexec.exe")
+    installer = next((repository / "src-tauri/target/release/bundle/msi").glob("*.msi")).resolve()
     with tempfile.TemporaryDirectory(prefix="Plumdeck インストール ") as temporary:
         directory = Path(temporary) / "Application files"
         log = Path(temporary) / "install.log"
+        install = (f'"{MSIEXEC}" /i "{installer}" /qn /norestart '
+                   f'INSTALLDIR="{directory}" /l*v "{log}"')
+        uninstall = f'"{MSIEXEC}" /x "{installer}" /qn /norestart'
         try:
             started = time.monotonic()
-            # The bundled backend and engine payload is ~700 MB, so a silent install
-            # legitimately runs for several minutes on a CI runner; keep the ceiling
-            # bounded but generous and avoid the extra-debug "x" log flag that stalls
-            # large installs by flushing after every file operation.
-            returncode = run_tree([msiexec, "/i", str(installer), "/qn", "/norestart",
-                f"INSTALLDIR={directory}", "/l*v", str(log)], timeout=900)
+            returncode = run_msi(install, timeout=600, log=log)
             print(f"Installer finished in {time.monotonic() - started:.0f}s with code {returncode}")
             if returncode not in (0, 3010):
                 raise RuntimeError(f"Installer exited: {returncode}")
@@ -55,7 +83,7 @@ def main():
             raise
         finally:
             try:
-                run_tree([msiexec, "/x", str(installer), "/qn", "/norestart"], timeout=300)
+                run_msi(uninstall, timeout=300)
             except (subprocess.TimeoutExpired, OSError) as error:
                 print(f"Cleanup uninstall did not complete: {error}", file=sys.stderr)
 
