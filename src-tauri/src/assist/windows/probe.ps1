@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+try {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @'
@@ -108,3 +109,8 @@ while ($queue.Count -gt 0) {
 $paths=@(); $pathsError=$null
 try { $paths=@([PlumdeckObservation]::AudioPaths($process.Id)) } catch { $pathsError=$_.Exception.Message }
 @{running=$true;appPath=$process.Path;right=$right;nodes=@($nodes.ToArray());paths=$paths;pathsError=$pathsError;truncated=$truncated} | ConvertTo-Json -Depth 6 -Compress
+
+} catch {
+    @{running=$false;error=$_.Exception.Message;nodes=@();paths=@()} | ConvertTo-Json -Depth 4 -Compress
+    exit 1
+}

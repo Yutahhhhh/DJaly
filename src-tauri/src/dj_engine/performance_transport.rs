@@ -10,6 +10,8 @@ mod windows_pipe {
         os::windows::io::AsRawHandle, time::{Duration, Instant}};
     #[link(name = "kernel32")]
     extern "system" {
+        fn ReadFile(handle: *mut std::ffi::c_void, buffer: *mut u8, length: u32,
+            read: *mut u32, overlapped: *mut std::ffi::c_void) -> i32;
         fn SetNamedPipeHandleState(handle: *mut std::ffi::c_void, mode: *const u32,
             count: *const u32, timeout: *const u32) -> i32;
     }
@@ -47,7 +49,14 @@ mod windows_pipe {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             let start = Instant::now();
             loop {
-                match self.file.read(bytes) {
+                let mut count = 0u32;
+                // std::fs::File maps ERROR_NO_DATA to EOF, losing the distinction
+                // between an empty nonblocking pipe and a disconnected peer.
+                let result = if unsafe { ReadFile(self.file.as_raw_handle(), bytes.as_mut_ptr(),
+                    bytes.len().min(u32::MAX as usize) as u32, &mut count, std::ptr::null_mut()) } != 0 {
+                    Ok(count as usize)
+                } else { Err(io::Error::last_os_error()) };
+                match result {
                     Err(e) if e.raw_os_error() == Some(232) => {
                         if self.nonblocking.get() {
                             return Err(io::ErrorKind::WouldBlock.into());

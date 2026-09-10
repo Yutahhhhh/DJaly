@@ -10,6 +10,14 @@ struct JunctionInvite(Mutex<Option<String>>);
 fn valid_junction_invite(value: &str) -> bool {
     value.len() <= 8192 && value.starts_with("plumdeck-junction://join?") && !value.chars().any(char::is_control)
 }
+fn receive_junction_invite(app: &tauri::AppHandle, value: &str) {
+    if !valid_junction_invite(value) { return; }
+    if let Some(state) = app.try_state::<JunctionInvite>() {
+        if let Ok(mut pending) = state.0.lock() { *pending = Some(value.to_string()); }
+    }
+    let _ = app.emit("junction://invite", value);
+    if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
+}
 #[tauri::command]
 fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String> {
     state.0.lock().ok()?.take()
@@ -18,13 +26,23 @@ use tauri_plugin_shell::process::{CommandEvent, CommandChild};
 #[derive(Default)]
 struct BackendChild(Mutex<Option<CommandChild>>);
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 mod assist;
 mod dj_engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        for value in args { receive_junction_invite(app, &value); }
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus();
+        }
+    }));
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .manage(BackendChild::default())
         .plugin(tauri_plugin_shell::init())
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
@@ -122,6 +140,10 @@ pub fn run() {
             junction_exchange_files::junction_write_exchange_file,
         ])
         .setup(|app| {
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() { receive_junction_invite(&handle, url.as_str()); }
+            });
             for arg in env::args().skip(1) { if valid_junction_invite(&arg) { if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(arg); } } }
             app.manage(dj_engine::midi::controller(app.handle().clone()));
             app.manage(dj_engine::jog_display::JogDisplay::new());
@@ -204,14 +226,7 @@ pub fn run() {
                     api.prevent_exit(); let _ = app.emit("junction://close-blocked", ());
                 }
             }
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            if let tauri::RunEvent::Opened { urls } = event {
-                for url in urls { let value = url.to_string(); if valid_junction_invite(&value) {
-                    if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(value.clone()); }
-                    let _ = app.emit("junction://invite", value);
-                    if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
-                }}
-            }
+
         });
 }
 

@@ -1,6 +1,6 @@
 //! Read-only Windows UI Automation and open-file observation, in a bounded child.
 use super::{AssistSnapshot, decks};
-use std::{io::{Read, Write}, os::windows::process::CommandExt, process::{Command, Stdio},
+use std::{io::Read, os::windows::process::CommandExt, process::{Command, Stdio},
     sync::Mutex, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use serde::Deserialize;
 
@@ -12,6 +12,7 @@ struct Node { role: String, value: String, x:f64, y:f64, width:f64, height:f64 }
 #[serde(rename_all="camelCase")]
 struct Probe {
     running: bool,
+    error: Option<String>,
     app_path: Option<String>,
     #[serde(default)] right: f64,
     #[serde(default)] nodes: Vec<Node>,
@@ -62,11 +63,10 @@ impl AssistState {
 fn probe() -> Result<Probe,String> {
     let system=std::env::var_os("SystemRoot").ok_or("Windows システムフォルダーを取得できません")?;
     let shell=std::path::PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let mut child=Command::new(shell).args(["-NoLogo","-NoProfile","-NonInteractive","-Command","-"])
-        .creation_flags(0x08000000).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+    let mut child=Command::new(shell).args(["-NoLogo","-NoProfile","-NonInteractive","-Command",include_str!("probe.ps1")])
+        .creation_flags(0x08000000).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|e|format!("Windows UI 読み取りを開始できません: {e}"))?;
     let result=(|| {
-        child.stdin.take().ok_or("UI 読み取りの入力がありません")?.write_all(include_bytes!("probe.ps1")).map_err(|e|e.to_string())?;
         let output=child.stdout.take().ok_or("UI 読み取りの出力がありません")?;
         let (send,receive)=std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
@@ -77,7 +77,9 @@ fn probe() -> Result<Probe,String> {
         let output=receive.recv_timeout(Duration::from_secs(8)).map_err(|_|"Windows UI 読み取りがタイムアウトしました")?
             .map_err(|e|e.to_string())?;
         if output.len()>4*1024*1024 { return Err("UI 読み取りが上限を超えました".into()); }
-        serde_json::from_slice(&output).map_err(|e|format!("Windows UI 情報を取得できません: {e}"))
+        let result: Probe = serde_json::from_slice(&output).map_err(|e|format!("Windows UI 情報を取得できません: {e}"))?;
+        if let Some(error) = result.error.as_ref() { return Err(format!("Windows UI 読み取り: {error}")); }
+        Ok(result)
     })();
     let _=child.kill(); let _=child.wait();
     result

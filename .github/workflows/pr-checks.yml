@@ -85,3 +85,10 @@ jobs:
           # Unit tests compile the shell independently; packaging validates real resources.
           TAURI_CONFIG: '{"bundle":{"resources":[]}}'
         run: cargo test --lib
+
+      - name: Preserve resolved Rust lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cargo-lock
+          path: src-tauri/Cargo.lock
