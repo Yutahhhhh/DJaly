@@ -135,7 +135,7 @@ class PerformanceMetadataAppService:
         track_id: int,
         request: RekordboxCueImportRequest,
     ) -> dict[str, Any]:
-        """Replace only DJaly's cues from rekordbox, preserving loops and grid."""
+        """Replace only plumdeck's cues from rekordbox, preserving loops and grid."""
         from infra.rekordbox_cues import read_hot_cues
 
         track = self._track(track_id)

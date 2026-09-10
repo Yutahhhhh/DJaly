@@ -16,7 +16,7 @@ import { globSync } from "node:fs";
  * リポジトリにある esbuild で束ねてから読み込む。
  */
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
-const workDir = mkdtempSync(path.join(tmpdir(), "djaly-fx-"));
+const workDir = mkdtempSync(path.join(tmpdir(), "plumdeck-fx-"));
 const bundle = path.join(workDir, "client.mjs");
 const esbuildBin = globSync(path.join(repoRoot, "node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild"))[0];
 assert.ok(esbuildBin, "esbuild binary not found in the pnpm store");

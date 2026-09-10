@@ -35,7 +35,7 @@ class SettingAppService:
     def update_setting(self, setting_update: SettingUpdate) -> Dict[str, Any]:
         if is_retired_llm_setting_key(setting_update.key):
             raise ValueError(
-                "Djaly no longer stores LLM credentials or model settings; "
+                "plumdeck no longer stores LLM credentials or model settings; "
                 "AI reasoning is provided by the connected MCP client."
             )
         db_setting = self.repository.get_by_key(setting_update.key)

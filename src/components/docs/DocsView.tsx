@@ -7,7 +7,7 @@ import './docs.css';
 export function DocsView() {
   const [query, setQuery] = useState('');
   const [topicId, setTopicId] = useState<string | null>(() => {
-    const saved = sessionStorage.getItem('djaly.docs.topic');
+    const saved = sessionStorage.getItem('plumdeck.docs.topic');
     return docTopics.some(topic => topic.id === saved) ? saved : null;
   });
   const [zoom, setZoom] = useState(false);
@@ -23,8 +23,8 @@ export function DocsView() {
   }, [query]);
   const navigate = (id: string | null) => { setTopicId(id); setQuery(''); setZoom(false); };
   useEffect(() => {
-    if (topicId) sessionStorage.setItem('djaly.docs.topic', topicId);
-    else sessionStorage.removeItem('djaly.docs.topic');
+    if (topicId) sessionStorage.setItem('plumdeck.docs.topic', topicId);
+    else sessionStorage.removeItem('plumdeck.docs.topic');
     scroller.current?.scrollTo({ top: 0 });
     heading.current?.focus({ preventScroll: true });
   }, [topicId]);
@@ -51,7 +51,7 @@ export function DocsView() {
         <nav aria-label="関連トピック" className="docs-related"><h2>あわせて読む</h2><div className="docs-grid">{docTopics.filter(item => topic.related.includes(item.id)).map(card)}</div></nav>
         <Dialog open={zoom} onOpenChange={setZoom}><DialogContent className="docs-image-dialog"><DialogTitle>{topic.title}</DialogTitle><DialogDescription>{topic.caption} 説明用データを表示しています。</DialogDescription><div><img src={`/docs/${topic.image}.png`} alt={topic.caption}/></div></DialogContent></Dialog>
       </article> : <>
-        <p className="docs-eyebrow">DJALY GUIDE</p><h1 ref={heading} tabIndex={-1}>やりたいことから、探す。</h1><p className="docs-lead">楽曲の整理からDJプレイ、Junctionでの交代まで。<br/>必要な操作を、画面と手順で確認できます。</p>
+        <p className="docs-eyebrow">plumdeck GUIDE</p><h1 ref={heading} tabIndex={-1}>やりたいことから、探す。</h1><p className="docs-lead">楽曲の整理からDJプレイ、Junctionでの交代まで。<br/>必要な操作を、画面と手順で確認できます。</p>
         <div className="docs-start"><BookOpen aria-hidden="true" size={24}/><div><strong>初めて使う方へ</strong><p>取り込みからプレイまでの流れを確認しましょう。</p></div><button className="docs-link" onClick={() => navigate('start')}>はじめる<ArrowRight size={16} aria-hidden="true"/></button></div>
         <nav className="docs-categories" aria-label="トピックの分類">{docGroups.map((group, index) => <a key={group} href={`#docs-group-${index}`}>{group}</a>)}</nav>
         {docGroups.map((group, index) => <section className="docs-group" id={`docs-group-${index}`} key={group}><h2>{group}</h2><div className="docs-grid">{docTopics.filter(item => item.group === group).map(card)}</div></section>)}

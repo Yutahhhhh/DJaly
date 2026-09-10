@@ -4,8 +4,8 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {writeFile} from 'node:fs/promises';
 import path from 'node:path';
-const {webkit}=await import(process.env.DJALY_PLAYWRIGHT_MODULE||'playwright');
-const child=spawn(process.env.DJALY_TEST_HOST||path.resolve('native/mixxx-engine-host/build-upstream/djaly-mixxx-engine-host'),[],{env:{...process.env,DJALY_MIXXX_OUTPUT_DEVICE:'BlackHole 2ch'}});
+const {webkit}=await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE||'playwright');
+const child=spawn(process.env.PLUMDECK_TEST_HOST||path.resolve('native/mixxx-engine-host/build-upstream/plumdeck-mixxx-engine-host'),[],{env:{...process.env,PLUMDECK_MIXXX_OUTPUT_DEVICE:'BlackHole 2ch'}});
 let id=0,hello,stderr='';const pending=new Map(),commands=[];
 const exited=new Promise(r=>child.once('exit',code=>r(code)));
 child.stderr.on('data',data=>{stderr+=data;});
@@ -53,11 +53,11 @@ try{
   await page.mouse.move(box.x+box.width/2+25,box.y+box.height/2,{steps:10});await page.mouse.up();await page.keyboard.up('Alt');
   await page.getByRole('button',{name:'Ⅱ',exact:true}).click();
   await page.waitForFunction(()=>!JSON.parse(document.querySelector('#result').textContent).playing);
-  await page.screenshot({path:`/tmp/djaly-real-grid-${track}.png`});
+  await page.screenshot({path:`/tmp/plumdeck-real-grid-${track}.png`});
   assert.equal(await page.locator('#error').textContent(),'');assert.deepEqual(errors,[]);
   console.log(JSON.stringify({track,codec:bundle[track].codec,saved:(await result()).saved,consoleErrors:errors.length}));
   await page.close();
  }
 }finally{
- await browser.close();child.stdin.end();assert.equal(await exited,0);await writeFile('/tmp/djaly-real-ui-native-stderr.log',stderr);
+ await browser.close();child.stdin.end();assert.equal(await exited,0);await writeFile('/tmp/plumdeck-real-ui-native-stderr.log',stderr);
 }

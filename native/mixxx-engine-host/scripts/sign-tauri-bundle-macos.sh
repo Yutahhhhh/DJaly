@@ -2,15 +2,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
-bundle="${1:-$repo_root/src-tauri/target/release/bundle/macos/Djaly.app}"
+bundle="${1:-$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app}"
 case "$bundle" in
-  "$repo_root"/src-tauri/target/debug/bundle/macos/Djaly.app|"$repo_root"/src-tauri/target/release/bundle/macos/Djaly.app|"$repo_root"/src-tauri/target/release/bundle/macos/"Djaly Preview.app") ;;
+  "$repo_root"/src-tauri/target/debug/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/"plumdeck Preview.app") ;;
   *) echo "Refusing to sign an unexpected bundle path: $bundle" >&2; exit 2 ;;
 esac
 
-nested="$bundle/Contents/Resources/DJalyMixxxHost.app"
-staged="$repo_root/native/mixxx-engine-host/stage/DJalyMixxxHost.app"
-[[ -x "$staged/Contents/MacOS/djaly-mixxx-engine-host" ]] || {
+nested="$bundle/Contents/Resources/PlumdeckMixxxHost.app"
+staged="$repo_root/native/mixxx-engine-host/stage/PlumdeckMixxxHost.app"
+[[ -x "$staged/Contents/MacOS/plumdeck-mixxx-engine-host" ]] || {
   echo "Staged Mixxx host is missing: $staged" >&2
   exit 1
 }
@@ -18,7 +18,7 @@ staged="$repo_root/native/mixxx-engine-host/stage/DJalyMixxxHost.app"
 # Tauri's generic resource copier dereferences framework symlinks. Install the
 # already-audited nested app after bundling with ditto, which preserves the
 # framework topology and extended attributes. `nested` is an exact generated
-# path beneath the validated Djaly.app target above.
+# path beneath the validated plumdeck.app target above.
 rm -rf -- "$nested"
 /usr/bin/ditto "$staged" "$nested"
 
@@ -33,6 +33,6 @@ codesign --verify --deep --strict "$nested"
 codesign --verify --deep --strict "$bundle"
 echo "Verified Performance bundle: $bundle"
 
-if [[ "$bundle" == "$repo_root/src-tauri/target/release/bundle/macos/Djaly.app" ]]; then
+if [[ "$bundle" == "$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app" ]]; then
   "$repo_root/native/mixxx-engine-host/scripts/repack-performance-dmg-macos.sh"
 fi

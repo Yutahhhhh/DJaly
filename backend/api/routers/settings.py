@@ -36,7 +36,7 @@ def export_csv(session: Session = Depends(get_session)):
     return Response(
         content=csv_content,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=djaly_library.csv"}
+        headers={"Content-Disposition": "attachment; filename=plumdeck_library.csv"}
     )
 
 # --- CSV Import (Analyze) ---
@@ -80,7 +80,7 @@ def export_metadata(session: Session = Depends(get_session)):
     return Response(
         content=csv_content,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=djaly_metadata.csv"}
+        headers={"Content-Disposition": "attachment; filename=plumdeck_metadata.csv"}
     )
 
 @router.post("/api/settings/metadata/import/analyze", response_model=MetadataImportAnalysisResult)

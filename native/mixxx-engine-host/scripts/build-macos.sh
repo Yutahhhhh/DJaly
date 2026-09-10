@@ -40,5 +40,5 @@ cmake -S "$host_root/upstream" -B "$host_root/build-upstream" -G Ninja \
   -DBROADCAST=OFF -DQTKEYCHAIN=OFF -DHID=OFF -DBULK=OFF -DVINYLCONTROL=OFF \
   -DFFMPEG=OFF -DBATTERY=OFF -DOPUS=OFF -DMAD=OFF -DMODPLUG=OFF -DLILV=OFF -DWAVPACK=OFF \
   2>&1 | tee "$host_root/logs/configure.log"
-cmake --build "$host_root/build-upstream" --target djaly-mixxx-engine-host --parallel "${DJALY_BUILD_JOBS:-6}" \
+cmake --build "$host_root/build-upstream" --target plumdeck-mixxx-engine-host --parallel "${PLUMDECK_BUILD_JOBS:-6}" \
   2>&1 | tee "$host_root/logs/build.log"

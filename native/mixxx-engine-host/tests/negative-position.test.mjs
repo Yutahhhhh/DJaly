@@ -8,8 +8,8 @@ import test from 'node:test';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 test('negative transport: scratch across zero and resume on the audio clock', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-negative-'));
-  const rate = Number(process.env.DJALY_TIMING_SOURCE_RATE || 44100), wave = Buffer.alloc(44 + rate * 10 * 4);
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-negative-'));
+  const rate = Number(process.env.PLUMDECK_TIMING_SOURCE_RATE || 44100), wave = Buffer.alloc(44 + rate * 10 * 4);
   wave.write('RIFF'); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8);
   wave.writeUInt32LE(16, 16); wave.writeUInt16LE(1, 20); wave.writeUInt16LE(2, 22);
   wave.writeUInt32LE(rate, 24); wave.writeUInt32LE(rate * 4, 28);
@@ -19,8 +19,8 @@ test('negative transport: scratch across zero and resume on the audio clock', { 
     wave.writeInt16LE(v, 44 + n * 4); wave.writeInt16LE(v, 46 + n * 4);
   }
   const fixture = path.join(directory, 'tone.wav'); await writeFile(fixture, wave);
-  const child = spawn(process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host'), [], {
-    env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory, DJALY_MIXXX_TIMING_TRACE: '1' },
+  const child = spawn(process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host'), [], {
+    env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory, PLUMDECK_MIXXX_TIMING_TRACE: '1' },
   });
   let id = 0, hello, stderr = '';
   const pending = new Map();

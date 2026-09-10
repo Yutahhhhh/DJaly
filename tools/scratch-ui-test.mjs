@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-const engines = await import(process.env.DJALY_PLAYWRIGHT_MODULE || 'playwright');
-const name = process.env.DJALY_TEST_BROWSER || 'webkit';
+const engines = await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE || 'playwright');
+const name = process.env.PLUMDECK_TEST_BROWSER || 'webkit';
 const browser = await engines[name].launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 2 });
@@ -44,6 +44,6 @@ try {
   await page.mouse.move(vb.x + 40, vb.y + 250); await page.mouse.down(); await page.mouse.move(vb.x + 40, vb.y + 300, {steps:10}); await page.mouse.up(); await waitEnd();
   const final = await result(); assert.equal(final.seeks, 0); assert.deepEqual(errors, []);
   assert(Math.abs(final.commands.at(-1).positionMs + 50 / vb.height * 8000) < 2);
-  await page.screenshot({path:`/tmp/djaly-scratch-${name}.png`});
+  await page.screenshot({path:`/tmp/plumdeck-scratch-${name}.png`});
   console.log(JSON.stringify({browser:name,passed:true,commands:final.commands.length,seeks:final.seeks}));
 } finally { await browser.close(); }

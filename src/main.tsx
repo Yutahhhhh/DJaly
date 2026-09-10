@@ -38,7 +38,7 @@ class ErrorBoundary extends React.Component<
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="system" storageKey="djaly-ui-theme">
+      <ThemeProvider defaultTheme="system" storageKey="plumdeck-ui-theme">
         <App />
       </ThemeProvider>
     </ErrorBoundary>

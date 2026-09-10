@@ -17,21 +17,21 @@ export type MidiStatus = { enabled: boolean; connected: boolean; generation: num
 const OFF: MidiStatus = { enabled: false, connected: false, generation: 0, device: null, received: 0, sent: 0, error: null };
 export function useDdj1000(actions: ControllerActions) {
   const latest = useRef(actions); latest.current = actions;
-  const [enabled, setEnabled] = useState(() => localStorage.getItem("djaly.ddj1000.enabled") !== "false");
+  const [enabled, setEnabled] = useState(() => localStorage.getItem("plumdeck.ddj1000.enabled") !== "false");
   const [status, setStatus] = useState<MidiStatus>(OFF);
   const [retry, setRetry] = useState(0);
   const lightTestUntil = useRef(0);
   const [sensitivity, setSensitivity] = useState(() => {
-    return jogSetting(Number(localStorage.getItem("djaly.ddj1000.jogSensitivity") ?? JOG_DEFAULT),localStorage.getItem("djaly.ddj1000.jogSensitivityVersion"));
+    return jogSetting(Number(localStorage.getItem("plumdeck.ddj1000.jogSensitivity") ?? JOG_DEFAULT),localStorage.getItem("plumdeck.ddj1000.jogSensitivityVersion"));
   });
   const sensitivityRef = useRef(sensitivity); sensitivityRef.current = sensitivity;
-  useEffect(() => { localStorage.setItem("djaly.ddj1000.enabled", String(enabled)); }, [enabled]);
+  useEffect(() => { localStorage.setItem("plumdeck.ddj1000.enabled", String(enabled)); }, [enabled]);
   useEffect(() => {
-    const next=jogSetting(sensitivity,localStorage.getItem("djaly.ddj1000.jogSensitivityVersion"));
+    const next=jogSetting(sensitivity,localStorage.getItem("plumdeck.ddj1000.jogSensitivityVersion"));
     sensitivityRef.current=next;
     if(next!==sensitivity) setSensitivity(next);
-    localStorage.setItem("djaly.ddj1000.jogSensitivity",String(next));
-    localStorage.setItem("djaly.ddj1000.jogSensitivityVersion","4");
+    localStorage.setItem("plumdeck.ddj1000.jogSensitivity",String(next));
+    localStorage.setItem("plumdeck.ddj1000.jogSensitivityVersion","4");
   }, [sensitivity]);
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window || "__TAURI__" in window)) { setStatus({ ...OFF, error: "MIDI接続はデスクトップ版で利用できます" }); return; }
@@ -39,12 +39,12 @@ export function useDdj1000(actions: ControllerActions) {
     let connection = OFF, engineSession = djEngineClient.getSessionId();
     const decoder = new Ddj1000Decoder();
     const runtime = new Ddj1000Runtime(djEngineClient, () => latest.current);
-    for (const deck of ["A", "B", "C", "D"] as const) runtime.setTempoRange(deck, Number(localStorage.getItem(`djaly.tempoRange.${deck}`)) || 16);
+    for (const deck of ["A", "B", "C", "D"] as const) runtime.setTempoRange(deck, Number(localStorage.getItem(`plumdeck.tempoRange.${deck}`)) || 16);
     const tempoRange = (event: Event) => {
       const detail = (event as CustomEvent<{ deck: import("@/types/dj-engine").DeckId; range: number }>).detail;
       runtime.setTempoRange(detail.deck, detail.range);
     };
-    window.addEventListener("djaly:controller-tempo-range", tempoRange);
+    window.addEventListener("plumdeck:controller-tempo-range", tempoRange);
     const sent = new Map<string, number>();
     let refreshFeedbackAt = 0;
     let reading = false;
@@ -62,13 +62,13 @@ export function useDdj1000(actions: ControllerActions) {
         const snapshot = djEngineClient.getState().snapshot;
         if (next.nativePerformance?.active) for (const [i,deck] of (["A","B","C","D"] as const).entries()) {
           const range=next.nativePerformance.ranges?.[i];
-          if([6,10,16,75].includes(range)&&range!==Number(localStorage.getItem(`djaly.tempoRange.${deck}`))){
+          if([6,10,16,75].includes(range)&&range!==Number(localStorage.getItem(`plumdeck.tempoRange.${deck}`))){
             runtime.setTempoRange(deck,range);latest.current.library({control:'tempoRange',deck,value:range});
           }
           const cue = next.nativePerformance.cues[i]; if (Number.isFinite(cue)) latest.current.cuePoints[deck] = cue;
         }
         if (snapshot?.engine.capabilities.includes("performance.midi.v2") && djEngineClient.getSessionId()) {
-          const ranges = (["A","B","C","D"] as const).map(deck => Number(localStorage.getItem(`djaly.tempoRange.${deck}`)) || 16);
+          const ranges = (["A","B","C","D"] as const).map(deck => Number(localStorage.getItem(`plumdeck.tempoRange.${deck}`)) || 16);
           const token = `${djEngineClient.getSessionId()}:${sensitivityRef.current}:${ranges.join(',')}`;
           if (token !== performanceConfigured) {
             await invoke("dj_midi_performance_config", {sessionId:djEngineClient.getSessionId(),sensitivity:sensitivityRef.current,ranges,cues:(["A","B","C","D"] as const).map(deck=>latest.current.cuePoints[deck])});
@@ -152,7 +152,7 @@ export function useDdj1000(actions: ControllerActions) {
       })().catch(e => { if (live) setStatus(previous => ({ ...previous, error: String(e) })); }).finally(() => { writing = false; });
     }, 50);
     return () => {
-      live = false; clearInterval(displayTimer); clearInterval(inputTimer); clearInterval(pollTimer); clearInterval(feedbackTimer); window.removeEventListener("djaly:controller-tempo-range", tempoRange); runtime.dispose();
+      live = false; clearInterval(displayTimer); clearInterval(inputTimer); clearInterval(pollTimer); clearInterval(feedbackTimer); window.removeEventListener("plumdeck:controller-tempo-range", tempoRange); runtime.dispose();
       // The native lease closes the ports and clears feedback itself. Avoid a
       // delayed cleanup disabling the next effect after a reconnect.
       void invoke("dj_midi_status", { enabled: false }).catch(() => undefined);

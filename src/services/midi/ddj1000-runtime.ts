@@ -231,7 +231,7 @@ export class Ddj1000Runtime {
       if (control !== "fxMix" && control !== "fxState" && control !== "fxRelease" && !pressed) return;
       if (control === "fxRelease") {
         if (!snapshot.engine.capabilities.includes("mixer.beatfx.release")) {
-          if(pressed) this.actions().error("RELEASE ECHOを使うにはDjalyを再起動し、新しい音声エンジンを読み込んでください。");
+          if(pressed) this.actions().error("RELEASE ECHOを使うにはplumdeckを再起動し、新しい音声エンジンを読み込んでください。");
           return;
         }
         this.releaseFxHeld=Boolean(pressed);

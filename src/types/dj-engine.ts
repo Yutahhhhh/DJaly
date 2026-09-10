@@ -125,7 +125,7 @@ export const DJ_ENGINE_RANGES = {
 export const EQ_BANDS = ["low", "mid", "high"] as const;
 export type EqBand = (typeof EQ_BANDS)[number];
 
-/** DJaly からエンジンへ渡す曲記述子。正本は DJaly 側の DB。 */
+/** plumdeck からエンジンへ渡す曲記述子。正本は plumdeck 側の DB。 */
 export interface AssetWaveform {
   bins_per_second: number; duration_ms: number; amplitude_scale: number;
   peaks: number[]; low: number[]; mid: number[]; high: number[];

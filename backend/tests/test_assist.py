@@ -159,7 +159,7 @@ def test_an_empty_deck_is_not_treated_as_a_failure(session, mocker):
     assert deck["status"] == STATUS_EMPTY
 
 
-def test_a_track_rekordbox_knows_but_djaly_does_not_is_flagged(session, mocker, tmp_path):
+def test_a_track_rekordbox_knows_but_plumdeck_does_not_is_flagged(session, mocker, tmp_path):
     audio = tmp_path / "Unknown.mp3"
     audio.write_bytes(b"")
     patch_collection(mocker, [entry(str(audio), "Unknown", "Nobody", content_id="55")])

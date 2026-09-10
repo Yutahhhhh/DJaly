@@ -58,7 +58,7 @@ class SetlistRepository:
     def find_page(self, limit: int, offset: int) -> Dict[str, Any]:
         total = int(self.session.exec(text("SELECT count(*) FROM setlists")).one()[0])
         rows = self.session.exec(text("""
-            SELECT s.*, 'djaly' AS source, true AS editable,
+            SELECT s.*, 'plumdeck' AS source, true AS editable,
                    (SELECT count(*) FROM setlist_tracks st JOIN tracks t ON t.id=st.track_id
                     WHERE st.setlist_id=s.id) AS track_count
             FROM setlists s ORDER BY s.updated_at DESC, s.id DESC

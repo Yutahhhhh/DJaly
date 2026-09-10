@@ -14,7 +14,7 @@ import duckdb
 import numpy as np
 
 
-DB_PATH = Path("/Users/horiyuuta/Library/Application Support/Djaly/djaly.duckdb")
+DB_PATH = Path("/Users/horiyuuta/Library/Application Support/plumdeck/plumdeck.duckdb")
 SR = 22050
 SEGMENT_SECONDS = 16.0
 
@@ -169,7 +169,7 @@ def zone_features(audio: np.ndarray) -> np.ndarray:
 
 
 def analyze_track(track: Track) -> None:
-    cache_dir = Path("/tmp/djaly_house_zone_cache")
+    cache_dir = Path("/tmp/plumdeck_house_zone_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{track.id}-{int(Path(track.filepath).stat().st_mtime)}.npz"
     if cache_path.is_file():
@@ -248,7 +248,7 @@ def scan_mix_windows(source: Track, target: Track) -> list[tuple[float, float, f
 
 
 def load_tracks() -> tuple[dict[int, Track], list[Track]]:
-    rekordbox_rows = json.loads(Path("/tmp/djaly_rekordbox_meta.json").read_text(encoding="utf-8"))
+    rekordbox_rows = json.loads(Path("/tmp/plumdeck_rekordbox_meta.json").read_text(encoding="utf-8"))
     rekordbox_by_title: dict[str, list[dict]] = {}
     for item in rekordbox_rows:
         rekordbox_by_title.setdefault(norm_text(str(item.get("title") or "")), []).append(item)

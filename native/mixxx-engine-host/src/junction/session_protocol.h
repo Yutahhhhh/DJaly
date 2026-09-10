@@ -103,11 +103,11 @@ DecodeResult decodeEnvelopeBytes(const QByteArray& bytes, Envelope* out, const Q
 // ---------------------------------------------------------------------------
 
 /// Identity of an engine build, for compatibility gating. A version string
-/// alone is not enough: the same Mixxx commit with different Djaly DSP or a
+/// alone is not enough: the same Mixxx commit with different plumdeck DSP or a
 /// different checkpoint schema is not interchangeable (01, "固定依存の扱い").
 struct EngineFingerprint {
     QString mixxxCommit;
-    QString djalyBuild;
+    QString plumdeckBuild;
     int checkpointVersion = 0;
     int protocolVersion = kJunctionProtocolVersion;
     QString dspProfile;

@@ -67,7 +67,7 @@ public:
         if (target != "A" && target != "B" && target != "C" && target != "D" && target != "master" && target != "mic" && target != "sampler") return "Invalid beat FX target";
         if (p.contains("bpm") && (!number("bpm",40,300))) return "Expected BPM between 40 and 300";
         if (p.contains("auto") && !p["auto"].isBool()) return "Expected auto boolean";
-        const auto manifest = effects_->getBackendManager()->getManifest("org.djaly.effects." + effect, EffectBackendType::BuiltIn);
+        const auto manifest = effects_->getBackendManager()->getManifest("org.plumdeck.effects." + effect, EffectBackendType::BuiltIn);
         if (!manifest) return "Beat FX processor is unavailable: " + effect;
         target_ = target; mix_ = p.value("mix").toDouble(mix_); beats_ = p.value("beats").toDouble(beats_); enabled_ = p.value("enabled").toBool(enabled_);
         if (p["toggle"].toBool()) enabled_ = !enabled_;

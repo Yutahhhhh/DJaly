@@ -32,7 +32,7 @@
 #include <array>
 #include <map>
 #include <sndfile.h>
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
 #include <rtc/rtc.hpp>
 #endif
 namespace junction {
@@ -84,7 +84,7 @@ struct Runtime::Impl {
     struct Peer {QString id,name,fp;bool approved=false,hello=false,producing=false,endingAck=false;std::unique_ptr<MediaTransport> transport;QQueue<QByteArray> pending;
         qint64 lastControlAt=0;quint64 serial=0,candidateSerial=0;std::unique_ptr<MediaTransport> candidate,retiring; qint64 retireAt=0;ManualAttempt manual;};
     std::map<QString,std::unique_ptr<Peer>> peers;
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
     std::shared_ptr<rtc::WebSocket> signal;
 #endif
     QTimer timer;quint64 ticks=0,controlSeq=0;QString origin,room,name,displayName,token,recovery,invite,problem,connection="disconnected",programState="idle";
@@ -138,9 +138,9 @@ struct Runtime::Impl {
     }
     quint64 now() const {return hosting?timeline.now():timeline.frameAt(clock.toHostNanos(monotonicNanos()));}
     template<class F> void post(F fn) {QMetaObject::invokeMethod(q,std::move(fn),Qt::QueuedConnection);}
-    void fail(const QString& text) {if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction failure"<<hosting<<text;problem=text;reasons={text};ready=false;}
+    void fail(const QString& text) {if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction failure"<<hosting<<text;problem=text;reasons={text};ready=false;}
     void signalSend(QJsonObject m) {
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
         m["v"]=1;
         if(signal && signal->isOpen()) {try{signal->send(json(m).toStdString());}catch(const std::exception&){fail("接続サービスへ送信できません");}}
 #else
@@ -199,16 +199,16 @@ struct Runtime::Impl {
     }
     void updateInvite() {
         if(!hosting || room.isEmpty())return;
-        QUrl u("djaly-junction://join");QUrlQuery query;
+        QUrl u("plumdeck-junction://join");QUrlQuery query;
         query.addQueryItem("version","1");query.addQueryItem("signaling",origin);query.addQueryItem("room",room);query.addQueryItem("token",token);query.addQueryItem("host",identity->fingerprint);query.addQueryItem("expiresAt",QString::number(inviteExpiry));u.setQuery(query);invite=u.toString(QUrl::FullyEncoded);
     }
     QString connect(bool host) {
         hosting=host;QString error;
 #ifdef __APPLE__
-        if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("Djaly Junction audio session"),&sleepLease);
+        if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
 #endif
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);if(!identity)return error;
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
         rtc::WebSocket::Configuration config;config.maxMessageSize=65536;
         signal=std::make_shared<rtc::WebSocket>(config);
         QPointer<Runtime> safe=q;const auto serial=++signalGeneration;
@@ -226,7 +226,7 @@ struct Runtime::Impl {
     QString startManual(bool host) {
         manual=true;hosting=host;QString error;
 #ifdef __APPLE__
-        if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("Djaly Junction audio session"),&sleepLease);
+        if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
 #endif
         if(!MediaTransport::available())return "このビルドにはWebRTCが含まれていません";
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);
@@ -313,7 +313,7 @@ struct Runtime::Impl {
         callbacks.error=[safe,id,serial](QString failure){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,failure]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(!p)return;
             if(safe->d->manual){if(serial!=safe->d->attemptSerial(*p)||exchangeStateTerminal(p->manual.state))return;safe->d->manualSetState(*p,ExchangeState::Failed,failure,QStringLiteral("transport"));}
             else safe->d->fail(failure);},Qt::QueuedConnection);};
-        auto transport=std::make_unique<MediaTransport>(id,servers,std::move(callbacks),identity,qEnvironmentVariable("DJALY_JUNCTION_FORCE_RELAY")=="1");
+        auto transport=std::make_unique<MediaTransport>(id,servers,std::move(callbacks),identity,qEnvironmentVariable("PLUMDECK_JUNCTION_FORCE_RELAY")=="1");
         if(!transport->start(offerer,error))return {};
         return transport;
     }
@@ -677,7 +677,7 @@ struct Runtime::Impl {
             QFile file(path);if(file.size()>8*1024*1024||!file.open(QIODevice::ReadOnly))return false;
             const auto object=QJsonDocument::fromJson(file.readAll()).object();return object["schema"]==1&&object["decks"].toArray().size()==4;
         }
-        if(kind!=assetKinds.end()&&(kind->second=="djaly-ddj-dsp-v1"||kind->second=="djaly-keylock-v1"||kind->second=="djaly-fx-v1"))return backend->validateDspAsset(path);
+        if(kind!=assetKinds.end()&&(kind->second=="plumdeck-ddj-dsp-v1"||kind->second=="plumdeck-keylock-v1"||kind->second=="plumdeck-fx-v1"))return backend->validateDspAsset(path);
         SF_INFO info{};auto* f=sf_open(path.toUtf8().constData(),SFM_READ,&info);if(f)sf_close(f);return f!=nullptr;
     }
     void sendGraph(Peer& peer,const QJsonObject& value) {
@@ -734,7 +734,7 @@ struct Runtime::Impl {
                 if(o.contains("path")){auto path=o.take("path").toString();if(!path.isEmpty()){auto hash=AssetCache::hashFile(path);if(!hash.isEmpty()){
                     // The backend reuses its checkpoint slot. Keep an immutable,
                     // content-addressed copy for outstanding peer transfers.
-                    if(o["format"]=="djaly-ddj-dsp-v1"||o["format"]=="djaly-keylock-v1"||o["format"]=="djaly-fx-v1"){
+                    if(o["format"]=="plumdeck-ddj-dsp-v1"||o["format"]=="plumdeck-keylock-v1"||o["format"]=="plumdeck-fx-v1"){
                         const auto stable=transferDirectory+"/"+hash+".dsp";
                         if(!QFileInfo::exists(stable)&&!QFile::copy(path,stable)){o["assetError"]="DSP状態を保存できません";return o;}
                         path=stable;
@@ -748,7 +748,7 @@ struct Runtime::Impl {
         });
     }
     void requestAssets(Peer& source) {
-        std::function<void(QJsonValue)> walk=[&](QJsonValue v){if(v.isArray()){for(const auto& x:v.toArray())walk(x);return;}if(!v.isObject())return;auto o=v.toObject();auto hash=o["assetId"].toString();if(o["format"]=="djaly-ddj-dsp-v1"||o["format"]=="djaly-keylock-v1"||o["format"]=="djaly-fx-v1")assetKinds[hash]=o["format"].toString();if(!hash.isEmpty() && assets.find(hash)==assets.end()){auto path=cache.resolve(hash);if(path.isEmpty()){if(!requestedAssets.contains(hash)){requestedAssets.insert(hash);queue(source,"asset.request",{{"assetId",hash}});}}else assets[hash]=path;}for(auto it=o.begin();it!=o.end();++it)walk(it.value());};walk(preparedGraph);tryPrepare();
+        std::function<void(QJsonValue)> walk=[&](QJsonValue v){if(v.isArray()){for(const auto& x:v.toArray())walk(x);return;}if(!v.isObject())return;auto o=v.toObject();auto hash=o["assetId"].toString();if(o["format"]=="plumdeck-ddj-dsp-v1"||o["format"]=="plumdeck-keylock-v1"||o["format"]=="plumdeck-fx-v1")assetKinds[hash]=o["format"].toString();if(!hash.isEmpty() && assets.find(hash)==assets.end()){auto path=cache.resolve(hash);if(path.isEmpty()){if(!requestedAssets.contains(hash)){requestedAssets.insert(hash);queue(source,"asset.request",{{"assetId",hash}});}}else assets[hash]=path;}for(auto it=o.begin();it!=o.end();++it)walk(it.value());};walk(preparedGraph);tryPrepare();
     }
     void tryPrepare() {
         if(preparedGraph.isEmpty() || prepared || auth.next!=auth.local)return;
@@ -845,7 +845,7 @@ struct Runtime::Impl {
         for(auto& [id,p]:peers)if(p->approved&&(id==auth.owner||id==auth.next))queue(*p,"validation.window",{{"stage","capture"},{"startMediaFrame",u64(start)},{"handoffId",auth.handoffId}});
     }
     void beginValidation(quint64 start) {
-        if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction validation begin"<<hosting<<start<<captureEpoch.load()<<captureGeneration.load();
+        if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction validation begin"<<hosting<<start<<captureEpoch.load()<<captureGeneration.load();
         validationStart=start;validationEnd=start+12000;validationId=secureRandomHex(16);validationPcm.clear();validationReceiving.clear();validationOutgoing.clear();validationAwaitingAck.clear();
         validationSent=auth.local!=auth.owner&&auth.local!=auth.next;
         if(validationSent){validationCapture.cancel();return;}
@@ -855,7 +855,7 @@ struct Runtime::Impl {
         if(!validationStart||validationSent)return;
         auto window=validationCapture.take();if(!window)return;
         validationSent=true;auto wire=std::move(window->samples);
-        if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction validation complete"<<hosting<<wire.size();
+        if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction validation complete"<<hosting<<wire.size();
         if(hosting){validationPcm[auth.local]=wire;checkValidation();return;}
         auto p=peers.find(auth.host);if(p==peers.end())return;
         QByteArray bytes(reinterpret_cast<const char*>(wire.data()),qsizetype(wire.size()*sizeof(float)));
@@ -898,7 +898,7 @@ struct Runtime::Impl {
     void checkValidation() {
         if(!hosting||validationPcm.count(auth.owner)==0||validationPcm.count(auth.next)==0)return;
         const auto match=compareAudio(validationPcm[auth.owner],validationPcm[auth.next]);
-        if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction validation match"<<match.ready<<match.lagFrames<<match.correlation<<match.levelDb<<match.fractionalLagFrames;
+        if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction validation match"<<match.ready<<match.lagFrames<<match.correlation<<match.levelDb<<match.fractionalLagFrames;
         if(!match.ready){
             fail(QStringLiteral("音声の位置を調整中です（ずれ %1 samples）").arg(match.lagFrames));
             if(validationRound++<3){
@@ -922,7 +922,7 @@ struct Runtime::Impl {
     void tick() {
         ++ticks;if(networkProbe)testNetwork(false);if(auth.sessionId.isEmpty())return;
         manualTick();
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
         if(turnRefreshAt&&monotonicNanos()>=turnRefreshAt&&signal&&signal->isOpen()){
             turnRefreshAt=monotonicNanos()+5000000000LL;signalSend({{"type","turn.credentials"}});
         }
@@ -976,7 +976,7 @@ struct Runtime::Impl {
 #endif
         captureEnabled.store(false);tap.enable(false,false);audible.store(true);separateLocalMaster.store(true);
         peers.clear();program.close();programOpened=false;programState="stopped";
-#if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
+#if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
         if(signal){signal->resetCallbacks();signal->forceClose();signal.reset();}
 #endif
         endingAt=0;endingHost=false;reconnectAt=0;reconnectAttempts=0;turnRefreshAt=0;iceReady=false;iceServers.clear();deferredSignals.clear();identity.reset();manual=false;manualDetail.clear();manualErrorCode.clear();hostCertificatePem.clear();pinnedHostFingerprint.clear();participantRoster={};auth=Authority{};timeline=MediaTimeline{};clock.reset();q->setCaptureAnchor(UINT64_MAX,0);captureEpoch.store(1);scheduledFrame.store(UINT64_MAX);scheduledEpoch.store(0);sourceAnchor.store(UINT64_MAX);connection="disconnected";problem.clear();reasons.clear();invite.clear();ready=false;prepared=false;preparedGraph={};outgoing.clear();programEnqueuedThrough=0;backupPending.clear();backupOwner.clear();recoveryResumeFrame=0;recoveryUntil=0;ownerAudioAt=0;assetWaiters.clear();requestedAssets.clear();programPending.clear();validationReceiving.clear();validationOutgoing.clear();validationStart=0;validationCapture.reset();finalCheckpoint=false;aligned=false;graph={};
@@ -1047,7 +1047,7 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
     }
     const auto input=p["text"].toString(p["invite"].toString());
     const bool manualCreate=op=="create"&&(p["exchangeMode"]=="manual"||p["signalingUrl"].toString().isEmpty());
-    const bool manualJoin=op=="join"&&input.startsWith("DJALY-JUNCTION-");
+    const bool manualJoin=op=="join"&&input.startsWith("PLUMDECK-JUNCTION-");
     if(manualCreate||manualJoin){
         if(active())return reject("参加中のセッションを終了してから操作してください");
         if(!d->backend->available()||!MediaTransport::available())return reject("音声エンジンとWebRTCの準備が必要です");
@@ -1132,7 +1132,7 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         if(!d->backend->available()||!MediaTransport::available())return reject("音声エンジンとWebRTCの準備が必要です");
         d->displayName=sanitizeDisplayName(p["displayName"].toString());if(d->displayName.isEmpty())return reject("表示名を入力してください");
         d->origin=p["signalingUrl"].toString();d->hosting=op=="create";
-        if(!d->hosting){QUrl u(p["invite"].toString());QUrlQuery query(u);if(u.scheme()!="djaly-junction"||u.host()!="join"||query.queryItemValue("version")!="1")return reject("招待が無効です");d->origin=query.queryItemValue("signaling");d->room=query.queryItemValue("room");d->token=query.queryItemValue("token");bool ok;d->inviteExpiry=query.queryItemValue("expiresAt").toLongLong(&ok);if(!ok||d->inviteExpiry<=QDateTime::currentMSecsSinceEpoch()||!validOpaqueId(d->room)||d->token.size()<22||d->token.size()>128)return reject("招待が無効、または期限切れです");d->pendingInvite={{"host",query.queryItemValue("host")}};if(d->pendingInvite["host"].toString().size()!=64)return reject("ホストの識別情報が無効です");}
+        if(!d->hosting){QUrl u(p["invite"].toString());QUrlQuery query(u);if(u.scheme()!="plumdeck-junction"||u.host()!="join"||query.queryItemValue("version")!="1")return reject("招待が無効です");d->origin=query.queryItemValue("signaling");d->room=query.queryItemValue("room");d->token=query.queryItemValue("token");bool ok;d->inviteExpiry=query.queryItemValue("expiresAt").toLongLong(&ok);if(!ok||d->inviteExpiry<=QDateTime::currentMSecsSinceEpoch()||!validOpaqueId(d->room)||d->token.size()<22||d->token.size()>128)return reject("招待が無効、または期限切れです");d->pendingInvite={{"host",query.queryItemValue("host")}};if(d->pendingInvite["host"].toString().size()!=64)return reject("ホストの識別情報が無効です");}
         if(!validOrigin(QUrl(d->origin)))return reject("WSS接続先を設定してください。開発用WSはローカルホストで利用できます");
         if(d->hosting&&!p["adoptCurrent"].toBool()){
             bool sounding=d->backend->audio()["microphone"].toObject()["enabled"].toBool();

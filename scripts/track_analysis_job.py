@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operate the running Djaly app's durable analysis jobs through its public MCP."""
+"""Operate the running plumdeck app's durable analysis jobs through its public MCP."""
 import argparse
 import asyncio
 import json

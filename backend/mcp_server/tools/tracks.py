@@ -36,7 +36,7 @@ def search_tracks(
     """ライブラリの楽曲を条件で検索する。q はタイトル/アーティスト横断のフリーテキスト検索。
     genres/subgenres は完全一致リスト。status='verified'|'unverified'|'all' でジャンル検証状態を絞れる。
     自然言語の雰囲気は、このツールを呼ぶMCPクライアント自身がBPMや特徴量の
-    範囲へ解釈して指定すること。Djaly内ではLLM推論を行わない。"""
+    範囲へ解釈して指定すること。plumdeck内ではLLM推論を行わない。"""
     if not 1 <= limit <= 500 or offset < 0:
         raise ValueError("limit must be 1..500 and offset must be non-negative")
     with db_session() as session:

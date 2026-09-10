@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('continuous 25 Hz seek drag stays responsive and leaves playback at the final request', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-seek-drag-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-seek-drag-'));
   const fixture = path.join(directory, 'seek-drag.wav');
   const sampleRate = 44100, frameCount = sampleRate * 30;
   const wave = Buffer.alloc(44 + frameCount * 4);
@@ -24,7 +24,7 @@ test('continuous 25 Hz seek drag stays responsive and leaves playback at the fin
   }
 
   await writeFile(fixture, wave);
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: 'BlackHole 2ch' } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: 'BlackHole 2ch' } });
   let stderr = '', id = 0, hello;
   const pending = new Map();
   child.stderr.on('data', data => { stderr += data; });

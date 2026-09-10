@@ -1,6 +1,6 @@
 #include <cstring>
 // Derived from Mixxx 3ebac449 EngineBufferScaleLinear (GPL-2.0-or-later).
-#include "djaly_vinyl_scaler.h"
+#include "plumdeck_vinyl_scaler.h"
 #include "vinyl_convolution.h"
 
 #include <QtDebug>
@@ -11,9 +11,9 @@
 #include "util/math.h"
 #include "util/sample.h"
 
-DjalyVinylScaler::DjalyVinylScaler(ReadAheadManager *pReadAheadManager)
+PlumdeckVinylScaler::PlumdeckVinylScaler(ReadAheadManager *pReadAheadManager)
     : EngineBufferScaleLinear(pReadAheadManager), m_pReadAheadManager(pReadAheadManager),
-      m_bufferInt(SampleUtil::alloc(kiDjalyScaleReadAheadLength)),
+      m_bufferInt(SampleUtil::alloc(kiplumdeckScaleReadAheadLength)),
       m_bufferIntSize(0),
       m_bClear(false),
       m_dRate(1.0),
@@ -23,14 +23,14 @@ DjalyVinylScaler::DjalyVinylScaler(ReadAheadManager *pReadAheadManager)
     (void)vinyl::kernels(); // Construct shared immutable banks before audio starts.
     m_floorSampleOld[0] = 0.0;
     m_floorSampleOld[1] = 0.0;
-    SampleUtil::clear(m_bufferInt, kiDjalyScaleReadAheadLength);
+    SampleUtil::clear(m_bufferInt, kiplumdeckScaleReadAheadLength);
 }
 
-DjalyVinylScaler::~DjalyVinylScaler() {
+PlumdeckVinylScaler::~PlumdeckVinylScaler() {
     SampleUtil::free(m_bufferInt);
 }
 
-void DjalyVinylScaler::setScaleParameters(double base_rate,
+void PlumdeckVinylScaler::setScaleParameters(double base_rate,
                                                  double* pTempoRatio,
                                                  double* pPitchRatio) {
     Q_UNUSED(pPitchRatio);
@@ -39,7 +39,7 @@ void DjalyVinylScaler::setScaleParameters(double base_rate,
     m_dRate = base_rate * *pTempoRatio;
 }
 
-void DjalyVinylScaler::clear() {
+void PlumdeckVinylScaler::clear() {
     m_bClear = true;
     // Clear out buffer and saved sample data
     m_bufferIntSize = 0;
@@ -50,7 +50,7 @@ void DjalyVinylScaler::clear() {
 
 // Determine if we're changing directions (scratching) and then perform
 // a stretch
-double DjalyVinylScaler::scaleBuffer(
+double PlumdeckVinylScaler::scaleBuffer(
         CSAMPLE* pOutputBuffer,
         SINT iOutputBufferSize) {
     if (iOutputBufferSize == 0) {
@@ -127,7 +127,7 @@ double DjalyVinylScaler::scaleBuffer(
 
 // Preserve upstream's per-block and through-zero rate ramps, replacing only
 // sample interpolation. ReadAheadManager retains ownership of loop mapping.
-double DjalyVinylScaler::do_scale(CSAMPLE* output,SINT samples) {
+double PlumdeckVinylScaler::do_scale(CSAMPLE* output,SINT samples) {
     const double old=m_dOldRate, next=m_dRate;
     m_dOldRate=next;
     if(samples<=0)return 0;
@@ -152,7 +152,7 @@ double DjalyVinylScaler::do_scale(CSAMPLE* output,SINT samples) {
             for(int attempt=0;attempt<4&&floor+radius>=m_bufferIntSize/2;attempt++) {
                 const double remaining=(frames-f)*speed + (frames-f)*(frames-f-1)*delta/2;
                 const SINT needed=std::max<SINT>(2,2*SINT(std::ceil(m_dCurrentFrame+remaining+radius+1))-m_bufferIntSize);
-                const SINT capacity=std::min<SINT>(kiDjalyScaleReadAheadLength-m_bufferIntSize,needed);
+                const SINT capacity=std::min<SINT>(kiplumdeckScaleReadAheadLength-m_bufferIntSize,needed);
                 if(capacity<=0)break;
                 const SINT received=m_pReadAheadManager->getNextSamples(direction,m_bufferInt+m_bufferIntSize,capacity);
                 if(received<0||received>capacity)break;m_bufferIntSize+=received;

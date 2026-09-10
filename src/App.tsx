@@ -29,11 +29,11 @@ import { ModeToggle, PlayWorkspace, type AppMode } from "@/components/play";
 function App() {
   const junction = useJunction();
   const [appMode, setAppMode] = useState<AppMode>(() => {
-    const saved = sessionStorage.getItem("djaly.appMode");
+    const saved = sessionStorage.getItem("plumdeck.appMode");
     return isAppMode(saved) ? saved : "analysis";
   });
   const [activeView, setActiveView] = useState(() =>
-    sessionStorage.getItem("djaly.activeView") ?? "dashboard"
+    sessionStorage.getItem("plumdeck.activeView") ?? "dashboard"
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isServerReady, setIsServerReady] = useState(false);
@@ -69,11 +69,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    sessionStorage.setItem("djaly.activeView", activeView);
+    sessionStorage.setItem("plumdeck.activeView", activeView);
   }, [activeView]);
 
   useEffect(() => {
-    sessionStorage.setItem("djaly.appMode", appMode);
+    sessionStorage.setItem("plumdeck.appMode", appMode);
     const from = previousMode.current;
     previousMode.current = appMode;
     if (appMode !== "analysis") pause();
@@ -158,7 +158,7 @@ function App() {
         <Updater />
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#080b11]">
           <div className="z-[80] flex h-10 shrink-0 items-center border-b border-slate-700 bg-[#11151d] px-3 shadow-md">
-            <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Djaly<span className="hidden sm:inline"> Workspace</span></span>
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">plumdeck<span className="hidden sm:inline"> Workspace</span></span>
             <JunctionBar />
             <div className="ml-auto"><ModeToggle mode={appMode} onChange={changeMode} disabled={releasingPerformanceAudio} /></div>
           </div>

@@ -59,7 +59,7 @@ QString hexOf(const unsigned char* data, unsigned int length) {
 
 } // namespace
 
-QString exchangeTextPrefix() { return QStringLiteral("DJALY-JUNCTION-1."); }
+QString exchangeTextPrefix() { return QStringLiteral("PLUMDECK-JUNCTION-1."); }
 
 QString exchangeStateName(ExchangeState state) {
     switch (state) {
@@ -203,7 +203,7 @@ std::optional<ExchangePacket> decodeExchangePacket(const QString& text, qint64 n
     if (!trimmed.startsWith(exchangeTextPrefix())) {
         // Give the version mismatch its own code: the text is well-formed for
         // some other build, and telling the user to update is actionable.
-        const auto generic = QStringLiteral("DJALY-JUNCTION-");
+        const auto generic = QStringLiteral("PLUMDECK-JUNCTION-");
         if (trimmed.startsWith(generic)) {
             bad(error, errorCode, QStringLiteral("この接続情報は別のバージョンのものです。両方のアプリを更新してください"),
                 QStringLiteral("unsupported_version"));
@@ -236,7 +236,7 @@ std::optional<ExchangePacket> decodeExchangePacket(const QString& text, qint64 n
         return std::nullopt;
     }
     if(object["engineVersion"]!="mixxx-3ebac449e7e5fe2a0186596657696e87ce8b0e56-junction-3"){
-        bad(error,errorCode,"アプリのエンジンバージョンが一致しません。両方のDjalyを同じバージョンに更新してください","unsupported_version");return std::nullopt;
+        bad(error,errorCode,"アプリのエンジンバージョンが一致しません。両方のplumdeckを同じバージョンに更新してください","unsupported_version");return std::nullopt;
     }
     const auto kind = kindFromName(object["kind"].toString());
     if (!kind) {

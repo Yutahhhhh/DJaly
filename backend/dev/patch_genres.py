@@ -353,8 +353,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "db_path",
         nargs="?",
-        default="../db_data/djaly.duckdb",
-        help="DuckDBファイルのパス (デフォルト: ../db_data/djaly.duckdb)"
+        default="../db_data/plumdeck.duckdb",
+        help="DuckDBファイルのパス (デフォルト: ../db_data/plumdeck.duckdb)"
     )
     parser.add_argument(
         "--dry-run",

@@ -4,7 +4,7 @@ from sqlmodel import Field, SQLModel
 
 
 class TrackPerformanceMetadata(SQLModel, table=True):
-    """DJ metadata owned by Djaly, independent of the transient engine state."""
+    """DJ metadata owned by plumdeck, independent of the transient engine state."""
 
     __tablename__ = "track_performance_metadata"
 

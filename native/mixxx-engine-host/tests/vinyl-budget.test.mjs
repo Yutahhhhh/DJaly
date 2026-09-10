@@ -9,12 +9,12 @@ import {parseTile,parsePcmWindow} from '../../../src/services/waveform/protocol.
 import {parseClockPoint} from '../../../src/types/deck-performance.ts';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 test('four-deck resampler callback budget at fractional, unity and high reverse rates', {timeout:60000},async()=>{
- const directory=await mkdtemp(path.join(tmpdir(),'djaly-clock-waveform-'));
+ const directory=await mkdtemp(path.join(tmpdir(),'plumdeck-clock-waveform-'));
  const rate=48000,frames=rate*60+3,bytes=Buffer.alloc(44+frames*4);
  bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(2,22);bytes.writeUInt32LE(rate,24);bytes.writeUInt32LE(rate*4,28);bytes.writeUInt16LE(4,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);bytes.writeUInt32LE(frames*4,40);
  for(let f=0;f<frames;f++){const sample=f%480===0?30000:Math.round(Math.sin(2*Math.PI*437.3*f/rate)*10000);bytes.writeInt16LE(sample,44+f*4);bytes.writeInt16LE(-sample,46+f*4);}
  const fixture=path.join(directory,'antiphase.wav');await writeFile(fixture,bytes);
- const child=spawn(process.env.DJALY_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/djaly-mixxx-engine-host'),[],{env:{...process.env,DJALY_MIXXX_OUTPUT_DEVICE:process.env.DJALY_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch',DJALY_WAVEFORM_CACHE:path.join(directory,'cache')}});
+ const child=spawn(process.env.PLUMDECK_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/plumdeck-mixxx-engine-host'),[],{env:{...process.env,PLUMDECK_MIXXX_OUTPUT_DEVICE:process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch',PLUMDECK_WAVEFORM_CACHE:path.join(directory,'cache')}});
  let hello,id=0,stderr='';const pending=new Map(),points=[];
  child.stderr.on('data',data=>stderr=(stderr+data).slice(-4000));
  createInterface({input:child.stdout}).on('line',line=>{const m=JSON.parse(line);if(m.event==='deck.clock.v2')points.push(...m.data.points);if(m.kind!=='event')pending.get(m.id)?.(m);});

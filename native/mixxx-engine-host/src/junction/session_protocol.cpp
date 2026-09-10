@@ -246,7 +246,7 @@ DecodeResult decodeEnvelopeBytes(const QByteArray& bytes, Envelope* out, const Q
 QJsonObject EngineFingerprint::toJson() const {
     return QJsonObject{
         {QStringLiteral("mixxxCommit"), mixxxCommit},
-        {QStringLiteral("djalyBuild"), djalyBuild},
+        {QStringLiteral("plumdeckBuild"), plumdeckBuild},
         {QStringLiteral("checkpointVersion"), checkpointVersion},
         {QStringLiteral("protocolVersion"), protocolVersion},
         {QStringLiteral("dspProfile"), dspProfile},
@@ -259,7 +259,7 @@ std::optional<EngineFingerprint> EngineFingerprint::fromJson(const QJsonValue& v
     EngineFingerprint fingerprint;
     QString reason;
     if (!takeBoundedString(object, "mixxxCommit", 64, &fingerprint.mixxxCommit, &reason)) return std::nullopt;
-    if (!takeBoundedString(object, "djalyBuild", 64, &fingerprint.djalyBuild, &reason)) return std::nullopt;
+    if (!takeBoundedString(object, "plumdeckBuild", 64, &fingerprint.plumdeckBuild, &reason)) return std::nullopt;
     if (!takeBoundedString(object, "dspProfile", 64, &fingerprint.dspProfile, &reason)) return std::nullopt;
     qint64 checkpoint = 0, protocol = 0;
     if (!takeBoundedInt(object, "checkpointVersion", 0, 1000000, &checkpoint, &reason)) return std::nullopt;
@@ -281,11 +281,11 @@ bool EngineFingerprint::compatibleWith(const EngineFingerprint& other, QString* 
     // A different pinned engine means different DSP behaviour even at the same
     // Mixxx version string, so this is a hard stop rather than a warning.
     if (mixxxCommit != other.mixxxCommit) {
-        if (reason) *reason = QStringLiteral("エンジンのビルドが違います。同じ版の Djaly を使ってください");
+        if (reason) *reason = QStringLiteral("エンジンのビルドが違います。同じ版の plumdeck を使ってください");
         return false;
     }
     if (dspProfile != other.dspProfile) {
-        if (reason) *reason = QStringLiteral("音声処理の構成が違います。同じ版の Djaly を使ってください");
+        if (reason) *reason = QStringLiteral("音声処理の構成が違います。同じ版の plumdeck を使ってください");
         return false;
     }
     return true;

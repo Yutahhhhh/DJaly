@@ -28,7 +28,7 @@ class DdjTremoloCheckpointProcessor final : public EffectProcessor, public junct
     TremoloEffect renderer_;
 public:
     DdjTremoloCheckpointProcessor(){routes_.reserve(1024);}
-    QString checkpointId() const override{return "org.djaly.effects.tremolo";}
+    QString checkpointId() const override{return "org.plumdeck.effects.tremolo";}
     void initialize(const QSet<ChannelHandleAndGroup>& inputs,const QSet<ChannelHandleAndGroup>& outputs,const mixxx::EngineParameters& p) override {outputs_=outputs;for(const auto& input:inputs)initializeInputChannel(input.handle(),p);}
     void initializeInputChannel(ChannelHandle input,const mixxx::EngineParameters& p) override {for(const auto& output:outputs_){if(routes_.size()>=1024)return;routes_.push_back({input.handle(),output.handle().handle(),unsigned(p.sampleRate()),std::make_unique<TremoloState>(p)});published_.store(routes_.size(),std::memory_order_release);}}
     bool hasStatesForInputChannel(ChannelHandle input) const override {for(const auto& route:routes_)if(route.input==input.handle())return true;return false;}
@@ -54,7 +54,7 @@ public:
             leaders_[deck]=ControlObject::getControl(ConfigKey(group,"sync_leader"));
         }
     }
-    static QString getId() { return QString(Processor::getId()).replace("org.mixxx.","org.djaly."); }
+    static QString getId() { return QString(Processor::getId()).replace("org.mixxx.","org.plumdeck."); }
     static EffectManifestPointer getManifest() {
         auto m=Processor::getManifest(); m->setId(getId());
         auto bpm=m->addParameter(); bpm->setId("manual_bpm"); bpm->setName("Manual BPM (0 = AUTO)");
@@ -137,7 +137,7 @@ public:
     std::atomic<size_t> publishedRoutes_{0};
     DdjBeatProcessor(){routes_.reserve(1024);}
     QSet<ChannelHandleAndGroup> outputs_;
-    QString checkpointId() const override {return QString(getId()).replace("org.mixxx.","org.djaly.");}
+    QString checkpointId() const override {return QString(getId()).replace("org.mixxx.","org.plumdeck.");}
     void initialize(const QSet<ChannelHandleAndGroup>& inputs,const QSet<ChannelHandleAndGroup>& outputs,const mixxx::EngineParameters& parameters) override {outputs_=outputs;for(const auto& input:inputs)initializeInputChannel(input.handle(),parameters);}
     void initializeInputChannel(ChannelHandle input,const mixxx::EngineParameters& parameters) override {for(const auto& output:outputs_){if(routes_.size()>=1024)return;routes_.push_back({input.handle(),output.handle().handle(),unsigned(parameters.sampleRate()),std::make_unique<DdjBeatState>(parameters)});publishedRoutes_.store(routes_.size(),std::memory_order_release);}}
     bool hasStatesForInputChannel(ChannelHandle input) const override {for(const auto& route:routes_)if(route.input==input.handle())return true;return false;}
@@ -170,8 +170,8 @@ public:
     static EffectManifestPointer getManifest() {
         EffectManifestPointer m(new EffectManifest());
         m->setId(getId()); m->setName(getId()); m->setShortName(getId());
-        m->setAuthor("Djaly"); m->setVersion("1.0");
-        m->setDescription("Djaly beat-synchronized processor");
+        m->setAuthor("plumdeck"); m->setVersion("1.0");
+        m->setDescription("plumdeck beat-synchronized processor");
         m->setAddDryToWet(false); m->setEffectRampsFromDry(false);
         auto beats=m->addParameter(); beats->setId("beats"); beats->setName("Beats");
         beats->setValueScaler(EffectManifestParameter::ValueScaler::Linear); beats->setRange(.125, .5, 2);

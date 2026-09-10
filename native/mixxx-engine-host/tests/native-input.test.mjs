@@ -8,8 +8,8 @@ const tone=async(prefix)=>{
  for(let f=0;f<frames;f++){const v=Math.round(8000*Math.sin(f*.1));wave.writeInt16LE(v,44+f*4);wave.writeInt16LE(v,46+f*4);}const file=path.join(dir,'tone.wav');await writeFile(file,wave);return file;
 };
 test('native performance channel owns MIDI edges, faders, release and disconnect without a WebView',{timeout:15000},async()=>{
- const file=await tone('djaly-native-input-');
- const child=spawn(process.env.DJALY_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/djaly-mixxx-engine-host'),[],{env:{...process.env,DJALY_MIXXX_OUTPUT_DEVICE:process.env.DJALY_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch'}});
+ const file=await tone('plumdeck-native-input-');
+ const child=spawn(process.env.PLUMDECK_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/plumdeck-mixxx-engine-host'),[],{env:{...process.env,PLUMDECK_MIXXX_OUTPUT_DEVICE:process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch'}});
  let hello,id=0,stderr='',socket;const pending=new Map(),capturedBySeq=new Map(),applied=new Map();child.stderr.on('data',b=>stderr=(stderr+b).slice(-3000));
  createInterface({input:child.stdout}).on('line',line=>{const m=JSON.parse(line);if(m.event==='deck.clock.v2')for(const p of m.data.points)if(p.deck==='A'&&p.inputOrigin==='native-midi'&&!applied.has(p.appliedInputSeq))applied.set(p.appliedInputSeq,p.nativeMonoUs);if(m.kind!=='event')pending.get(m.id)?.(m);});
  const command=async(op,params={})=>{const key=++id;const promise=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error(stderr)),3000);pending.set(key,m=>{clearTimeout(timeout);pending.delete(key);resolve(m);});});child.stdin.write(JSON.stringify({id:key,op,params,...(hello?{engineId:hello.engineId,sessionId:hello.sessionId}:{})})+'\n');const reply=await promise;assert.notEqual(reply.kind,'error',JSON.stringify(reply));return reply.data??reply;};
@@ -35,8 +35,8 @@ test('native performance channel owns MIDI edges, faders, release and disconnect
 // ネイティブ演奏入力と RPC のポインタ操作は同じデッキを共有する。遅れて届いた
 // 片方の解放が、もう片方の新しいジェスチャーを止めないことを実エンジンで確認する。
 test('scratch ownership survives crossed native and control gestures',{timeout:30000},async()=>{
- const file=await tone('djaly-scratch-owner-');
- const child=spawn(process.env.DJALY_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/djaly-mixxx-engine-host'),[],{env:{...process.env,DJALY_MIXXX_OUTPUT_DEVICE:process.env.DJALY_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch'}});
+ const file=await tone('plumdeck-scratch-owner-');
+ const child=spawn(process.env.PLUMDECK_TEST_HOST||path.resolve(import.meta.dirname,'../build-upstream/plumdeck-mixxx-engine-host'),[],{env:{...process.env,PLUMDECK_MIXXX_OUTPUT_DEVICE:process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch'}});
  let hello,id=0,stderr='',socket;const pending=new Map();child.stderr.on('data',b=>stderr=(stderr+b).slice(-3000));
  createInterface({input:child.stdout}).on('line',line=>{const m=JSON.parse(line);if(m.kind!=='event')pending.get(m.id)?.(m);});
  const command=async(op,params={})=>{const key=++id;const promise=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error(stderr)),3000);pending.set(key,m=>{clearTimeout(timeout);pending.delete(key);resolve(m);});});child.stdin.write(JSON.stringify({id:key,op,params,...(hello?{engineId:hello.engineId,sessionId:hello.sessionId}:{})})+'\n');const reply=await promise;assert.notEqual(reply.kind,'error',JSON.stringify(reply));return reply.data??reply;};

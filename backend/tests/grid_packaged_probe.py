@@ -1,7 +1,7 @@
 """Smoke a packaged backend using an isolated temporary DB, never the user DB.
 
 PYTHONPATH=backend backend/.venv/bin/python backend/tests/grid_packaged_probe.py \
-    backend/dist/djaly-server
+    backend/dist/plumdeck-server
 """
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -27,7 +27,7 @@ def request(base, path, payload=None):
 def main():
     executable = Path(sys.argv[1]).resolve()
     source = request("http://127.0.0.1:48123", "/api/tracks?offset=0&limit=1")[0]
-    with tempfile.TemporaryDirectory(prefix="djaly-packaged-grid-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plumdeck-packaged-grid-") as directory:
         root = Path(directory)
         os.environ["DB_PATH"] = str(root / "test.duckdb")
         os.environ["USER_DATA_DIR"] = str(root)
@@ -62,7 +62,7 @@ def main():
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
-        environment = dict(os.environ, DJALY_PORT=str(port), PYTHONUNBUFFERED="1")
+        environment = dict(os.environ, PLUMDECK_PORT=str(port), PYTHONUNBUFFERED="1")
         base = f"http://127.0.0.1:{port}"
         log_path = root / "server.log"
         with log_path.open("w+") as log:

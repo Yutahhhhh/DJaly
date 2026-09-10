@@ -1,7 +1,7 @@
 """MCP サーバー専用の自動テスト。
 
 外部 MCP クライアント (Claude Desktop / Claude Code) が Streamable HTTP で
-Djaly の MCP サーバーに接続したときの挙動を、実際の MCP クライアント
+plumdeck の MCP サーバーに接続したときの挙動を、実際の MCP クライアント
 (mcp.client.session.ClientSession + streamable_http_client) を使って検証する。
 
 - `client` fixture (TestClient) は使わず、MCP 専用の async fixture `mcp_session` を使う。
@@ -207,9 +207,9 @@ async def test_selective_analysis_job_over_mcp(mcp_session, session, tmp_path, m
 
 @pytest.mark.asyncio
 async def test_initialize_returns_server_info(mcp_session):
-    """initialize の結果にサーバー情報 (name=Djaly) とプロトコルバージョン、tools 能力が含まれることを検証する。"""
+    """initialize の結果にサーバー情報 (name=plumdeck) とプロトコルバージョン、tools 能力が含まれることを検証する。"""
     result = await mcp_session.initialize()
-    assert result.server_info.name == "Djaly"
+    assert result.server_info.name == "plumdeck"
     assert result.protocol_version
     assert result.capabilities.tools is not None
 

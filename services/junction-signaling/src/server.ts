@@ -1,5 +1,5 @@
 // ws wiring, HTTP health endpoints, and graceful shutdown for the
-// Djaly Junction signaling service. This is the only module allowed to
+// plumdeck Junction signaling service. This is the only module allowed to
 // import `ws`/`http` — protocol.ts, rooms.ts and rate-limit.ts stay pure.
 
 import { createServer, type Server as HttpServer } from "node:http";

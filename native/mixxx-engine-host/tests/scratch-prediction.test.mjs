@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 test('scratch prediction velocity integrates to its position without expiration jumps',()=>{
- const dir=mkdtempSync(join(tmpdir(),'djaly-trajectory-'));
+ const dir=mkdtempSync(join(tmpdir(),'plumdeck-trajectory-'));
  try{
   const source=join(dir,'test.cpp'),binary=join(dir,'test');
   writeFileSync(source,`

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-const {webkit}=await import(process.env.DJALY_PLAYWRIGHT_MODULE||'playwright');
+const {webkit}=await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE||'playwright');
 const browser=await webkit.launch({headless:true});
 try{
  const page=await browser.newPage({viewport:{width:1200,height:800},deviceScaleFactor:2});
- await page.goto(process.env.DJALY_TEST_UI||'http://127.0.0.1:1420');
+ await page.goto(process.env.PLUMDECK_TEST_UI||'http://127.0.0.1:1420');
  const result=await page.evaluate(async()=>{
   const {waveformRenderer:r}=await import('/src/services/waveform/renderer.ts');
   document.body.innerHTML='';document.body.style.background='#080b10';
@@ -34,5 +34,5 @@ try{
  });
  assert(result.fallback&&result.restored,'context loss must fall back and recover');assert(result.bounded);
  assert(result.stableUploads,'steady scrolling must reuse geometry');assert(result.gpuPixels>10000&&result.cpuPixels>10000,'both renderers must produce visible waveforms');assert(result.diagnostics.gpuBytes<=32*1024*1024);assert(result.diagnostics.rasterBytes<=32*1024*1024);
- await page.screenshot({path:'/tmp/djaly-deck-waveform-renderer.png'});console.log(JSON.stringify(result));
+ await page.screenshot({path:'/tmp/plumdeck-deck-waveform-renderer.png'});console.log(JSON.stringify(result));
 }finally{await browser.close();}

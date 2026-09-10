@@ -3,7 +3,7 @@ name = "dj-engine-host"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77"
-description = "Djaly ネイティブ DJ エンジンホスト（Phase 0: プロトコル契約とシミュレータ）"
+description = "plumdeck ネイティブ DJ エンジンホスト（Phase 0: プロトコル契約とシミュレータ）"
 publish = false
 
 [lib]

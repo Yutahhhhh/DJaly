@@ -1,7 +1,7 @@
 """Read-only lookups against the local rekordbox collection.
 
 Assist mode needs two things from rekordbox: what a given open file actually is,
-and which of Djaly's tracks rekordbox knows about at all. Both are answered with
+and which of plumdeck's tracks rekordbox knows about at all. Both are answered with
 plain SELECTs over the encrypted master.db through the same read-only,
 ``query_only`` connection the beat-grid reader uses. Nothing here writes, and no
 higher-level pyrekordbox API is instantiated, so the running rekordbox is never

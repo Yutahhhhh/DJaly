@@ -12,7 +12,7 @@ fn read_exchange(path: &Path) -> Result<String, String> {
     let mut bytes = Vec::new();
     file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| "ファイルを読み込めません")?;
     if bytes.len() > MAX_BYTES { return Err("ファイルが大きすぎます。招待・返答は128KB以内です".into()); }
-    let text = String::from_utf8(bytes).map_err(|_| "文字形式が違います。Djalyから書き出したファイルを選択してください")?;
+    let text = String::from_utf8(bytes).map_err(|_| "文字形式が違います。plumdeckから書き出したファイルを選択してください")?;
     if text.contains('\0') { return Err("招待・返答の形式が違います".into()); }
     Ok(text.trim_start_matches('\u{feff}').to_owned())
 }
@@ -23,7 +23,7 @@ fn write_exchange(path: &Path, text: &str) -> Result<(), String> {
     }
     let directory = path.parent().filter(|p| p.is_dir()).ok_or("保存先のフォルダーが見つかりません")?;
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "時刻を確認できません")?.as_nanos();
-    let temporary = directory.join(format!(".djaly-exchange-{}-{nonce}-{}.tmp", std::process::id(), sequence()));
+    let temporary = directory.join(format!(".plumdeck-exchange-{}-{nonce}-{}.tmp", std::process::id(), sequence()));
     let mut created = false;
     let result = (|| -> Result<(), String> {
         let mut options = fs::OpenOptions::new(); options.write(true).create_new(true);
@@ -49,7 +49,7 @@ pub async fn junction_write_exchange_file(path: String, text: String) -> Result<
 mod tests {
     use super::*;
     fn directory() -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("djaly-exchange-test-{}-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(), sequence()));
+        let p = std::env::temp_dir().join(format!("plumdeck-exchange-test-{}-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(), sequence()));
         fs::create_dir(&p).unwrap(); p
     }
     #[test]

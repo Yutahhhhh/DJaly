@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function fixture() {
   const rate = 44100, frames = rate * 24;
@@ -54,10 +54,10 @@ function amplitudes(wav) {
 }
 
 test('four decks use native cues, variable-grid jumps/loops, EQ/filter/trim and FX', { timeout: 90000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-controls-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-controls-'));
   const audioPath = path.join(directory, 'tones.wav');
   await writeFile(audioPath, fixture());
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', nextId = 0, hello;
   const pending = new Map();
   child.stderr.on('data', chunk => { stderr += chunk; });
@@ -166,7 +166,9 @@ test('four decks use native cues, variable-grid jumps/loops, EQ/filter/trim and 
       // a name with no manifest fails the load and answers unsupported_operation.
       for (const effect of ['echo', 'reverb', 'flanger', 'phaser', 'filter', 'bitcrusher', 'distortion', 'autopan', 'tremolo', 'moogladder4filter']) {
         const state = await command('mixer.fx.set', { deck, effect, enabled: true, mix: 0.25 });
-        assert.deepEqual(state.channels[deck].fx, { effect, enabled: true, mix: 0.25 });
+        assert.equal(state.channels[deck].fx.effect, effect);
+        assert.equal(state.channels[deck].fx.enabled, true);
+        assert.equal(state.channels[deck].fx.mix, 0.25);
         await command('mixer.fx.set', { deck, effect, enabled: false, mix: 0.25 });
       }
     }

@@ -33,7 +33,7 @@ export function PerformanceView({ onRequestTrack }: PerformanceViewProps) {
   const [commandBusy, setCommandBusy] = useState(false);
   const [pickerDeck, setPickerDeck] = useState<DeckId | null>(null);
   const [hydrationAttempt, setHydrationAttempt] = useState(0);
-  const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("djaly.djOutputDevice") ?? "");
+  const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("plumdeck.djOutputDevice") ?? "");
   const pickerResolver = useRef<((track: TrackDescriptor | null) => void) | null>(null);
   const pendingHotCues = useRef<Partial<Record<DeckId, { trackId: string; cues: { slot: number; positionMs: number }[] }>>>({});
   const hydratingHotCues = useRef(new Set<DeckId>());
@@ -135,7 +135,7 @@ export function PerformanceView({ onRequestTrack }: PerformanceViewProps) {
   }, [client, hydrationAttempt, runCommand, snapshot]);
 
   const trackLoader = onRequestTrack ?? requestLibraryTrack;
-  const realHostSelected = Boolean(status?.binaryPath && /mixxx-engine-host|DJalyMixxxHost/.test(status.binaryPath));
+  const realHostSelected = Boolean(status?.binaryPath && /mixxx-engine-host|PlumdeckMixxxHost/.test(status.binaryPath));
 
   return (
     <main className="h-full overflow-y-auto bg-gradient-to-b from-background via-background to-muted/20 p-4 lg:p-6">
@@ -171,7 +171,7 @@ export function PerformanceView({ onRequestTrack }: PerformanceViewProps) {
                 value={outputDevice}
                 onChange={(event) => {
                   setOutputDevice(event.target.value);
-                  localStorage.setItem("djaly.djOutputDevice", event.target.value);
+                  localStorage.setItem("plumdeck.djOutputDevice", event.target.value);
                 }}
               />
             )}

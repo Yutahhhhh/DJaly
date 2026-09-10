@@ -4,8 +4,8 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 import platformdirs
 
-APP_NAME = "Djaly"
-APP_AUTHOR = "DjalyDev"
+APP_NAME = "plumdeck"
+APP_AUTHOR = "plumdeck"
 
 class Settings(BaseSettings):
     # App Info
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     MUSIC_DIR: str = "/music_data"
     
     # Network
-    DJALY_PORT: int = 8001
+    PLUMDECK_PORT: int = 8001
     FRONTEND_PORT: int = 1420
     
     # Audio ML
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     NUM_WORKERS: int | None = None
 
     # Logging & Cache
-    DJALY_LOG_DIR: str | None = None
+    PLUMDECK_LOG_DIR: str | None = None
     NUMBA_CACHE_DIR: str | None = None
     MPLCONFIGDIR: str | None = None
 
@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     def model_post_init(self, __context):
         # DB_PATHが未設定ならデフォルト値を設定
         if not self.DB_PATH:
-            self.DB_PATH = os.path.join(self.USER_DATA_DIR, "djaly.duckdb")
+            self.DB_PATH = os.path.join(self.USER_DATA_DIR, "plumdeck.duckdb")
         
         # ログディレクトリ
-        if not self.DJALY_LOG_DIR:
-            self.DJALY_LOG_DIR = os.path.join(self.USER_DATA_DIR, "logs")
+        if not self.PLUMDECK_LOG_DIR:
+            self.PLUMDECK_LOG_DIR = os.path.join(self.USER_DATA_DIR, "logs")
             
         # キャッシュディレクトリ
         if not self.NUMBA_CACHE_DIR:
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
             os.environ["NUMBA_CACHE_DIR"] = self.NUMBA_CACHE_DIR
         if self.MPLCONFIGDIR:
             os.environ["MPLCONFIGDIR"] = self.MPLCONFIGDIR
-        if self.DJALY_LOG_DIR:
-            os.environ["DJALY_LOG_DIR"] = self.DJALY_LOG_DIR
+        if self.PLUMDECK_LOG_DIR:
+            os.environ["PLUMDECK_LOG_DIR"] = self.PLUMDECK_LOG_DIR
 
 settings = Settings()

@@ -7,13 +7,13 @@
 class ReadAheadManager;
 
 /** Number of samples to read ahead */
-constexpr int kiDjalyScaleReadAheadLength = 32768;
+constexpr int kiplumdeckScaleReadAheadLength = 32768;
 
-class DjalyVinylScaler : public EngineBufferScaleLinear  {
+class PlumdeckVinylScaler : public EngineBufferScaleLinear  {
   public:
-    explicit DjalyVinylScaler(
+    explicit PlumdeckVinylScaler(
             ReadAheadManager* pReadAheadManager);
-    ~DjalyVinylScaler() override;
+    ~PlumdeckVinylScaler() override;
 
     double scaleBuffer(
             CSAMPLE* pOutputBuffer,

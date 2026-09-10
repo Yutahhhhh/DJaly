@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,writeFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
 test('vinyl kernels preserve DC/passband and suppress above-Nyquist tones across rate banks',async()=>{
- const directory=await mkdtemp(path.join(tmpdir(),'djaly-vinyl-kernel-'));
+ const directory=await mkdtemp(path.join(tmpdir(),'plumdeck-vinyl-kernel-'));
  const source=String.raw`
 #include "vinyl_kernel.h"
 #include <complex>

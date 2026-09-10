@@ -32,7 +32,7 @@ hiddenimports = [
 
 # Collect packages that genuinely use dynamic imports/resources. NumPy is
 # handled by PyInstaller's built-in hook. scipy/sklearn/tensorflow are not
-# runtime dependencies of DJaly and collecting them here only produced stale
+# runtime dependencies of plumdeck and collecting them here only produced stale
 # hidden-import warnings and unnecessary discovery work.
 for package in [
     'uvicorn', 'starlette', 'fastapi', 'h11', 'essentia',
@@ -85,7 +85,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='djaly-server',
+    name='plumdeck-server',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

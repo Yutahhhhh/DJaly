@@ -9,7 +9,7 @@ QJsonObject restSettings(){return {{"stunUrls",QJsonArray{}},{"save",false},{"tu
 JTEST("network-settings","REST credentials expire and isolate peer labels without exporting the administrator secret"){
  NetworkSettings settings(false);CHECK(settings.configure(restSettings()).isEmpty());QString error;
  const auto first=settings.credentials("session-test","peer-one",1800000000000LL,&error);CHECK(error.isEmpty());CHECK_EQ(first.size(),1);
- const auto row=first[0].toObject();CHECK_EQ(row["username"].toString(),QString("1800001800:djaly-220fc30d5e853fbac87d6f64"));CHECK_EQ(row["credential"].toString(),QString("ZOrlBqXdL6/XpTtXCkvw4wkqb84="));CHECK_EQ(row["expiresAt"].toDouble(),1800001800000.0);
+ const auto row=first[0].toObject();CHECK_EQ(row["username"].toString(),QString("1800001800:plumdeck-220fc30d5e853fbac87d6f64"));CHECK_EQ(row["credential"].toString(),QString("TOSwc1tzNIJTljYuWL9+F2lEEEg="));CHECK_EQ(row["expiresAt"].toDouble(),1800001800000.0);
  const auto other=settings.credentials("session-test","peer-two",1800000000000LL);CHECK(row["username"]!=other[0].toObject()["username"]);CHECK(row["credential"]!=other[0].toObject()["credential"]);
  CHECK(!QJsonDocument(first).toJson().contains("0123456789abcdef0123456789abcdef"));CHECK(!QJsonDocument(settings.summary()).toJson().contains("secret"));
  CHECK(validateNetworkServers(first,1800000000000LL).isEmpty());CHECK(!validateNetworkServers(first,1800001800000LL).isEmpty());

@@ -6,12 +6,12 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('recording completion finalizes WAV and rapid start/stop cannot stick', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-finalize-'));
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-finalize-'));
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let hello, nextId = 0, stderr = '';
   const pending = new Map();
   child.stderr.on('data', chunk => { stderr += chunk; });

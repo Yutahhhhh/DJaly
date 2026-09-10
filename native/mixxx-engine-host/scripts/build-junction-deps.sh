@@ -34,7 +34,7 @@ cmake -S "$source_dir" -B "$source_dir/build-static" -G Ninja \
   -DPREFER_SYSTEM_LIB=OFF -DUSE_SYSTEM_SRTP=OFF -DUSE_NICE=ON \
   -DUSE_SYSTEM_USRSCTP=OFF -DUSE_SYSTEM_PLOG=OFF -DUSE_SYSTEM_JSON=OFF \
   -DNO_MEDIA=OFF -DNO_WEBSOCKET=OFF -DNO_EXAMPLES=ON -DNO_TESTS=ON
-cmake --build "$source_dir/build-static" --parallel "${DJALY_BUILD_JOBS:-6}"
+cmake --build "$source_dir/build-static" --parallel "${PLUMDECK_BUILD_JOBS:-6}"
 for library in libdatachannel.a deps/libsrtp/libsrtp2.a deps/usrsctp/usrsctplib/libusrsctp.a; do
   test -f "$source_dir/build-static/$library"
 done

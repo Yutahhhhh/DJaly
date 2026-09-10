@@ -27,12 +27,12 @@ async def check_mcp(base):
 
 def main():
     executable = Path(sys.argv[1]).resolve()
-    with tempfile.TemporaryDirectory(prefix="djaly-play-bundle-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plumdeck-play-bundle-") as directory:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         env = dict(os.environ, DB_PATH=str(Path(directory) / "probe.duckdb"),
-                   USER_DATA_DIR=directory, DJALY_PORT=str(port), PYTHONUNBUFFERED="1")
+                   USER_DATA_DIR=directory, PLUMDECK_PORT=str(port), PYTHONUNBUFFERED="1")
         base = f"http://127.0.0.1:{port}"
 
         def request(path, method="GET", payload=None):

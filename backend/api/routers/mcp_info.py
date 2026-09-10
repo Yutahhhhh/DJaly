@@ -18,9 +18,9 @@ async def get_mcp_info() -> Dict[str, Any]:
     tool_list.sort(key=lambda t: t["name"])
     return {
         "server_name": mcp.name,
-        "port": settings.DJALY_PORT,
+        "port": settings.PLUMDECK_PORT,
         "http_path": MCP_HTTP_PATH,
-        "url": f"http://127.0.0.1:{settings.DJALY_PORT}{MCP_HTTP_PATH}",
+        "url": f"http://127.0.0.1:{settings.PLUMDECK_PORT}{MCP_HTTP_PATH}",
         "tool_count": len(tool_list),
         "tools": tool_list,
     }

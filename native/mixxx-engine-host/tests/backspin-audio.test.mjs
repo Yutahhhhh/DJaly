@@ -9,7 +9,7 @@ import { Ddj1000Runtime } from '../../../src/services/midi/ddj1000-runtime.ts';
 import { Ddj1000Decoder } from '../../../src/services/midi/ddj1000.ts';
 import { ScratchCommandQueue } from '../../../src/services/dj-engine/scratch-command-queue.ts';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function pcmWindow(wave, fromMs, toMs) {
@@ -37,12 +37,12 @@ function pcmWindow(wave, fromMs, toMs) {
 }
 
 test('fast reverse scratch stays audible in recorded PCM', { timeout: 45000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-native-scratch-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-native-scratch-'));
   const fixture = path.join(directory, 'mono-48000.wav');
   // A mono source at 48 kHz deliberately differs from the stereo 44.1 kHz
   // engine. Scratch positions must still use SOURCE frames * two.
-  const longTrack = process.env.DJALY_SCRATCH_LONG === '1';
-  const realTrack = process.env.DJALY_SCRATCH_TRACK;
+  const longTrack = process.env.PLUMDECK_SCRATCH_LONG === '1';
+  const realTrack = process.env.PLUMDECK_SCRATCH_TRACK;
   const origin = realTrack ? 60000 : longTrack ? 240000 : 24000;
   const rate = 48000, frames = rate * (longTrack ? 300 : 30);
   const wave = Buffer.alloc(44 + frames * 2);
@@ -52,7 +52,7 @@ test('fast reverse scratch stays audible in recorded PCM', { timeout: 45000 }, a
   wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34); wave.write('data', 36); wave.writeUInt32LE(frames * 2, 40);
   for (let i = 0; i < frames; i++) wave.writeInt16LE(Math.round(4000 * Math.sin(2 * Math.PI * 440 * i / rate)), 44 + i * 2);
   await writeFile(fixture, wave);
-  const codec = process.env.DJALY_SCRATCH_CODEC;
+  const codec = process.env.PLUMDECK_SCRATCH_CODEC;
   let input = realTrack || fixture;
   if (codec) {
     assert(['mp3', 'm4a'].includes(codec), 'Supported test codecs: mp3, m4a');
@@ -60,7 +60,7 @@ test('fast reverse scratch stays audible in recorded PCM', { timeout: 45000 }, a
     const encoded = spawnSync('ffmpeg', ['-v', 'error', '-i', fixture, '-y', input], {encoding:'utf8'});
     assert.equal(encoded.status, 0, encoded.stderr || String(encoded.error));
   }
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_TIMING_TRACE: '1', DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_TIMING_TRACE: '1', PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', id = 0, hello, observeTelemetry = false;
   const telemetry = { fullStates: 0, positionEvents: 0, positionBytes: 0, maxPositionBytes: 0, batchedEvents: 0 };
   const observedBpms = new Set();
@@ -158,7 +158,7 @@ test('fast reverse scratch stays audible in recorded PCM', { timeout: 45000 }, a
       assert(realTrack ? levels.some(level=>level>100) : minimum>100,
         `Reverse ${speed}x must remain audible: ${minimum}`);
     }
-    const diagnosticPath=path.join(tmpdir(),`djaly-scratch-${child.pid}.json`);
+    const diagnosticPath=path.join(tmpdir(),`plumdeck-scratch-${child.pid}.json`);
     const diagnosis=JSON.parse(await readFile(diagnosticPath,'utf8'));
     assert(diagnosis.samples.some(sample=>sample.masterPeak>0),
       'Diagnostic output meter must read the real Main bus rather than a nonexistent legacy key');
@@ -217,9 +217,9 @@ test('fast reverse scratch stays audible in recorded PCM', { timeout: 45000 }, a
     child.stdin.end();
     let outcome=await Promise.race([exited,delay(3000).then(()=>null)]);
     if(!outcome){child.kill('SIGTERM');outcome=await Promise.race([exited,delay(3000).then(()=>null)]);}
-    if (process.env.DJALY_KEEP_SCRATCH_AUDIO === '1') console.log(JSON.stringify({directory,input}));
+    if (process.env.PLUMDECK_KEEP_SCRATCH_AUDIO === '1') console.log(JSON.stringify({directory,input}));
     else await rm(directory,{recursive:true,force:true});
-    await rm(path.join(tmpdir(),`djaly-scratch-${child.pid}.json`),{force:true});
+    await rm(path.join(tmpdir(),`plumdeck-scratch-${child.pid}.json`),{force:true});
     assert.equal(outcome?.code,0,stderr);
   }
 });

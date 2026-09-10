@@ -63,7 +63,7 @@ export type RecordingExportFormat = "wav" | "flac" | "mp3";
 export interface RecordingFormatOption { value: RecordingExportFormat; extension: string; label: string }
 
 export interface Page<T> { items: T[]; total: number; limit: number; offset: number; has_more: boolean }
-export interface LocalPlaylist { id: number; name: string; source: "djaly"; editable: true; track_count: number; created_at?: string; updated_at?: string }
+export interface LocalPlaylist { id: number; name: string; source: "plumdeck"; editable: true; track_count: number; created_at?: string; updated_at?: string }
 export interface LocalPlaylistTrack extends Track { setlist_track_id: number; position: number }
 export interface MirrorCopyResult { playlist: LocalPlaylist; copied: number; resolved?: number; skipped_unresolved: number }
 

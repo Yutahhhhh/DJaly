@@ -101,7 +101,7 @@ jobs:
           cd backend
           # Keep CI packaging identical to local releases. The spec includes
           # FFmpeg, Essentia/MusiCNN on supported platforms and MCP dependencies.
-          python -m PyInstaller --clean --noconfirm djaly-server.spec
+          python -m PyInstaller --clean --noconfirm plumdeck-server.spec
 
           mkdir -p ../src-tauri/bin
 
@@ -110,9 +110,9 @@ jobs:
             EXTENSION=".exe"
           fi
 
-          mv dist/djaly-server$EXTENSION ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
-          chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION 2>/dev/null || true
-          test -f ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
+          mv dist/plumdeck-server$EXTENSION ../src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION
+          chmod +x ../src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION 2>/dev/null || true
+          test -f ../src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION
           ls -la ../src-tauri/bin/
 
       - name: smoke test packaged backend
@@ -125,11 +125,11 @@ jobs:
             EXTENSION=".exe"
           fi
 
-          SIDECAR="src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION"
+          SIDECAR="src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION"
           PORT=48123
-          LOG_FILE="${RUNNER_TEMP}/djaly-sidecar-smoke.log"
+          LOG_FILE="${RUNNER_TEMP}/plumdeck-sidecar-smoke.log"
 
-          DJALY_PORT="$PORT" "$SIDECAR" >"$LOG_FILE" 2>&1 &
+          PLUMDECK_PORT="$PORT" "$SIDECAR" >"$LOG_FILE" 2>&1 &
           SIDECAR_PID=$!
 
           cleanup() {
@@ -140,7 +140,7 @@ jobs:
 
           READY=0
           for attempt in {1..45}; do
-            if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/" | grep -q 'Djaly Backend API is running'; then
+            if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/" | grep -q 'plumdeck Backend API is running'; then
               READY=1
               break
             fi
@@ -169,7 +169,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Djaly.app'
+          test -d 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/plumdeck.app'
           compgen -G 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg' > /dev/null
 
       - name: verify Windows bundles

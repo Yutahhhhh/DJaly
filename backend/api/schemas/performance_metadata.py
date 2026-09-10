@@ -133,7 +133,7 @@ class GridAnalysisRequest(BaseModel):
 
 
 class RekordboxCueImportRequest(BaseModel):
-    """Expected DJaly revision for a source-to-owned-metadata import."""
+    """Expected plumdeck revision for a source-to-owned-metadata import."""
 
     model_config = ConfigDict(extra="forbid")
     revision: StrictInt = Field(ge=0)

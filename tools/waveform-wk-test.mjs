@@ -9,7 +9,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 const seconds=Number(process.argv[2]||600);
 if(!Number.isInteger(seconds)||seconds<5||seconds>7200)throw Error('Duration must be 5–7200 seconds');
-const directory=await mkdtemp(path.join(tmpdir(),'djaly-wk-'));
+const directory=await mkdtemp(path.join(tmpdir(),'plumdeck-wk-'));
 let server;
 try{
  await build({configFile:false,build:{outDir:directory,emptyOutDir:false,lib:{entry:path.resolve('tools/waveform-validation.ts'),formats:['es'],fileName:()=> 'validation.js'}}});
@@ -22,7 +22,7 @@ try{
   else{response.statusCode=404;response.end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const child=spawn(path.resolve('src-tauri/target/debug/examples/waveform_validation'),[],{stdio:'inherit',env:{...process.env,DJALY_VALIDATION_SECONDS:String(seconds),DJALY_VALIDATION_URL:`http://127.0.0.1:${server.address().port}/index.html`}});
+ const child=spawn(path.resolve('src-tauri/target/debug/examples/waveform_validation'),[],{stdio:'inherit',env:{...process.env,PLUMDECK_VALIDATION_SECONDS:String(seconds),PLUMDECK_VALIDATION_URL:`http://127.0.0.1:${server.address().port}/index.html`}});
  process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
 }finally{
  if(server)await new Promise(resolve=>server.close(resolve));

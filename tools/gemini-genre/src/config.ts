@@ -7,8 +7,8 @@ const ROOT = path.resolve(HERE, "..");
 export type Mode = "genre" | "subgenre" | "both";
 
 export interface Config {
-  /** Djaly backend base URL (the local FastAPI server). */
-  djalyApi: string;
+  /** plumdeck backend base URL (the local FastAPI server). */
+  plumdeckApi: string;
   /** Gemini Gem URL to drive. */
   gemUrl: string;
   /** Which field(s) to classify. */
@@ -31,9 +31,9 @@ export interface Config {
   responseTimeoutMs: number;
   /** Just open the browser so you can log into Google, then exit. */
   loginOnly: boolean;
-  /** Skip the browser; POST already-saved out/<mode>/results.json back to Djaly. */
+  /** Skip the browser; POST already-saved out/<mode>/results.json back to plumdeck. */
   applyOnly: boolean;
-  /** After each batch is saved, also POST it to Djaly to update the DB. */
+  /** After each batch is saved, also POST it to plumdeck to update the DB. */
   apply: boolean;
   /** Let apply overwrite genres that are already verified. */
   overwrite: boolean;
@@ -64,9 +64,9 @@ export function loadConfig(argv: string[]): Config {
     opt(args, "out") ?? env.GEMINI_GENRE_OUT ?? path.join(ROOT, "out");
 
   return {
-    djalyApi: (
+    plumdeckApi: (
       opt(args, "api") ??
-      env.DJALY_API ??
+      env.PLUMDECK_API ??
       "http://localhost:8001"
     ).replace(/\/$/, ""),
     gemUrl:
@@ -96,7 +96,7 @@ export function loadConfig(argv: string[]): Config {
 
 export function describe(cfg: Config): string {
   return [
-    `  api       ${cfg.djalyApi}`,
+    `  api       ${cfg.plumdeckApi}`,
     `  gem       ${cfg.gemUrl}`,
     `  mode      ${cfg.mode}`,
     `  batch     ${cfg.batchSize}`,

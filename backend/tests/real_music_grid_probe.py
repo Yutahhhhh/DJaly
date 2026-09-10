@@ -18,7 +18,7 @@ def main():
     parser.add_argument("tracks", nargs="+")
     parser.add_argument("--serve", type=int, help="Serve the isolated API after verification")
     args = parser.parse_args()
-    directory = Path(tempfile.mkdtemp(prefix="djaly-real-grid-"))
+    directory = Path(tempfile.mkdtemp(prefix="plumdeck-real-grid-"))
     os.environ["DB_PATH"] = str(directory / "library.duckdb")
     os.environ["USER_DATA_DIR"] = str(directory)
     from fastapi import FastAPI

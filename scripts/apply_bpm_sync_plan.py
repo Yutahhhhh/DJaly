@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply a prepared Rekordbox BPM sync plan to a stopped Djaly database."""
+"""Apply a prepared Rekordbox BPM sync plan to a stopped plumdeck database."""
 
 from __future__ import annotations
 

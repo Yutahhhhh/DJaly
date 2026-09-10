@@ -4,7 +4,7 @@ set -e # エラーが発生したら即停止
 # 設定
 # tauri.conf.json からバージョンを取得
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-BINARY_NAME="djaly-server"
+BINARY_NAME="plumdeck-server"
 OUTPUT_DIR="src-tauri/bin"
 
 # アーキテクチャの自動検出
@@ -35,7 +35,7 @@ cd backend
 source .venv/bin/activate
 
 # PyInstallerの実行 (specファイルを使用)
-pyinstaller --clean --noconfirm djaly-server.spec
+pyinstaller --clean --noconfirm plumdeck-server.spec
 
 cd ..
 
@@ -86,11 +86,11 @@ echo "✅ バックエンド配置完了: $OUTPUT_DIR/${BINARY_NAME}-${TARGET_TR
 # --- 3. Tauri Build ---
 echo "🦀 [3/4] Tauriアプリをビルド中..."
 
-# 署名用キーの設定 (keys/djaly.key が存在する場合)
-if [ -f "keys/djaly.key" ]; then
+# 署名用キーの設定 (keys/plumdeck.key が存在する場合)
+if [ -f "keys/plumdeck.key" ]; then
     echo "🔑 署名用キーを読み込んでいます..."
-    export TAURI_SIGNING_PRIVATE_KEY=$(cat keys/djaly.key)
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="djaly-password"
+    export TAURI_SIGNING_PRIVATE_KEY=$(cat keys/plumdeck.key)
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="plumdeck-password"
 fi
 
 # pnpm tauri build だと package.json の "tauri": "tauri dev" が呼ばれてしまうため
@@ -125,11 +125,11 @@ echo "アップロードファイル: $DMG_PATH"
 
 # 署名ファイルのパスを取得
 SIG_PATH="${DMG_PATH}.sig"
-if [ -f "keys/djaly.key" ]; then
+if [ -f "keys/plumdeck.key" ]; then
     echo "🔏 Updater用のDMG署名を生成中..."
     SIGN_OUTPUT=$(pnpm exec tauri signer sign \
-        -f keys/djaly.key \
-        -p "djaly-password" \
+        -f keys/plumdeck.key \
+        -p "plumdeck-password" \
         "$DMG_PATH")
     echo "$SIGN_OUTPUT" | awk '/Public signature:/{getline; print}' > "$SIG_PATH"
 fi
@@ -137,7 +137,7 @@ fi
 # latest.jsonを生成
 LATEST_JSON="src-tauri/target/release/bundle/dmg/latest.json"
 DMG_FILENAME=$(basename "$DMG_PATH")
-DOWNLOAD_URL="https://github.com/Yutahhhhh/DJaly/releases/download/v${VERSION}/${DMG_FILENAME}"
+DOWNLOAD_URL="https://github.com/Yutahhhhh/plumdeck/releases/download/v${VERSION}/${DMG_FILENAME}"
 PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo "📝 latest.jsonを生成中..."
@@ -185,9 +185,9 @@ fi
 # --generate-notes: コミットログからリリースノートを自動生成
 echo "☁️ GitHub Releaseを作成中..."
 if [ -f "$SIG_PATH" ]; then
-    gh release create "v$VERSION" "$DMG_PATH" "$SIG_PATH" "$LATEST_JSON" --title "Djaly v$VERSION" --generate-notes
+    gh release create "v$VERSION" "$DMG_PATH" "$SIG_PATH" "$LATEST_JSON" --title "plumdeck v$VERSION" --generate-notes
 else
-    gh release create "v$VERSION" "$DMG_PATH" "$LATEST_JSON" --title "Djaly v$VERSION" --generate-notes
+    gh release create "v$VERSION" "$DMG_PATH" "$LATEST_JSON" --title "plumdeck v$VERSION" --generate-notes
 fi
 
 echo "🎉 リリース完了！ GitHubを確認してください。"
@@ -195,4 +195,4 @@ echo ""
 echo "⚠️ 注意: Apple Developer Programに登録して署名・公証を行っていない場合、"
 echo "   macOSでインストール後に「壊れているため開けません」というエラーが表示されることがあります。"
 echo "   その場合は、ターミナルで以下のコマンドを実行して検疫属性を削除してください:"
-echo "   xattr -cr /Applications/Djaly.app"
+echo "   xattr -cr /Applications/plumdeck.app"

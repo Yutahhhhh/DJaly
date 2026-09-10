@@ -17,11 +17,11 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
 #include <rtc/rtc.hpp>
 #endif
 namespace junction {
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
 class FeedbackSession final : public rtc::RtcpReceivingSession {
 public:
  std::function<void(quint16)> retry;std::function<void()> reportReceived;
@@ -36,7 +36,7 @@ namespace {
 QString normalize(QString s){return s.remove(':').toLower();}
 bool fail(QString* e,QString s){if(e)*e=s;return false;}
 void ensureNetworkRuntime() {
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  // libnice owns a process-wide GLib thread. Join it before static destruction,
  // after all scoped peer connections and signaling sockets have closed.
  struct NetworkLifetime {
@@ -56,7 +56,7 @@ struct MediaTransport::Impl {
  std::atomic<quint64> receivedPackets{0},senderReports{0},receivedReports{0},nacksSent{0},retransmittedPackets{0};
  quint64 minimumEpoch=0,minimumGeneration=0;StreamManifest tx,rx;bool hasTx=false,hasRx=false,automaticManifest=false,waitingManifestAck=false; qint64 manifestSentAt=0;quint16 sequence=0;quint64 decodedSeq=0,nextRx=0;bool rxStarted=false;
  struct Packet{QByteArray bytes;qint64 arrived;int retries=0;};std::map<quint64,Packet> packets;
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::PeerConnection> pc[2];std::shared_ptr<rtc::DataChannel> channels[3];std::shared_ptr<rtc::Track> track;
  // Written from libdatachannel's threads, read from the session thread.
  std::atomic<bool> gathered[2]{{false},{false}};std::atomic<int> link[2]{{int(LinkState::New)},{int(LinkState::New)}};
@@ -82,7 +82,7 @@ struct MediaTransport::Impl {
     src_reset(src);opus_encoder_ctl(enc,OPUS_RESET_STATE);fill=0;anchor=got.info.mediaFrame;sourceGeneration=got.info.generation;sourceEpoch=got.info.epoch;rate=got.info.sampleRateHz;
     if(automatic){StreamManifest manifest;{std::lock_guard lock(mutex);manifest=tx;}manifest.streamId=secureRandomHex(16);manifest.epoch=sourceEpoch;manifest.generation=sourceGeneration;manifest.mediaFrameOrigin=anchor;auto random=secureRandomBytes(8);manifest.ssrc=qFromBigEndian<quint32>(reinterpret_cast<const uchar*>(random.constData()));if(!manifest.ssrc)manifest.ssrc=1;manifest.rtpTimestampOrigin=qFromBigEndian<quint32>(reinterpret_cast<const uchar*>(random.constData()+4));
      {std::lock_guard lock(mutex);tx=manifest;hasTx=true;waitingManifestAck=true;manifestSentAt=monotonicNanos();
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
       resend.clear();
 #endif
      }
@@ -94,7 +94,7 @@ struct MediaTransport::Impl {
    else if(!waiting){holding=false;held={};sourceEnd=got.info.sourceFrame+got.frames;
    long used=0;while(used<got.frames&&rate){SRC_DATA data{};data.data_in=input.data()+used*2;data.input_frames=got.frames-used;data.data_out=converted.data();data.output_frames=4096;data.src_ratio=48000.0/rate;if(src_process(src,&data))break;used+=data.input_frames_used;
     for(long i=0;i<data.output_frames_gen;i++){frame[fill*2]=converted[i*2];frame[fill*2+1]=converted[i*2+1];if(++fill==960){PcmBlockInfo raw;raw.epoch=sourceEpoch;raw.generation=sourceGeneration;raw.mediaFrame=anchor;raw.sourceFrame=anchor;raw.sequence=anchor/960;raw.frameCount=960;raw.sampleRateHz=48000;raw.channels=2;preCodec.push(frame.data(),raw);int n=opus_encode_float(enc,frame.data(),960,encoded.data(),encoded.size());std::lock_guard lock(mutex);
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
     if(n>0&&hasTx&&track&&track->isOpen()&&tx.epoch==sourceEpoch&&tx.generation==sourceGeneration&&anchor>=tx.mediaFrameOrigin){QByteArray packet(12+n,0);auto p=reinterpret_cast<uchar*>(packet.data());p[0]=0x80;p[1]=111;qToBigEndian<quint16>(sequence++,p+2);qToBigEndian<quint32>(tx.rtpTimestampOrigin+quint32(anchor-tx.mediaFrameOrigin),p+4);qToBigEndian<quint32>(tx.ssrc,p+8);memcpy(p+12,encoded.data(),n);resend[quint16(sequence-1)]={packet,monotonicNanos()};for(auto it=resend.begin();it!=resend.end();)if(monotonicNanos()-it->second.arrived>150000000)it=resend.erase(it);else ++it;reportConfig->ssrc=tx.ssrc;reportConfig->timestamp=tx.rtpTimestampOrigin+quint32(anchor-tx.mediaFrameOrigin);if(sequence%50==0){reporter->setNeedsToReport();++senderReports;}try{track->send(reinterpret_cast<const std::byte*>(packet.constData()),packet.size());}catch(const std::exception&){} }
 #endif
     fill=0;anchor+=960;}}
@@ -105,7 +105,7 @@ struct MediaTransport::Impl {
    if(!rxStarted){nextRx=packets.begin()->first;rxStarted=true;opus_decoder_ctl(dec,OPUS_RESET_STATE);conceal=0;}
    while(!packets.empty()&&packets.begin()->first<nextRx)packets.erase(packets.begin());
    auto it=packets.find(nextRx);
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
    if(it==packets.end()&&!packets.empty()&&receivedSequence&&lastReceivedFrame>nextRx&&monotonicNanos()-lastNack>20000000&&track&&track->isOpen()){QByteArray nack(16,0);auto*p=reinterpret_cast<uchar*>(nack.data());p[0]=0x81;p[1]=205;qToBigEndian<quint16>(3,p+2);qToBigEndian<quint32>(rx.ssrc,p+8);qToBigEndian<quint16>(quint16(lastReceivedSequence-(lastReceivedFrame-nextRx)/960),p+12);try{track->send(reinterpret_cast<const std::byte*>(nack.constData()),nack.size());++nacksSent;}catch(...){}lastNack=monotonicNanos();}
 #endif
    bool ready=it!=packets.end()&&monotonicNanos()-it->second.arrived>=60000000;bool lost=it==packets.end()&&!packets.empty()&&monotonicNanos()-packets.begin()->second.arrived>=60000000;
@@ -127,7 +127,7 @@ std::shared_ptr<MediaTransport::Identity> MediaTransport::createIdentity(const Q
 MediaTransport::MediaTransport(QString peer,QStringList ice,Callbacks cb,std::shared_ptr<Identity> identity,bool forceRelay):d(new Impl){ensureNetworkRuntime();d->peer=peer;d->ice=ice;d->cb=std::move(cb);d->identity=std::move(identity);d->forceRelay=forceRelay;}
 MediaTransport::~MediaTransport(){close();}
 bool MediaTransport::available(){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  ensureNetworkRuntime();
  return true;
 #else
@@ -135,9 +135,9 @@ bool MediaTransport::available(){
 #endif
 }
 bool MediaTransport::start(bool offerer,QString* error){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  if(d->running)return fail(error,"Transport already started");try{rtc::Configuration cfg;if(d->forceRelay)cfg.iceTransportPolicy=rtc::TransportPolicy::Relay;cfg.disableAutoNegotiation=true;cfg.maxMessageSize=65536;for(const auto& s:d->ice)cfg.iceServers.emplace_back(s.toStdString());if(d->identity){cfg.certificatePemFile=d->identity->certificatePath.toStdString();cfg.keyPemFile=d->identity->keyPath.toStdString();}
- for(int i=0;i<2;i++){d->pc[i]=std::make_shared<rtc::PeerConnection>(cfg);const bool trace=qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE");if(trace)d->pc[i]->onIceStateChange([i](auto state){qInfo()<<"junction ice state"<<i<<int(state);});
+ for(int i=0;i<2;i++){d->pc[i]=std::make_shared<rtc::PeerConnection>(cfg);const bool trace=qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE");if(trace)d->pc[i]->onIceStateChange([i](auto state){qInfo()<<"junction ice state"<<i<<int(state);});
   d->pc[i]->onStateChange([this,i,trace](rtc::PeerConnection::State state){if(trace)qInfo()<<"junction transport state"<<i<<int(state);
    const auto mapped=state==rtc::PeerConnection::State::Connecting?LinkState::Connecting:state==rtc::PeerConnection::State::Connected?LinkState::Connected:state==rtc::PeerConnection::State::Disconnected?LinkState::Disconnected:state==rtc::PeerConnection::State::Failed?LinkState::Failed:state==rtc::PeerConnection::State::Closed?LinkState::Closed:LinkState::New;
    d->link[i].store(int(mapped),std::memory_order_release);if(d->cb.linkState)d->cb.linkState(i!=0,mapped);});
@@ -153,40 +153,40 @@ bool MediaTransport::start(bool offerer,QString* error){
 #endif
 }
 void MediaTransport::close(){d->running=false;if(d->worker.joinable())d->worker.join();
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  for(auto& pc:d->pc)if(pc){pc->resetCallbacks();pc->close();}for(auto& c:d->channels)if(c){c->resetCallbacks();c->close();c.reset();}if(d->track){d->track->resetCallbacks();d->track.reset();}for(auto&pc:d->pc)pc.reset();
 #endif
 }
 bool MediaTransport::remoteDescription(bool bulk,const QString&sdp,const QString&type,const QString&fp,QString*error){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  if(!d->pc[bulk]||normalize(fp).size()!=64||sdp.size()>65536)return fail(error,"Invalid authenticated SDP");for(const auto& line:sdp.split('\n')){if(line.startsWith("a=fingerprint:")){auto v=line.trimmed().mid(14).split(' ');if(v.size()!=2||v[0]!="sha-256"||normalize(v[1])!=normalize(fp))return fail(error,"DTLS media identity mismatch");}}try{rtc::Description desc(sdp.toStdString(),type.toStdString());auto f=desc.fingerprint();if(!f||normalize(QString::fromStdString(f->value))!=normalize(fp))return fail(error,"DTLS identity mismatch");d->pc[bulk]->setRemoteDescription(desc);if(type=="offer")d->pc[bulk]->setLocalDescription();return true;}catch(const std::exception&){return fail(error,"Invalid remote SDP");}
 #else
  return fail(error,"WebRTC unavailable");
 #endif
 }
 bool MediaTransport::remoteCandidate(bool bulk,const QString&c,const QString&mid){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  if(!d->pc[bulk]||c.size()>4096||mid.size()>128)return false;try{d->pc[bulk]->addRemoteCandidate(rtc::Candidate(c.toStdString(),mid.toStdString()));return true;}catch(...){return false;}
 #else
  return false;
 #endif
 }
 bool MediaTransport::sendControl(const QByteArray&b){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::DataChannel> c;{std::lock_guard lock(d->mutex);c=d->channels[0];}if(!c||!c->isOpen()||b.size()>65536||c->bufferedAmount()>131072)return false;try{return c->send(reinterpret_cast<const std::byte*>(b.constData()),b.size());}catch(...){return false;}
 #else
  return false;
 #endif
 }
 bool MediaTransport::sendBulk(const QByteArray&b){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::DataChannel> c;{std::lock_guard lock(d->mutex);c=d->channels[1];}if(!c||!c->isOpen()||b.size()>kMaxChunkBytes+72||c->bufferedAmount()>65536)return false;{std::lock_guard lock(d->mutex);auto now=monotonicNanos();if(now-d->bulkWindow>=1000000000){d->bulkWindow=now;d->bulkBytes=0;}if(d->bulkBytes+b.size()>4*1024*1024)return false;d->bulkBytes+=b.size();}try{return c->send(reinterpret_cast<const std::byte*>(b.constData()),b.size());}catch(...){return false;}
 #else
  return false;
 #endif
 }
 bool MediaTransport::sendValidation(const QByteArray&b){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::DataChannel> c,control;{std::lock_guard lock(d->mutex);c=d->channels[2];control=d->channels[0];}if(!c||!c->isOpen()||b.size()>kMaxChunkBytes+72||c->bufferedAmount()>32768||(control&&control->bufferedAmount()>0))return false;{std::lock_guard lock(d->mutex);auto now=monotonicNanos();if(now-d->validationWindow>=1000000000){d->validationWindow=now;d->validationBytes=0;}if(d->validationBytes+b.size()>256*1024)return false;d->validationBytes+=b.size();}try{return c->send(reinterpret_cast<const std::byte*>(b.constData()),b.size());}catch(...){return false;}
 #else
  return false;
@@ -194,21 +194,21 @@ bool MediaTransport::sendValidation(const QByteArray&b){
 }
 bool MediaTransport::setSendManifest(const StreamManifest&m){if(m.streamId.isEmpty()||m.producerPeerId.isEmpty()||!m.ssrc||m.codecLookaheadFrames>=960)return false;std::lock_guard lock(d->mutex);d->tx=m;d->hasTx=true;d->minimumEpoch=m.epoch;d->minimumGeneration=m.generation;d->waitingManifestAck=false;return true;}
 bool MediaTransport::setReceiveManifest(const StreamManifest&m){if(m.streamId.isEmpty()||m.producerPeerId!=d->peer||!m.ssrc||m.codecLookaheadFrames>=960)return false;std::lock_guard lock(d->mutex);d->rx=m;d->hasRx=true;d->packets.clear();d->rxStarted=false;
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  d->receivedSequence=false;
 #endif
  return true;}
 void MediaTransport::startProducer(PcmRing*r){std::lock_guard lock(d->mutex);d->source=r;}
 MediaTransport::Statistics MediaTransport::statistics()const{return {d->receivedPackets.load(),d->senderReports.load(),d->receivedReports.load(),d->nacksSent.load(),d->retransmittedPackets.load()};}
 bool MediaTransport::selectedRelay(bool bulk)const{
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  if(!d->pc[bulk])return false;rtc::Candidate local,remote;if(!d->pc[bulk]->getSelectedCandidatePair(&local,&remote))return false;return local.type()==rtc::Candidate::Type::Relayed&&remote.type()==rtc::Candidate::Type::Relayed;
 #else
  return false;
 #endif
 }
 bool MediaTransport::gatheringComplete(bool bulk)const{
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  return d->pc[bulk]&&d->gathered[bulk].load(std::memory_order_acquire);
 #else
  Q_UNUSED(bulk);return false;
@@ -216,7 +216,7 @@ bool MediaTransport::gatheringComplete(bool bulk)const{
 }
 bool MediaTransport::readyForManualExport()const{return gatheringComplete(false)&&gatheringComplete(true);}
 QString MediaTransport::aggregatedDescription(bool bulk,QString*type,QString*fingerprint)const{
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  // Only after GatheringState::Complete does the local description carry every
  // candidate. Returning it earlier would export an unusable half-offer.
  if(!gatheringComplete(bulk))return {};
@@ -229,7 +229,7 @@ QString MediaTransport::aggregatedDescription(bool bulk,QString*type,QString*fin
 #endif
 }
 LinkState MediaTransport::linkState(bool bulk)const{
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  return d->pc[bulk]?LinkState(d->link[bulk].load(std::memory_order_acquire)):LinkState::Closed;
 #else
  Q_UNUSED(bulk);return LinkState::Closed;
@@ -241,7 +241,7 @@ LinkState MediaTransport::aggregateLinkState()const{
  return rank(control)<=rank(bulk)?control:bulk;
 }
 bool MediaTransport::requestRetransmission(quint64 frame){
-#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::lock_guard lock(d->mutex);if(!d->hasRx||!d->receivedSequence||frame<d->nextRx||frame>d->lastReceivedFrame||(d->lastReceivedFrame-frame)%960||!d->track||!d->track->isOpen()||monotonicNanos()-d->lastNack<20000000)return false;
  QByteArray nack(16,0);auto*p=reinterpret_cast<uchar*>(nack.data());p[0]=0x81;p[1]=205;qToBigEndian<quint16>(3,p+2);qToBigEndian<quint32>(d->rx.ssrc,p+8);qToBigEndian<quint16>(quint16(d->lastReceivedSequence-(d->lastReceivedFrame-frame)/960),p+12);try{d->track->send(reinterpret_cast<const std::byte*>(nack.constData()),nack.size());++d->nacksSent;d->lastNack=monotonicNanos();return true;}catch(...){return false;}
 #else

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import existing local lyrics into Djaly over MCP, preserving registered lyrics."""
+"""Import existing local lyrics into plumdeck over MCP, preserving registered lyrics."""
 import argparse
 import asyncio
 from collections import Counter

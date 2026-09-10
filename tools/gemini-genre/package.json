@@ -1,9 +1,9 @@
 {
-  "name": "djaly-gemini-genre",
+  "name": "plumdeck-gemini-genre",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Deploy-excluded Playwright tool: classify Djaly's unanalyzed genres through a Gemini Gem and save the results as JSON per batch.",
+  "description": "Deploy-excluded Playwright tool: classify plumdeck's unanalyzed genres through a Gemini Gem and save the results as JSON per batch.",
   "scripts": {
     "login": "tsx src/run.ts --login-only",
     "classify": "tsx src/run.ts",

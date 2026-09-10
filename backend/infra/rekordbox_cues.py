@@ -46,7 +46,7 @@ def read_hot_cues(filepath: str, database: Path | None = None) -> list[CuePoint]
 
     An exact rekordbox track with no hot cues returns an empty list. A missing
     database or unmatched path is reported separately so an import cannot
-    silently clear DJaly cues for the wrong source.
+    silently clear plumdeck cues for the wrong source.
     """
     database = database or master_db_path()
     if database is None or not database.is_file():

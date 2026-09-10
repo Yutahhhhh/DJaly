@@ -14,7 +14,7 @@ export function AudioSettings({ onClose, onApply }: {
   onApply: (outputDevice: string, microphone?: MicrophoneSettings) => Promise<void>;
 }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
-  const [selected, setSelected] = useState(() => localStorage.getItem("djaly.djOutputDevice") ?? "");
+  const [selected, setSelected] = useState(() => localStorage.getItem("plumdeck.djOutputDevice") ?? "");
   const [audio, setAudio] = useState<AudioConfig | null>(null);
   const [microphone, setMicrophone] = useState<MicrophoneSettings>(() => savedMicrophoneSettings() ?? DEFAULT_MICROPHONE);
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export function AudioSettings({ onClose, onApply }: {
   const micSupported = Boolean(audio?.microphone?.available);
   const micValid = !microphone.deviceId ? !microphone.enabled : Boolean(micDevice && !micAmbiguous && microphone.channel < (micDevice.inputChannels ?? 0));
   const canApply = Boolean(selectedDevice && selectedDevice.outputChannels >= 2 && !ambiguous && (!micSupported || micValid));
-  const outputChanged = selected !== (localStorage.getItem("djaly.djOutputDevice") ?? "") || !audio?.applied;
+  const outputChanged = selected !== (localStorage.getItem("plumdeck.djOutputDevice") ?? "") || !audio?.applied;
   const setMic = (patch: Partial<MicrophoneSettings>) => setMicrophone(old => ({ ...old, ...patch }));
   const apply = async () => {
     setApplying(true); setError(null);

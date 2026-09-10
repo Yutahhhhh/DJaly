@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize Djaly BPM values from the local Rekordbox collection."""
+"""Synchronize plumdeck BPM values from the local Rekordbox collection."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def post_json(url: str, payload: dict) -> dict:
         return json.load(response)
 
 
-def load_djaly_tracks(base_url: str) -> list[dict]:
+def load_plumdeck_tracks(base_url: str) -> list[dict]:
     with urllib.request.urlopen(f"{base_url}/api/settings/export/csv", timeout=300) as response:
         content = response.read().decode("utf-8-sig")
     return list(csv.DictReader(io.StringIO(content)))
@@ -87,20 +87,20 @@ def unique_candidate(candidates: list[dict]) -> tuple[dict | None, bool]:
     return None, bool(values)
 
 
-def build_plan(djaly_tracks: list[dict], path_index, metadata_index):
+def build_plan(plumdeck_tracks: list[dict], path_index, metadata_index):
     updates = []
     rollback = []
     counts = defaultdict(int)
-    djaly_metadata_counts = Counter(
+    plumdeck_metadata_counts = Counter(
         (normalize_text(track.get("artist", "")), normalize_text(track.get("title", "")))
-        for track in djaly_tracks
+        for track in plumdeck_tracks
     )
-    for track in djaly_tracks:
+    for track in plumdeck_tracks:
         candidate, ambiguous = unique_candidate(path_index.get(normalize_path(track["filepath"]), []))
         method = "path"
         if candidate is None and not ambiguous:
             key = (normalize_text(track.get("artist", "")), normalize_text(track.get("title", "")))
-            if djaly_metadata_counts[key] == 1:
+            if plumdeck_metadata_counts[key] == 1:
                 metadata_candidates = list(
                     {
                         (item["rekordbox_id"], item["bpm"]): item
@@ -146,15 +146,15 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument(
         "--audit-dir",
-        default=str(Path.home() / "Library/Application Support/Djaly/backups"),
+        default=str(Path.home() / "Library/Application Support/plumdeck/backups"),
     )
     args = parser.parse_args()
 
-    djaly_tracks = load_djaly_tracks(args.base_url)
+    plumdeck_tracks = load_plumdeck_tracks(args.base_url)
     path_index, metadata_index, rekordbox_count = load_rekordbox_indexes()
-    updates, rollback, counts = build_plan(djaly_tracks, path_index, metadata_index)
+    updates, rollback, counts = build_plan(plumdeck_tracks, path_index, metadata_index)
     summary = {
-        "djaly_tracks": len(djaly_tracks),
+        "plumdeck_tracks": len(plumdeck_tracks),
         "rekordbox_tracks": rekordbox_count,
         **counts,
     }

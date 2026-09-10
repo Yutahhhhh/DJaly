@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-const engines = await import(process.env.DJALY_PLAYWRIGHT_MODULE || 'playwright');
-const browser = await engines[process.env.DJALY_TEST_BROWSER || 'chromium'].launch();
+const engines = await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE || 'playwright');
+const browser = await engines[process.env.PLUMDECK_TEST_BROWSER || 'chromium'].launch();
 const wav = Buffer.alloc(44 + 44100 * 3 * 2);
 wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
 wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -31,7 +31,7 @@ try {
   await page.getByLabel('マイク入力チャンネル').selectOption('1');
   await page.getByLabel('マイクを出力する').check();
   await page.getByLabel('話している間、DJの音量を自動で下げる').check();
-  await page.screenshot({ path: '/tmp/djaly-audio-routing-ui.png' });
+  await page.screenshot({ path: '/tmp/plumdeck-audio-routing-ui.png' });
   assert.equal(await page.locator('#dj-output-device option').count(), 2, 'input-only device excluded from output picker');
   await page.getByRole('button', { name: '適用', exact: true }).click();
   const applied = (await events()).find(event => event.microphone);
@@ -41,7 +41,7 @@ try {
   await page.getByLabel('アーティスト名', { exact: true }).fill('Yutahhh');
   await page.getByLabel('ミックス名', { exact: true }).fill('Night Mix');
   await page.getByRole('combobox', { name: '保存形式' }).click();
-  await page.screenshot({ path: '/tmp/djaly-recording-formats-ui.png', animations: 'disabled' });
+  await page.screenshot({ path: '/tmp/plumdeck-recording-formats-ui.png', animations: 'disabled' });
   await page.getByRole('option', { name: 'MP3（320 kbps）' }).click();
   assert((await page.locator('.dj-recording-filename').textContent()).includes('Yutahhh - Night Mix.mp3'));
   await page.getByRole('button', { name: 'プレビューを再生', exact: true }).click();
@@ -70,7 +70,7 @@ try {
   await page.goto('http://127.0.0.1:1420/tools/play-workspace-fixture.html');
   const bulkButton = page.getByRole('button', { name: 'rekordbox CUE一括反映', exact: true });
   assert.equal(await bulkButton.count(), 1, 'bulk import appears once, never on individual decks');
-  await page.screenshot({ path: '/tmp/djaly-bulk-cue-workspace.png', animations: 'disabled' });
+  await page.screenshot({ path: '/tmp/plumdeck-bulk-cue-workspace.png', animations: 'disabled' });
   await bulkButton.click();
   await page.getByRole('dialog').waitFor();
   assert((await page.getByRole('dialog').textContent()).includes('反映 150 曲'));

@@ -21,14 +21,14 @@ export function RekordboxCueImportButton({ onImport }: { onImport: () => Promise
 
   return <>
     <button type="button" className="dj-button" disabled={loading} onClick={() => void importCues()}
-      title="DJalyライブラリ全曲のHOT CUE A–Hをrekordboxから一括反映します。対応する曲の保存済みCUEは置き換わります。">
+      title="plumdeckライブラリ全曲のHOT CUE A–Hをrekordboxから一括反映します。対応する曲の保存済みCUEは置き換わります。">
       {loading ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />}
       {loading ? "CUE一括反映中…" : "rekordbox CUE一括反映"}
     </button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-h-[80vh] overflow-y-auto border-[#34383f] bg-[#202327] text-[#e2e5e9] sm:max-w-lg">
         <DialogHeader><DialogTitle className="text-sm">rekordbox CUE一括反映</DialogTitle>
-          <DialogDescription className="text-xs text-[#aeb3bb]">DJalyに登録済みの全曲が対象です。ファイルパスが一致する曲のHOT CUE A–Hを取り込みます。</DialogDescription></DialogHeader>
+          <DialogDescription className="text-xs text-[#aeb3bb]">plumdeckに登録済みの全曲が対象です。ファイルパスが一致する曲のHOT CUE A–Hを取り込みます。</DialogDescription></DialogHeader>
         {result && <div role="status" className="space-y-3 text-sm">
           <p>反映 {result.imported.toLocaleString()} 曲 · 対応なし {result.skipped.toLocaleString()} 曲 · 失敗 {result.failed.toLocaleString()} 曲 · 編集競合 {result.conflicts.toLocaleString()} 曲</p>
           <p className="text-xs text-[#aeb3bb]">対応のない曲と編集中に競合した曲は変更していません。</p>

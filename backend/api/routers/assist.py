@@ -1,7 +1,7 @@
 """Assist-mode endpoints.
 
 Every route here is read-only with respect to both libraries: nothing is written
-to the Djaly database and the rekordbox collection is only ever opened
+to the plumdeck database and the rekordbox collection is only ever opened
 read-only.
 """
 from fastapi import APIRouter, Depends, HTTPException

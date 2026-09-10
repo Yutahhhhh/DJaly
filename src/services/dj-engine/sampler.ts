@@ -11,7 +11,7 @@ const valid = (data: unknown): data is SamplerState => {
   return Boolean(s && Array.isArray(s.slots) && s.slots.length === 16 && s.slots.every((v, i) => v.slot === i && typeof v.path === "string" && Number.isSafeInteger(v.revision)) && Number.isFinite(s.gain) && typeof s.pfl === "boolean");
 };
 function saved(): string[] {
-  try { const paths = JSON.parse(localStorage.getItem("djaly.sampler.paths") ?? "[]"); return Array.from({length:64}, (_, i) => typeof paths[i] === "string" ? paths[i] : ""); } catch { return []; }
+  try { const paths = JSON.parse(localStorage.getItem("plumdeck.sampler.paths") ?? "[]"); return Array.from({length:64}, (_, i) => typeof paths[i] === "string" ? paths[i] : ""); } catch { return []; }
 }
 export const sampler = {
   getSnapshot: () => state,
@@ -25,12 +25,12 @@ export const sampler = {
   async load(slot: number, path: string) {
     const bank = state.bank;
     await this.command("load", { slot, path, bank });
-    const paths = saved(); paths[bank * 16 + slot] = path; localStorage.setItem("djaly.sampler.paths", JSON.stringify(paths));
+    const paths = saved(); paths[bank * 16 + slot] = path; localStorage.setItem("plumdeck.sampler.paths", JSON.stringify(paths));
   },
   async eject(slot: number) {
     const bank = state.bank;
     await this.command("eject", { slot, bank });
-    const paths = saved(); paths[bank * 16 + slot] = ""; localStorage.setItem("djaly.sampler.paths", JSON.stringify(paths));
+    const paths = saved(); paths[bank * 16 + slot] = ""; localStorage.setItem("plumdeck.sampler.paths", JSON.stringify(paths));
   },
   async trigger(slot: number, stop = false) {
     const sample = state.slots[slot];

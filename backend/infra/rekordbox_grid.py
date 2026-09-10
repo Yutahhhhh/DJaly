@@ -21,7 +21,7 @@ class RekordboxGridError(ValueError):
 
 
 def master_db_path() -> Path | None:
-    explicit = os.environ.get("DJALY_REKORDBOX_DB")
+    explicit = os.environ.get("PLUMDECK_REKORDBOX_DB")
     if explicit:
         return Path(explicit).expanduser()
     if sys.platform == "darwin":

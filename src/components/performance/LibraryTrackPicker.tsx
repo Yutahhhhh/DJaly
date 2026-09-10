@@ -60,7 +60,7 @@ export function LibraryTrackPicker({ deck, onClose, onSelect }: LibraryTrackPick
         <DialogHeader>
           <DialogTitle>Load library track into Deck {deck}</DialogTitle>
           <DialogDescription>
-            DJaly remains the source of truth; the native engine receives a temporary descriptor.
+            plumdeck remains the source of truth; the native engine receives a temporary descriptor.
           </DialogDescription>
         </DialogHeader>
         <form className="flex gap-2" onSubmit={submit}>

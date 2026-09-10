@@ -18,7 +18,7 @@ def _track(session: Session, duration: float = 180.0) -> Track:
     track = Track(
         filepath="/performance/metadata.mp3",
         title="Metadata",
-        artist="DJaly",
+        artist="plumdeck",
         genre="House",
         bpm=128.0,
         key="8A",
@@ -201,7 +201,7 @@ def test_cue_points_lists_only_stored_cues(client, session: Session):
     other = Track(
         filepath="/performance/no-cues.mp3",
         title="No cues",
-        artist="DJaly",
+        artist="plumdeck",
         genre="House",
         bpm=128.0,
         key="8A",

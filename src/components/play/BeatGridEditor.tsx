@@ -83,7 +83,7 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
     catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (alive.current) setBusy(""); }
   };
-  const source = draft.source === "rekordbox" ? "rekordbox" : draft.source === "analysis" ? "Djaly解析・小節頭は要確認" : draft.source === "manual" || props.hasGrid ? "手修正" : "未解析・仮グリッド";
+  const source = draft.source === "rekordbox" ? "rekordbox" : draft.source === "analysis" ? "plumdeck解析・小節頭は要確認" : draft.source === "manual" || props.hasGrid ? "手修正" : "未解析・仮グリッド";
   return <div className="dj-grid-editor" role="group" aria-label="ビートグリッド編集">
     <div className="dj-grid-editor__head"><strong>GRID EDIT</strong><span className="dj-grid-editor__source">{source}</span><span className="dj-grid-editor__unsaved">{changed ? "未適用" : ""}</span>
       <button disabled={Boolean(disabled || busy)} aria-label="グリッド編集を閉じる" onClick={cancel}>×</button>

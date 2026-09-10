@@ -208,7 +208,7 @@ impl Transport {
 
 // The native Mixxx performance host currently communicates over a Unix domain
 // socket and is staged by the macOS-only performance build. Keep the regular
-// Windows DJaly application buildable and make this optional acceleration path
+// Windows plumdeck application buildable and make this optional acceleration path
 // explicitly unavailable instead of compiling Unix APIs on Windows.
 #[cfg(not(unix))]
 pub struct Transport {

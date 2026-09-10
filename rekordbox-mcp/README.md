@@ -41,7 +41,7 @@ Rekordbox への接続と永続化、`mcp/` と `webapi/` はそれぞれのア�
 - `uv`
 
 ```bash
-cd /path/to/Djaly/rekordbox-mcp
+cd /path/to/plumdeck/rekordbox-mcp
 uv sync
 cp .env.example .env   # 必要に応じて編集
 ```
@@ -191,7 +191,7 @@ uv run pytest tests/ -v
 
 ## ライセンスと upstream
 
-本プロジェクトは MIT License（Djaly Project, 2025）です。upstream の著作権表示と
+本プロジェクトは MIT License（plumdeck Project, 2025）です。upstream の著作権表示と
 ライセンス全文は [LICENSE](LICENSE) に収録しています。
 
 - [pyrekordbox](https://github.com/dylanljones/pyrekordbox) — MIT、Dylan Jones
@@ -204,7 +204,7 @@ uv run pytest tests/ -v
 
 ## MCP クライアント設定
 
-以下の例では、プロジェクトを `/path/to/Djaly/rekordbox-mcp`
+以下の例では、プロジェクトを `/path/to/plumdeck/rekordbox-mcp`
 に置いている前提です。`cwd`／`args` のパスは各環境に合わせて変更してください。
 クライアントからは stdio で接続するため、サーバーの標準出力にログを出さないでください。
 
@@ -236,7 +236,7 @@ Claude Desktop の MCP 設定（通常は `claude_desktop_config.json`）に追�
     "rekordbox-readonly": {
       "command": "uv",
       "args": ["run", "rekordbox-mcp", "--mode", "readonly"],
-      "cwd": "/path/to/Djaly/rekordbox-mcp"
+      "cwd": "/path/to/plumdeck/rekordbox-mcp"
     }
   }
 }
@@ -260,7 +260,7 @@ XML または直接 DB 書込み用に接続する場合は、`args` を次の�
     "rekordbox": {
       "command": "uv",
       "args": ["run", "rekordbox-mcp", "--mode", "readonly"],
-      "cwd": "/path/to/Djaly/rekordbox-mcp",
+      "cwd": "/path/to/plumdeck/rekordbox-mcp",
       "env": {
         "REKORDBOX_DB_PATH": "/path/to/master.db",
         "REKORDBOX_MODE": "readonly"
@@ -281,7 +281,7 @@ XML または直接 DB 書込み用に接続する場合は、`args` を次の�
       "type": "stdio",
       "command": "uv",
       "args": ["run", "rekordbox-mcp", "--mode", "readonly"],
-      "cwd": "/path/to/Djaly/rekordbox-mcp"
+      "cwd": "/path/to/plumdeck/rekordbox-mcp"
     }
   }
 }
@@ -301,7 +301,7 @@ Cursor の MCP 設定（Settings の MCP またはプロジェクトの `.cursor
     "rekordbox": {
       "command": "uv",
       "args": ["run", "rekordbox-mcp", "--mode", "readonly"],
-      "cwd": "/path/to/Djaly/rekordbox-mcp"
+      "cwd": "/path/to/plumdeck/rekordbox-mcp"
     }
   }
 }

@@ -175,7 +175,7 @@ export function SettingsView() {
       title: 'Data Management (CSV)',
       icon: <FileSpreadsheet className="h-4 w-4" />,
       description: 'Export your library to back up analysis data. Import to restore or migrate data (supports path tracking).',
-      onExport: () => handleExport('library', settingsService.getExportUrl('library'), 'djaly_library.csv'),
+      onExport: () => handleExport('library', settingsService.getExportUrl('library'), 'plumdeck_library.csv'),
       onFileSelect: (file: File) => handleAnalyze(file, 'library'),
       variant: 'outline' as const,
       exportLabel: 'Export Library to CSV',
@@ -187,7 +187,7 @@ export function SettingsView() {
       title: 'Metadata Management (Lightweight CSV)',
       icon: <Globe className="h-4 w-4" />,
       description: 'Use this to bulk update track metadata (Title, Artist, Genre, Verified status) externally. This will NOT affect analysis data.',
-      onExport: () => handleExport('metadata', settingsService.getExportUrl('metadata'), 'djaly_metadata.csv'),
+      onExport: () => handleExport('metadata', settingsService.getExportUrl('metadata'), 'plumdeck_metadata.csv'),
       onFileSelect: (file: File) => handleAnalyze(file, 'metadata'),
       variant: 'secondary' as const,
       exportLabel: 'Export Metadata CSV',
@@ -258,7 +258,7 @@ export function SettingsView() {
                 <Input
                   id="recording-directory"
                   value={settings.recording_directory ?? ""}
-                  placeholder="未設定のときは ~/Music/Djaly Recordings"
+                  placeholder="未設定のときは ~/Music/plumdeck Recordings"
                   onChange={(event) =>
                     setSettings((prev) => ({ ...prev, recording_directory: event.target.value }))
                   }
@@ -366,7 +366,7 @@ export function SettingsView() {
             <div className="grid gap-2 p-4 border rounded-md bg-muted/20">
               <p className="text-sm font-medium">Provided by the connected MCP client</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Djaly does not store model names or API keys. Genre classification,
+                plumdeck does not store model names or API keys. Genre classification,
                 natural-language vibe interpretation, and lyric wordplay reasoning use
                 the model in Codex, Claude, or whichever MCP client is connected.
                 Connection details and available tools are shown on the MCP page.

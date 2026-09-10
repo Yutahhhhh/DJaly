@@ -1,6 +1,6 @@
 """Validation helpers for model-selected audio-feature targets.
 
-Natural-language interpretation belongs to the MCP client. Djaly only accepts
+Natural-language interpretation belongs to the MCP client. plumdeck only accepts
 the resulting structured values and applies them to deterministic search and
 setlist algorithms.
 """
@@ -17,7 +17,7 @@ FEATURE_RANGES = {
 
 
 def sanitize_target_parameters(values: Optional[Dict[str, Any]]) -> Dict[str, float]:
-    """Return finite, clamped numeric targets supported by Djaly."""
+    """Return finite, clamped numeric targets supported by plumdeck."""
     if not values or not isinstance(values, dict):
         return {}
 

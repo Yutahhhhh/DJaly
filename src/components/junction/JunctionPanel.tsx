@@ -52,7 +52,7 @@ export function JunctionPanel({ open, onClose, incomingInvite, onConsumeIncoming
   const host = active && s?.hostPeerId === s?.localPeerId;
   const isServerMode = s?.exchange?.mode === 'server' || Boolean(s?.invite && !s?.exchange);
 
-  const [name, setName] = useState(() => localStorage.getItem('djaly.junction.name') ?? '');
+  const [name, setName] = useState(() => localStorage.getItem('plumdeck.junction.name') ?? '');
   const [sessionName, setSessionName] = useState('');
   const [joinText, setJoinText] = useState('');
   const [importText, setImportText] = useState('');
@@ -108,7 +108,7 @@ export function JunctionPanel({ open, onClose, incomingInvite, onConsumeIncoming
     setEntryBusy(true);
     setEntryError('');
     try {
-      localStorage.setItem('djaly.junction.name', name);
+      localStorage.setItem('plumdeck.junction.name', name);
       await junctionCommand(op, params);
       setJoinText('');
       setPreview(null);

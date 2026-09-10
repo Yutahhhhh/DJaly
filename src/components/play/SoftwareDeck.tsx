@@ -72,13 +72,13 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
     const receive = (event: Event) => {
       const action = (event as CustomEvent<{ deck?: DeckId; control: string; value: number; mode?: number }>).detail;
       if (action.deck !== id) return;
-      if (action.control === "tempoRange" && TEMPO_RANGES.includes(action.value as TempoRange)) { setTempoRange(action.value as TempoRange); localStorage.setItem(`djaly.tempoRange.${id}`, String(action.value)); }
+      if (action.control === "tempoRange" && TEMPO_RANGES.includes(action.value as TempoRange)) { setTempoRange(action.value as TempoRange); localStorage.setItem(`plumdeck.tempoRange.${id}`, String(action.value)); }
     };
-    window.addEventListener("djaly:controller-library", receive);
-    return () => window.removeEventListener("djaly:controller-library", receive);
+    window.addEventListener("plumdeck:controller-library", receive);
+    return () => window.removeEventListener("plumdeck:controller-library", receive);
   }, [id]);
   const [loopMode, setLoopMode] = useState<LoopMode>("auto");
-  const [tempoRange, setTempoRange] = useState<TempoRange>(() => { const saved = Number(localStorage.getItem(`djaly.tempoRange.${id}`)) as TempoRange; return TEMPO_RANGES.includes(saved) ? saved : TEMPO_RANGES[2]; });
+  const [tempoRange, setTempoRange] = useState<TempoRange>(() => { const saved = Number(localStorage.getItem(`plumdeck.tempoRange.${id}`)) as TempoRange; return TEMPO_RANGES.includes(saved) ? saved : TEMPO_RANGES[2]; });
   const [fxMix, setFxMix] = useState(.8);
   const trackId = localTrackId(deck?.track);
   const { data } = useTrackVisuals(trackId);
@@ -136,9 +136,9 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
   const stateKind = leading ? "master" : deck?.status === "error" ? "error" : deck?.status === "playing" ? "playing" : "idle";
 
   return <article aria-label={`Deck ${id}`} data-deck={id} onClick={onActivate}
-    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-djaly-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragOver(true); } }}
+    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragOver(true); } }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(false); }}
-    onDrop={(event) => { event.preventDefault(); setDragOver(false); try { const track = JSON.parse(event.dataTransfer.getData("application/x-djaly-track")) as Track; if (track.id && track.filepath && track.duration > 0) onDropTrack(track); } catch { /* Ignore foreign drag data. */ } }}
+    onDrop={(event) => { event.preventDefault(); setDragOver(false); try { const track = JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track; if (track.id && track.filepath && track.duration > 0) onDropTrack(track); } catch { /* Ignore foreign drag data. */ } }}
     className={cn("dj-deck", left ? "dj-deck--left" : "dj-deck--right", active && "dj-deck--active", !deck?.track && "dj-deck--empty", dragOver && "dj-deck--drop")}>
     <div className="dj-track-info">
       <button className="dj-deck-number" aria-label={`Select deck ${id}`} aria-pressed={active} onClick={onActivate}>{id}</button>
@@ -247,7 +247,7 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
       </div>
       <TempoPlatter deckId={id} bpm={bpm} trackBpm={trackBpm} rate={rate} positionMs={position}
         playing={deck?.status === "playing"} disabled={!supported("deck.tempo")}
-        range={tempoRange} onRange={(range) => { setTempoRange(range); localStorage.setItem(`djaly.tempoRange.${id}`, String(range)); window.dispatchEvent(new CustomEvent("djaly:controller-tempo-range", { detail: { deck: id, range } })); }} onTempo={onTempo} />
+        range={tempoRange} onRange={(range) => { setTempoRange(range); localStorage.setItem(`plumdeck.tempoRange.${id}`, String(range)); window.dispatchEvent(new CustomEvent("plumdeck:controller-tempo-range", { detail: { deck: id, range } })); }} onTempo={onTempo} />
       <button className="dj-eject dj-eject--deck" disabled={disabled} onClick={onUnload} aria-label={`Eject deck ${id}`} title="デッキから取り出す"><Upload /></button>
     </div>
     {deck?.lastError && <div className="dj-deck-error" role="alert">{deck.lastError}</div>}

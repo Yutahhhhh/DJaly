@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const output = path.join(root, 'smoke-artifacts');
 await mkdir(output, { recursive: true });
 const startedAt = new Date().toISOString();
-const reportPath = path.join(output, process.env.DJALY_SMOKE_TWO_DECKS === '1' ? 'result-two-deck.json' : 'result.json');
+const reportPath = path.join(output, process.env.PLUMDECK_SMOKE_TWO_DECKS === '1' ? 'result-two-deck.json' : 'result.json');
 await writeFile(reportPath, JSON.stringify({ passed: false, status: 'running', startedAt }));
 // Generated 12-second stereo 440 Hz / 660 Hz fixture, no user media touched.
 const sr = 44100, samples = sr * 12, pcm = Buffer.alloc(samples * 4);
@@ -25,14 +25,14 @@ header.writeUInt32LE(sr, 24); header.writeUInt32LE(sr * 4, 28); header.writeUInt
 header.write('data', 36); header.writeUInt32LE(pcm.length, 40);
 const fixture = path.join(output, 'fixture.wav');
 await writeFile(fixture, Buffer.concat([header, pcm]));
-const binary = process.env.DJALY_TEST_HOST || path.join(root, 'build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.join(root, 'build-upstream/plumdeck-mixxx-engine-host');
 const binarySHA256 = createHash('sha256').update(await readFile(binary)).digest('hex');
 const recordingDir = path.join(output, 'recordings');
 await mkdir(recordingDir, { recursive: true });
-const outputSelection = process.env.DJALY_SMOKE_DEFAULT_OUTPUT === '1'
+const outputSelection = process.env.PLUMDECK_SMOKE_DEFAULT_OUTPUT === '1'
   ? {}
-  : { DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' };
-const child = spawn(binary, [], { env: { ...process.env, ...(process.env.DJALY_TRACE_LIBRARIES ? { DYLD_PRINT_LIBRARIES: '1' } : {}), ...outputSelection, DJALY_MIXXX_RECORDING_DIR: recordingDir }, stdio: ['pipe', 'pipe', 'pipe'] });
+  : { PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' };
+const child = spawn(binary, [], { env: { ...process.env, ...(process.env.PLUMDECK_TRACE_LIBRARIES ? { DYLD_PRINT_LIBRARIES: '1' } : {}), ...outputSelection, PLUMDECK_MIXXX_RECORDING_DIR: recordingDir }, stdio: ['pipe', 'pipe', 'pipe'] });
 let stderr = '', id = 0, hello;
 const transcript = [], queue = [], waiting = [];
 child.stderr.on('data', data => { stderr += data; });
@@ -91,7 +91,7 @@ try {
   hello = await command('session.hello');
   const restored = (await command('state.snapshot')).data; assert.equal(restored.decks.A.status, 'playing'); assert(restored.decks.A.positionMs > 4300);
   let twoDeck;
-  if (process.env.DJALY_SMOKE_TWO_DECKS === '1') {
+  if (process.env.PLUMDECK_SMOKE_TWO_DECKS === '1') {
     const pcmB = Buffer.alloc(samples * 4);
     for (let i = 0; i < samples; i++) {
       pcmB.writeInt16LE(Math.round(3000 * Math.sin(2 * Math.PI * 880 * i / sr)), i * 4);

@@ -5,7 +5,7 @@ use tauri::State;
 use crate::dj_engine::EngineSupervisor;
 pub fn cache_root() -> Result<PathBuf,String> {
     let home=std::env::var_os("HOME").ok_or("Home directory unavailable")?;
-    Ok(PathBuf::from(home).join("Library/Caches/Djaly/waveform-v2"))
+    Ok(PathBuf::from(home).join("Library/Caches/plumdeck/waveform-v2"))
 }
 fn valid_key(key:&str)->bool {key.len()==64 && key.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))}
 struct Lease {engine:Arc<EngineSupervisor>,session:String,id:String}

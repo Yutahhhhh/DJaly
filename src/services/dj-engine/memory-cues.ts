@@ -3,7 +3,7 @@ import { junctionLeaseKey } from '../junction/state';
 import type { DeckId } from "../../types/dj-engine";
 import { djEngineClient } from "./client";
 export type MemoryCue = { positionMs: number; endMs?: number };
-const key = (track: string) => `djaly.memoryCues.${track}`;
+const key = (track: string) => `plumdeck.memoryCues.${track}`;
 export function memoryCues(track: string, duration = Infinity): MemoryCue[] {
   try { const data = JSON.parse(localStorage.getItem(key(track)) ?? "[]"); return Array.isArray(data) ? data.filter((v): v is MemoryCue => v && Number.isFinite(v.positionMs) && v.positionMs >= 0 && v.positionMs < duration && (v.endMs === undefined || Number.isFinite(v.endMs) && v.endMs > v.positionMs && v.endMs <= duration)).slice(0,64).sort((a,b) => a.positionMs-b.positionMs) : []; } catch { return []; }
 }
@@ -31,5 +31,5 @@ export async function memoryAction(deck: DeckId, action: "save" | "delete" | "pr
     return;
   }
   localStorage.setItem(key(trackId), JSON.stringify(points.sort((a,b) => a.positionMs-b.positionMs)));
-  window.dispatchEvent(new CustomEvent("djaly:memory-cues", {detail:{trackId}}));
+  window.dispatchEvent(new CustomEvent("plumdeck:memory-cues", {detail:{trackId}}));
 }

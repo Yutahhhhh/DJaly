@@ -6,11 +6,11 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import path from 'node:path';
-const binary=process.env.DJALY_TEST_HOST||path.resolve(import.meta.dirname,'../../build-upstream/djaly-mixxx-engine-host');
+const binary=process.env.PLUMDECK_TEST_HOST||path.resolve(import.meta.dirname,'../../build-upstream/plumdeck-mixxx-engine-host');
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(read,predicate,label,timeout=40000){const end=Date.now()+timeout;let last;while(Date.now()<end){last=await read();if(predicate(last))return last;await pause(60);}throw Error(`${label}: timed out; phase=${last?.handoffState}, connection=${last?.connection?.state}`);}
 function native(directory){
- const child=spawn(binary,[],{env:{...process.env,DJALY_JUNCTION_EPHEMERAL_NETWORK:'1',DJALY_MIXXX_OUTPUT_DEVICE:process.env.DJALY_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch',DJALY_MIXXX_RECORDING_DIR:directory}});
+ const child=spawn(binary,[],{env:{...process.env,PLUMDECK_JUNCTION_EPHEMERAL_NETWORK:'1',PLUMDECK_MIXXX_OUTPUT_DEVICE:process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE||'BlackHole 2ch',PLUMDECK_MIXXX_RECORDING_DIR:directory}});
  let hello,id=0,stderr='';const pending=new Map();child.stderr.on('data',b=>{stderr=(stderr+b).slice(-3000);});
  const reject=reason=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(reason);}pending.clear();};child.on('error',reject);child.on('exit',code=>reject(Error(`Native exited: ${code}`)));
  createInterface({input:child.stdout}).on('line',line=>{let reply;try{reply=JSON.parse(line);}catch{return;}const p=pending.get(reply.id);if(p){clearTimeout(p.timer);pending.delete(reply.id);p.resolve(reply);}});
@@ -28,7 +28,7 @@ async function response(guest,text,name){await guest.command('junction.exchange.
 const denied=r=>r.kind==='error'||r.ok===false;
 test('manual multi-DJ admission, cancellation, handoff and same-peer re-exchange without a signaling server',{timeout:300000},async()=>{
  const relay=Boolean(process.env.JUNCTION_TURN_ADDRESS);
- const directory=await mkdtemp('/tmp/djaly-manual-runtime-');const host=native(directory),first=native(directory),second=native(directory);const peers=[host,first,second];
+ const directory=await mkdtemp('/tmp/plumdeck-manual-runtime-');const host=native(directory),first=native(directory),second=native(directory);const peers=[host,first,second];
  try{
   for(const peer of peers)await peer.start();console.info('native engines ready');
   if(relay){

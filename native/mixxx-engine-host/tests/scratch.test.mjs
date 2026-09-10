@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function pcmWindow(wave, fromMs, toMs) {
@@ -34,7 +34,7 @@ function pcmWindow(wave, fromMs, toMs) {
 }
 
 test('native waveform scratch: paused/playing motion PCM, hold/release, gesture races and watchdog', { timeout: 45000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-native-scratch-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-native-scratch-'));
   const fixture = path.join(directory, 'mono-48000.wav');
   // A mono source at 48 kHz deliberately differs from the stereo 44.1 kHz
   // engine. Scratch positions must still use SOURCE frames * two.
@@ -46,7 +46,7 @@ test('native waveform scratch: paused/playing motion PCM, hold/release, gesture 
   wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34); wave.write('data', 36); wave.writeUInt32LE(frames * 2, 40);
   for (let i = 0; i < frames; i++) wave.writeInt16LE(Math.round(4000 * Math.sin(2 * Math.PI * 440 * i / rate)), 44 + i * 2);
   await writeFile(fixture, wave);
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_TIMING_TRACE: '1', DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_TIMING_TRACE: '1', PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', id = 0, hello, observeTelemetry = false;
   const telemetry = { fullStates: 0, positionEvents: 0, positionBytes: 0, maxPositionBytes: 0, batchedEvents: 0 };
   const observedBpms = new Set();
@@ -158,7 +158,7 @@ test('native waveform scratch: paused/playing motion PCM, hold/release, gesture 
     await move(1200, -1200, 1000);
     await hold(-1200, 800);
     const backward = (await snapshot()).decks.A;
-    if (process.env.DJALY_MIXXX_TIMING_TRACE === '1') {
+    if (process.env.PLUMDECK_MIXXX_TIMING_TRACE === '1') {
       const timing = await command('deck.timing.trace', { deck: 'A' });
       console.log(JSON.stringify({ pausedHoldTrace: timing.rows.slice(-40) }));
     }

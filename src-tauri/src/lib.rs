@@ -8,7 +8,7 @@ use std::sync::Mutex;
 #[derive(Default)]
 struct JunctionInvite(Mutex<Option<String>>);
 fn valid_junction_invite(value: &str) -> bool {
-    value.len() <= 8192 && value.starts_with("djaly-junction://join?") && !value.chars().any(char::is_control)
+    value.len() <= 8192 && value.starts_with("plumdeck-junction://join?") && !value.chars().any(char::is_control)
 }
 #[tauri::command]
 fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String> {
@@ -37,7 +37,7 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
-                let app_menu = Submenu::new(handle, "Djaly", true)?;
+                let app_menu = Submenu::new(handle, "plumdeck", true)?;
                 app_menu.append(&PredefinedMenuItem::hide(handle, None)?)?;
                 app_menu.append(&PredefinedMenuItem::hide_others(handle, None)?)?;
                 app_menu.append(&PredefinedMenuItem::quit(handle, None)?)?;
@@ -123,7 +123,7 @@ pub fn run() {
             // ネイティブ DJ エンジン（Phase 0 シミュレータ）はオプトイン起動。
             // 既定では起動せず、フロントは「未起動」を受け取って素直に劣化する。
             // Python サイドカーとは独立なので、CI 判定より前に置く。
-            if env_flag("DJALY_DJ_ENGINE_AUTOSTART") {
+            if env_flag("PLUMDECK_DJ_ENGINE_AUTOSTART") {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let supervisor = handle
@@ -156,12 +156,12 @@ pub fn run() {
 
             let sidecar_command = app
                 .shell()
-                .sidecar("djaly-server")
+                .sidecar("plumdeck-server")
                 .map_err(|e| {
                     eprintln!("Failed to create sidecar command: {}", e);
                     e
                 })?
-                .env("DJALY_PORT", port);
+                .env("PLUMDECK_PORT", port);
 
             // コマンドの実行結果を詳細にログ出力
             println!("Attempting to spawn sidecar with port: {}", port);

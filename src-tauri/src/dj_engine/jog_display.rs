@@ -383,7 +383,7 @@ mod mac {
                     // A bounded, overwritten diagnostic snapshot; no track
                     // names, paths, audio, or raw MIDI content are included.
                     let _ = std::fs::write(
-                        std::env::temp_dir().join("djaly-ddj-display-status.json"),
+                        std::env::temp_dir().join("plumdeck-ddj-display-status.json"),
                         json,
                     );
                 }
@@ -406,10 +406,10 @@ mod mac {
                 last_scan = Instant::now();
                 let opened = (|| -> Result<_, String> {
                     let mut input =
-                        MidiInput::new("DJaly jog handshake").map_err(|e| e.to_string())?;
+                        MidiInput::new("plumdeck jog handshake").map_err(|e| e.to_string())?;
                     input.ignore(midir::Ignore::None);
                     let output =
-                        MidiOutput::new("DJaly jog heartbeat").map_err(|e| e.to_string())?;
+                        MidiOutput::new("plumdeck jog heartbeat").map_err(|e| e.to_string())?;
                     let ins: Vec<_> = input
                         .ports()
                         .into_iter()
@@ -428,7 +428,7 @@ mod mac {
                     let ip = input
                         .connect(
                             &ins[0],
-                            "DJaly jog input",
+                            "plumdeck jog input",
                             move |_, b, _| {
                                 if b.len() <= 256 && b.first() == Some(&0xf0) {
                                     let _ = sender.try_send(b.to_vec());
@@ -438,7 +438,7 @@ mod mac {
                         )
                         .map_err(|e| e.to_string())?;
                     let mut op = output
-                        .connect(&outs[0], "DJaly jog output")
+                        .connect(&outs[0], "plumdeck jog output")
                         .map_err(|e| e.to_string())?;
                     let api = hidapi::HidApi::new().map_err(|e| e.to_string())?;
                     let dev = api

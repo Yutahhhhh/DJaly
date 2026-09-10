@@ -35,7 +35,7 @@ export function Sidebar({
       )}
     >
       <div className="p-4 flex items-center justify-between h-16 border-b">
-        {isOpen && <span className="font-bold text-xl">Djaly</span>}
+        {isOpen && <span className="font-bold text-xl">plumdeck</span>}
         <Button variant="ghost" size="icon" aria-label="サイドバーを開閉" onClick={toggleSidebar}>
           <Menu className="h-5 w-5" />
         </Button>

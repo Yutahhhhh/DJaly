@@ -1,4 +1,4 @@
-//! DJaly ネイティブ DJ エンジンの **シミュレータ** 実行ファイル。
+//! plumdeck ネイティブ DJ エンジンの **シミュレータ** 実行ファイル。
 //!
 //! stdin から NDJSON コマンドを読み、stdout へ NDJSON メッセージを書く。
 //! ログは stderr のみ。音声デバイスは開かず、音は一切出ない。
@@ -221,7 +221,7 @@ fn parse_f64(key: &str, raw: String) -> Result<f64, String> {
 
 fn print_usage() {
     eprintln!(
-        "dj-engine-sim — DJaly ネイティブエンジンのシミュレータ（音は出ません）\n\
+        "dj-engine-sim — plumdeck ネイティブエンジンのシミュレータ（音は出ません）\n\
          \n\
          使い方: dj-engine-sim [オプション]\n\
          \n\

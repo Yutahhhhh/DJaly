@@ -35,7 +35,7 @@ class FakeRows:
         return self.rows
 
 
-def test_reader_maps_rekordbox_kinds_to_eight_djaly_slots(tmp_path, monkeypatch):
+def test_reader_maps_rekordbox_kinds_to_eight_plumdeck_slots(tmp_path, monkeypatch):
     database = tmp_path / "master.db"
     database.touch()
     connection = FakeConnection([

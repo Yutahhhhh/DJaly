@@ -6,8 +6,8 @@ export function LoadingScreen() {
       <div className="relative flex flex-col items-center">
         <div className="relative h-24 w-24 mb-6 flex items-center justify-center">
           <img 
-            src="/DJALY_LOGO.png" 
-            alt="Djaly Logo" 
+            src="/plumdeck-logo.png"
+            alt="plumdeck logo"
             className="h-24 w-24 object-contain"
           />
         </div>

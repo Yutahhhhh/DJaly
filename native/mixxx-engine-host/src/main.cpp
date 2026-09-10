@@ -5,19 +5,19 @@
 #include <csignal>
 #include <fcntl.h>
 #include <unistd.h>
-#ifdef DJALY_WITH_MIXXX
+#ifdef PLUMDECK_WITH_MIXXX
 #include <QApplication>
 #endif
 
 int main(int argc, char** argv) {
     std::signal(SIGPIPE, SIG_IGN);
-#ifdef DJALY_WITH_MIXXX
+#ifdef PLUMDECK_WITH_MIXXX
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv); // Qt runtime only; no windows, skins or library.
 #else
     QCoreApplication app(argc, argv);
 #endif
-    app.setApplicationName("djaly-mixxx-engine-host");
+    app.setApplicationName("plumdeck-mixxx-engine-host");
     Host host(makeBackend());
     constexpr qsizetype maxLine = 1024 * 1024 + 4096;
     QByteArray pending;

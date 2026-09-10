@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-const engines = await import(process.env.DJALY_PLAYWRIGHT_MODULE || 'playwright');
-const browser = await engines[process.env.DJALY_TEST_BROWSER || 'chromium'].launch();
+const engines = await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE || 'playwright');
+const browser = await engines[process.env.PLUMDECK_TEST_BROWSER || 'chromium'].launch();
 try {
   const page = await browser.newPage({viewport:{width:1200,height:800},deviceScaleFactor:2});
   const errors=[]; page.on('pageerror', e=>errors.push(e.message));
@@ -30,10 +30,10 @@ try {
   assert.equal(scratch[0].phase,'begin'); assert.equal(scratch.at(-1).phase,'end');
   assert(scratch.some(c=>c.phase==='move' && c.positionMs<0));
   await page.getByRole('button',{name:'保存・適用'}).click();assert((await result()).saved);
-  await page.getByRole('button',{name:'グリッド解析',exact:true}).click();await page.getByText('Djaly解析・小節頭は要確認',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'グリッド解析',exact:true}).click();await page.getByText('plumdeck解析・小節頭は要確認',{exact:true}).waitFor();
   await page.getByRole('button',{name:'rekordboxから読込'}).click();
   await page.getByText('rekordbox',{exact:true}).waitFor();
-  await page.screenshot({path:'/tmp/djaly-grid-source-editor.png'});
+  await page.screenshot({path:'/tmp/plumdeck-grid-source-editor.png'});
   await page.getByRole('button',{name:'▶',exact:true}).click();
   const beforeResize=(await result()).position;
   for(const width of [940,1600,1024,1400]){
@@ -45,6 +45,6 @@ try {
   await page.getByRole('button',{name:'Ⅱ',exact:true}).click();
   assert(await canvas.evaluate(c=>c.width<=8192 && c.height<=8192));
   await page.getByRole('button',{name:'縦横切替'}).click();await page.getByRole('button',{name:'密度切替'}).click();
-  await page.screenshot({path:'/tmp/djaly-grid-source-editor-vertical.png'});
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,gridDragSeekCount:shifted.seekCount,shiftedFirstBeatMs:shifted.first,screenshots:['/tmp/djaly-grid-source-editor.png','/tmp/djaly-grid-source-editor-vertical.png']}));
+  await page.screenshot({path:'/tmp/plumdeck-grid-source-editor-vertical.png'});
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,gridDragSeekCount:shifted.seekCount,shiftedFirstBeatMs:shifted.first,screenshots:['/tmp/plumdeck-grid-source-editor.png','/tmp/plumdeck-grid-source-editor-vertical.png']}));
 } finally {await browser.close()}

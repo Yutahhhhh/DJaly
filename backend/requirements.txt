@@ -14,6 +14,9 @@ platformdirs
 pyinstaller
 pydantic-settings
 aiohttp
-mcp
+mcp[cli]
 pyrekordbox==0.4.4
 sqlcipher3-wheels==0.5.7
+pytest
+pytest-asyncio
+pytest-mock

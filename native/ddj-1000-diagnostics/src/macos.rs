@@ -524,8 +524,8 @@ pub fn monitor_source(unique_id: i32, seconds: u64, json_output: bool) -> Result
         }
         let source = matching[0];
         let source_name = midi_string(source)?;
-        let client_name = make_cf_string(b"DJaly DDJ diagnostics\0")?;
-        let port_name = make_cf_string(b"DJaly monitor input\0")?;
+        let client_name = make_cf_string(b"plumdeck DDJ diagnostics\0")?;
+        let port_name = make_cf_string(b"plumdeck monitor input\0")?;
         let mut resources = MidiResources {
             client: 0,
             port: 0,

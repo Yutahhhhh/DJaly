@@ -35,7 +35,7 @@ async function flushRecording(problems: string[]): Promise<void> {
 /**
  * Pauses every deck but keeps the engine process alive and reconnectable.
  *
- * This is the Play → 解析 path: the DJ is still inside Djaly, so tearing the
+ * This is the Play → 解析 path: the DJ is still inside plumdeck, so tearing the
  * engine down would make going back cost a full restart.
  */
 export async function suspendPerformanceAudio(): Promise<ReleaseOutcome> {

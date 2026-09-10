@@ -6,13 +6,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('real-track scratch response and reversal latency', { timeout: 45000, skip: !process.env.DJALY_SCRATCH_TRACK }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-native-scratch-'));
-  const input=process.env.DJALY_SCRATCH_TRACK;
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_TIMING_TRACE: '1', DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+test('real-track scratch response and reversal latency', { timeout: 45000, skip: !process.env.PLUMDECK_SCRATCH_TRACK }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-native-scratch-'));
+  const input=process.env.PLUMDECK_SCRATCH_TRACK;
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_TIMING_TRACE: '1', PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', id = 0, hello;
   const pending = new Map();
   child.stderr.on('data', data => { stderr = (stderr + data).slice(-12000); });

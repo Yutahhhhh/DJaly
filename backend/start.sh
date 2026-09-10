@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "[INFO] Starting Djaly Backend Initialization..."
+echo "[INFO] Starting plumdeck Backend Initialization..."
 
 # 1. 環境変数の強制設定
 export OMP_NUM_THREADS=1
@@ -14,8 +14,8 @@ export NUMEXPR_NUM_THREADS=1
 if [ -d "/db_data" ]; then
     echo "[INFO] Cleaning up potential database locks in /db_data..."
     rm -f /db_data/*.wal
-    rm -f /db_data/djaly.duckdb.wal
-    rm -f /db_data/djaly.duckdb.lock
+    rm -f /db_data/plumdeck.duckdb.wal
+    rm -f /db_data/plumdeck.duckdb.lock
 else
     echo "[WARNING] /db_data directory not found. Using local directory."
 fi

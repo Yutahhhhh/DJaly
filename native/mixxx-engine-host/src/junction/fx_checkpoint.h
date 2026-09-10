@@ -4,7 +4,7 @@
 #include <memory>
 class EffectSlot;
 namespace junction::fx {
-inline constexpr auto format="djaly-fx-v1";
+inline constexpr auto format="plumdeck-fx-v1";
 inline constexpr auto fingerprint="mixxx-3ebac449-fx-state2";
 inline constexpr unsigned maxStateBytes=4*1024*1024;
 struct Route {

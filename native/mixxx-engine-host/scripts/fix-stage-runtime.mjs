@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 const bundle = path.resolve(process.argv[2]);
 const stageRoot = path.resolve(import.meta.dirname, '../stage');
 const relativeBundle = path.relative(stageRoot, bundle);
-assert(relativeBundle === 'DJalyMixxxHost.app' || /^\.staging\.[^/]+\/DJalyMixxxHost\.app$/.test(relativeBundle), 'Only this generated staging bundle may be modified');
+assert(relativeBundle === 'PlumdeckMixxxHost.app' || /^\.staging\.[^/]+\/PlumdeckMixxxHost\.app$/.test(relativeBundle), 'Only this generated staging bundle may be modified');
 const frameworks = path.join(bundle, 'Contents/Frameworks');
 const external = value => value.startsWith('/opt/homebrew/') || value.startsWith('/usr/local/');
 const exists = async file => { try { await access(file); return true; } catch { return false; } };

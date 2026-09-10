@@ -62,12 +62,12 @@ class AssistAppService:
         except RekordboxLibraryUnavailable as error:
             library_error = str(error)
 
-        djaly_tracks = self._tracks_by_filepath([entry.filepath for entry in entries.values()])
+        plumdeck_tracks = self._tracks_by_filepath([entry.filepath for entry in entries.values()])
 
         decks = []
         for observation in observations:
             decks.append(
-                self._resolve_deck(observation, entries, djaly_tracks, library_error)
+                self._resolve_deck(observation, entries, plumdeck_tracks, library_error)
             )
         return {
             "decks": decks,
@@ -79,7 +79,7 @@ class AssistAppService:
         self,
         observation: dict[str, Any],
         entries: dict[str, rekordbox_library.RekordboxEntry],
-        djaly_tracks: dict[str, Track],
+        plumdeck_tracks: dict[str, Track],
         library_error: Optional[str],
     ) -> dict[str, Any]:
         slot = int(observation.get("slot") or 0)
@@ -138,7 +138,7 @@ class AssistAppService:
             }
 
         entry = exact[0]
-        track = djaly_tracks.get(entry.filepath)
+        track = plumdeck_tracks.get(entry.filepath)
         if track is None:
             return {
                 **base,
@@ -146,7 +146,7 @@ class AssistAppService:
                 "rekordbox_id": entry.content_id,
                 "filepath": entry.filepath,
                 "match_confidence": confidence,
-                "message": "この曲は Djaly のライブラリに未登録のため、提案できません",
+                "message": "この曲は plumdeck のライブラリに未登録のため、提案できません",
             }
 
         return {

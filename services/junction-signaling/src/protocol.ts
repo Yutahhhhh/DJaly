@@ -1,4 +1,4 @@
-// Djaly Junction signaling wire protocol v1.
+// plumdeck Junction signaling wire protocol v1.
 //
 // Every frame is a single JSON object with {v:1, type:<name>, ...}.
 // This module is pure: no ws/net imports, only frame shapes + validators.

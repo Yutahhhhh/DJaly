@@ -64,8 +64,8 @@ export const DeckWaveform = memo(function DeckWaveform({ assetId, remoteWaveform
       const levels = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32];
       setZoomSeconds(current => levels[Math.max(0, Math.min(levels.length - 1, levels.indexOf(current) - Math.sign(action.value)))]);
     };
-    if (mode === "scroll") window.addEventListener("djaly:controller-library", zoom);
-    return () => window.removeEventListener("djaly:controller-library", zoom);
+    if (mode === "scroll") window.addEventListener("plumdeck:controller-library", zoom);
+    return () => window.removeEventListener("plumdeck:controller-library", zoom);
   }, [mode]);
   const bars = useMemo(() => barNumbers(beatTimesMs?.length ?? 0, beatNumbers, beatsPerBar), [beatTimesMs, beatNumbers, beatsPerBar]);
   const [dragging, setDragging] = useState(false);

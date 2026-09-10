@@ -1,7 +1,7 @@
 """Opt-in real CoreAudio microphone/ducking regression.
 
-Requires numpy and sounddevice. Set DJALY_TEST_MIC_DEVICE and
-DJALY_MIXXX_OUTPUT_DEVICE to TWO DISTINCT VIRTUAL audio devices. The test writes
+Requires numpy and sounddevice. Set PLUMDECK_TEST_MIC_DEVICE and
+PLUMDECK_MIXXX_OUTPUT_DEVICE to TWO DISTINCT VIRTUAL audio devices. The test writes
 generated tones to the mic device, records the master mix, and measures both
 sources. It never chooses or captures a hardware microphone implicitly.
 """
@@ -18,12 +18,12 @@ import wave
 import numpy as np
 import sounddevice as sd
 
-mic_device = os.environ["DJALY_TEST_MIC_DEVICE"]
-output_device = os.environ["DJALY_MIXXX_OUTPUT_DEVICE"]
+mic_device = os.environ["PLUMDECK_TEST_MIC_DEVICE"]
+output_device = os.environ["PLUMDECK_MIXXX_OUTPUT_DEVICE"]
 assert mic_device != output_device, "Separate virtual input and output required"
 root = Path(__file__).resolve().parent.parent
-binary = os.environ.get("DJALY_TEST_HOST", str(root / "build-upstream/djaly-mixxx-engine-host"))
-directory = Path(tempfile.mkdtemp(prefix="djaly-microphone-"))
+binary = os.environ.get("PLUMDECK_TEST_HOST", str(root / "build-upstream/plumdeck-mixxx-engine-host"))
+directory = Path(tempfile.mkdtemp(prefix="plumdeck-microphone-"))
 rate = 44100
 frames = np.arange(rate * 60)
 music = (np.sin(2 * np.pi * 223 * frames / rate) * 0.12 * 32767).astype("<i2")
@@ -34,7 +34,7 @@ with wave.open(str(fixture), "wb") as wav:
 stderr = open(directory / "host.log", "w")
 child = subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=stderr, text=True,
-                         env={**os.environ, "DJALY_MIXXX_RECORDING_DIR": str(directory)})
+                         env={**os.environ, "PLUMDECK_MIXXX_RECORDING_DIR": str(directory)})
 replies = queue.Queue()
 events = []
 

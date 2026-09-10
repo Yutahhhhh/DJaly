@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create/update Rekordbox GENRES playlists from Djaly's verified library."""
+"""Create/update Rekordbox GENRES playlists from plumdeck's verified library."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from rekordbox_mcp.db.connection import db6_tables
 from rekordbox_mcp.db.repository import RekordboxRepository
 from rekordbox_mcp.domain.models import OperationMode, Playlist
 
-DJALY_DB = Path("/Users/horiyuuta/Library/Application Support/Djaly/djaly.duckdb")
+PLUMDECK_DB = Path("/Users/horiyuuta/Library/Application Support/plumdeck/plumdeck.duckdb")
 REKORDBOX_DB = Path("/Users/horiyuuta/Library/Pioneer/rekordbox/master.db")
 ROOT_NAME = "GENRES"
 SPLIT_AT = 900
@@ -26,8 +26,8 @@ def next_seq(records: list[dict[str, str]], parent_id: str) -> int:
 
 
 def main() -> None:
-    # Djaly is authoritative for classification; Rekordbox is authoritative for IDs.
-    with duckdb.connect(str(DJALY_DB), read_only=True) as db:
+    # plumdeck is authoritative for classification; Rekordbox is authoritative for IDs.
+    with duckdb.connect(str(PLUMDECK_DB), read_only=True) as db:
         rows = db.execute(
             """
             SELECT filepath, trim(genre) AS genre, trim(subgenre) AS subgenre
@@ -108,7 +108,7 @@ def main() -> None:
                 result.append((genre, leaf, len(ids), len(filepaths) - len(ids)))
 
         print(f"Created/updated {len(result)} playlists in {ROOT_NAME}.")
-        print(f"Matched {sum(item[2] for item in result)} tracks; {missing} Djaly tracks were not in Rekordbox.")
+        print(f"Matched {sum(item[2] for item in result)} tracks; {missing} plumdeck tracks were not in Rekordbox.")
         for genre, leaf, matched, unmatched in result:
             print(f"{genre} / {leaf}: {matched}" + (f" (unmatched: {unmatched})" if unmatched else ""))
     finally:

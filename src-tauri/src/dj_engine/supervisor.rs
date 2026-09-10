@@ -7,7 +7,7 @@
 //!
 //! セキュリティ上の前提:
 //! - 実行するバイナリのパスは **webview からは決して受け取らない**。
-//!   環境変数 `DJALY_DJ_ENGINE_BIN`（絶対パス）か、開発時のビルド出力のみ。
+//!   環境変数 `PLUMDECK_DJ_ENGINE_BIN`（絶対パス）か、開発時のビルド出力のみ。
 //! - シェルを経由せず `std::process::Command` で直接起動する。
 //! - ネットワークリスナは一切開かない。
 
@@ -124,7 +124,7 @@ impl Default for EngineSupervisor {
 
 impl EngineSupervisor {
     pub fn new() -> Self {
-        let timeout_ms = std::env::var("DJALY_DJ_ENGINE_TIMEOUT_MS")
+        let timeout_ms = std::env::var("PLUMDECK_DJ_ENGINE_TIMEOUT_MS")
             .ok()
             .and_then(|raw| raw.parse::<u64>().ok())
             .unwrap_or(DEFAULT_TIMEOUT_MS)
@@ -184,18 +184,18 @@ impl EngineSupervisor {
 
         let output_device = normalize_output_device(output_device)?;
         let mut command = Command::new(&binary_path);
-        command.env("DJALY_WAVEFORM_CACHE", crate::waveform::cache_root()?);
+        command.env("PLUMDECK_WAVEFORM_CACHE", crate::waveform::cache_root()?);
         command
             .arg(format!("--tick-ms={TICK_MS}"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(output_device) = output_device {
-            command.env("DJALY_MIXXX_OUTPUT_DEVICE", output_device);
+            command.env("PLUMDECK_MIXXX_OUTPUT_DEVICE", output_device);
         }
-        // 保存先はアプリの設定。未指定ならエンジン既定の ~/Music/Djaly Recordings。
+        // 保存先はアプリの設定。未指定ならエンジン既定の ~/Music/plumdeck Recordings。
         if let Some(recording_dir) = normalize_recording_dir(recording_dir)? {
-            command.env("DJALY_MIXXX_RECORDING_DIR", recording_dir);
+            command.env("PLUMDECK_MIXXX_RECORDING_DIR", recording_dir);
         }
         let mut child = command.spawn().map_err(|error| {
             let message = format!(
@@ -516,7 +516,7 @@ impl EngineSupervisor {
     fn handshake(&self) -> Result<(), String> {
         let hello = self.dispatch(
             "session.hello",
-            json!({ "clientName": "djaly-tauri", "protocol": PROTOCOL_VERSION }),
+            json!({ "clientName": "plumdeck-tauri", "protocol": PROTOCOL_VERSION }),
             None,
         )?;
 
@@ -869,14 +869,14 @@ fn normalize_output_device(value: Option<String>) -> Result<Option<String>, Stri
 
 /// 実行するバイナリを決める。**webview からの入力は使わない。**
 fn resolve_binary() -> Result<PathBuf, String> {
-    if let Ok(raw) = std::env::var("DJALY_DJ_ENGINE_BIN") {
+    if let Ok(raw) = std::env::var("PLUMDECK_DJ_ENGINE_BIN") {
         let path = PathBuf::from(raw);
         if !path.is_absolute() {
-            return Err("DJALY_DJ_ENGINE_BIN は絶対パスで指定してください".to_string());
+            return Err("PLUMDECK_DJ_ENGINE_BIN は絶対パスで指定してください".to_string());
         }
         if !path.is_file() {
             return Err(format!(
-                "DJALY_DJ_ENGINE_BIN のパスにファイルがありません: {}",
+                "PLUMDECK_DJ_ENGINE_BIN のパスにファイルがありません: {}",
                 path.display()
             ));
         }
@@ -892,10 +892,10 @@ fn resolve_binary() -> Result<PathBuf, String> {
         {
             let packaged_host = contents_dir
                 .join("Resources")
-                .join("DJalyMixxxHost.app")
+                .join("PlumdeckMixxxHost.app")
                 .join("Contents")
                 .join("MacOS")
-                .join("djaly-mixxx-engine-host");
+                .join("plumdeck-mixxx-engine-host");
             if packaged_host.is_file() {
                 return Ok(packaged_host);
             }
@@ -913,10 +913,10 @@ fn resolve_binary() -> Result<PathBuf, String> {
         .join("native")
         .join("mixxx-engine-host")
         .join("stage")
-        .join("DJalyMixxxHost.app")
+        .join("PlumdeckMixxxHost.app")
         .join("Contents")
         .join("MacOS")
-        .join("djaly-mixxx-engine-host");
+        .join("plumdeck-mixxx-engine-host");
     if staged_host.is_file() {
         return Ok(staged_host);
     }
@@ -925,7 +925,7 @@ fn resolve_binary() -> Result<PathBuf, String> {
         .join("native")
         .join("mixxx-engine-host")
         .join("build-upstream")
-        .join("djaly-mixxx-engine-host");
+        .join("plumdeck-mixxx-engine-host");
     if real_host.is_file() {
         return Ok(real_host);
     }
@@ -945,7 +945,7 @@ fn resolve_binary() -> Result<PathBuf, String> {
         "エンジンバイナリが見つかりません。\
          `bash native/mixxx-engine-host/scripts/build-macos.sh` または \
          `cargo build --manifest-path native/dj-engine-host/Cargo.toml` を実行するか、\
-         DJALY_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
+         PLUMDECK_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
         target_dir.display()
     ))
 }

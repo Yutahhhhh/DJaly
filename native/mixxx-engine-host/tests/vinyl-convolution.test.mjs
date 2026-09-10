@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 test('SIMD stereo convolution agrees with an independent double precision sum',()=>{
- const directory=mkdtempSync(join(tmpdir(),'djaly-convolution-'));
+ const directory=mkdtempSync(join(tmpdir(),'plumdeck-convolution-'));
  try{
   const source=join(directory,'test.cpp'),binary=join(directory,'test');
   writeFileSync(source,`

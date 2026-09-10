@@ -1,6 +1,6 @@
 import type { PadEffect } from "../../types/dj-engine";
 export type PadPreset = { effect: PadEffect; mix: number; depth: number };
-// Independent software presets for each mode/page. These are DJaly presets,
+// Independent software presets for each mode/page. These are plumdeck presets,
 // not a claim to reproduce rekordbox's user-editable effect assignments.
 const first: PadEffect[] = ["echo","reverb","flanger","filter","phaser","autopan","bitcrusher","distortion"];
 const second: PadEffect[] = ["tremolo","moogladder4filter","reverb","echo","phaser","flanger","autopan","bitcrusher"];

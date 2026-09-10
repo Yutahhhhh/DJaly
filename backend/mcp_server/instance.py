@@ -7,12 +7,12 @@ from mcp.server.mcpserver import MCPServer
 from infra.database import connection
 
 mcp = MCPServer(
-    name="Djaly",
-    title="Djaly Music Library",
+    name="plumdeck",
+    title="plumdeck Music Library",
     instructions=(
-        "Djaly is a local-first DJ music library. Use these tools to search tracks, "
+        "plumdeck is a local-first DJ music library. Use these tools to search tracks, "
         "manage setlists, classify genres, and inspect lyrics/wordplay. You are the "
-        "reasoning model: Djaly never calls a separate LLM. Translate natural-language "
+        "reasoning model: plumdeck never calls a separate LLM. Translate natural-language "
         "vibes into search/setlist tool parameters yourself. For genre work, call "
         "get_genre_analysis_context, classify the returned tracks, then call "
         "apply_genre_analysis or apply_genre_analyses. For wordplay, inspect lyrics, "

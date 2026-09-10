@@ -39,8 +39,8 @@ QByteArray encode(unsigned lod,std::uint64_t index,const std::vector<Bin>& bins,
     u32(48,crc32(out+64,payload));return bytes;
 }
 }
-Manager::Manager():root_(qEnvironmentVariable("DJALY_WAVEFORM_CACHE")) {
-    if(root_.isEmpty())root_=QDir::homePath()+"/Library/Caches/Djaly/waveform-v2";
+Manager::Manager():root_(qEnvironmentVariable("PLUMDECK_WAVEFORM_CACHE")) {
+    if(root_.isEmpty())root_=QDir::homePath()+"/Library/Caches/plumdeck/waveform-v2";
     QDir().mkpath(root_);worker_=std::thread([this]{run();});
 }
 Manager::~Manager(){stop_=true;wake_.notify_one();if(worker_.joinable())worker_.join();}

@@ -60,7 +60,7 @@ export function McpView() {
     ? JSON.stringify(
         {
           mcpServers: {
-            djaly: {
+            plumdeck: {
               url: info.url,
             },
           },
@@ -79,7 +79,7 @@ export function McpView() {
             MCP
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Djaly の楽曲検索・セットリスト操作などを、Claude Desktop / Claude Code など外部の
+            plumdeck の楽曲検索・セットリスト操作などを、Claude Desktop / Claude Code など外部の
             MCP クライアントから直接呼び出せるようにします。検索やセットリスト編集は基本的に
             チャット経由で行い、このアプリの画面では結果を確認します。
           </p>
@@ -106,7 +106,7 @@ export function McpView() {
         <CardHeader>
           <CardTitle className="text-base">接続情報</CardTitle>
           <CardDescription>
-            Djaly のバックエンドが起動している間、以下の URL で MCP サーバー (Streamable HTTP) が待ち受けます。
+            plumdeck のバックエンドが起動している間、以下の URL で MCP サーバー (Streamable HTTP) が待ち受けます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -129,8 +129,8 @@ export function McpView() {
             {configSnippet}
           </pre>
           <p className="text-xs text-muted-foreground">
-            Claude Code の場合は <code>claude mcp add --transport http djaly {info?.url}</code>{" "}
-            でも登録できます。設定後、クライアントを再起動すると Djaly のツールが利用可能になります。
+            Claude Code の場合は <code>claude mcp add --transport http plumdeck {info?.url}</code>{" "}
+            でも登録できます。設定後、クライアントを再起動すると plumdeck のツールが利用可能になります。
           </p>
         </CardContent>
       </Card>

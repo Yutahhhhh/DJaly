@@ -72,7 +72,7 @@ def create_local_playlist(payload: LocalPlaylistCreate, session: Session = Depen
         raise HTTPException(422, "Playlist name cannot be blank")
     item = SetlistAppService(session).create_setlist(name)
     result = item.model_dump(mode="json")
-    result.update({"source": "djaly", "editable": True, "track_count": 0})
+    result.update({"source": "plumdeck", "editable": True, "track_count": 0})
     return result
 
 
@@ -87,7 +87,7 @@ def rename_local_playlist(
     if not item:
         raise HTTPException(404, "Local playlist not found")
     result = item.model_dump(mode="json")
-    result.update({"source": "djaly", "editable": True})
+    result.update({"source": "plumdeck", "editable": True})
     return result
 
 
@@ -355,7 +355,7 @@ def copy_mirror_playlist(
         raise
     local = session.get(Setlist, local_id)
     result = local.model_dump(mode="json")
-    result.update({"source": "djaly", "editable": True, "track_count": copied})
+    result.update({"source": "plumdeck", "editable": True, "track_count": copied})
     return {"playlist": result, "copied": copied, "skipped_unresolved": total - copied}
 
 

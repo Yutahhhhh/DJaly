@@ -12,8 +12,8 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "bin/djaly-server",
-          "cmd": "djaly-server",
+          "name": "bin/plumdeck-server",
+          "cmd": "plumdeck-server",
           "sidecar": true
         }
       ]

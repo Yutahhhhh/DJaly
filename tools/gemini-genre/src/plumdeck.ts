@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { Config, Mode } from "./config.ts";
 
-/** Subset of Djaly's TrackRead we send to Gemini. */
+/** Subset of plumdeck's TrackRead we send to Gemini. */
 export interface TrackInput {
   id: number;
   artist: string;
@@ -50,7 +50,7 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 /**
- * Pull every unanalyzed track for the given mode from the running Djaly backend.
+ * Pull every unanalyzed track for the given mode from the running plumdeck backend.
  * Uses /api/genres/unknown-ids for the full id set, then pages /api/genres/unknown
  * for the metadata + Essentia features.
  */
@@ -59,7 +59,7 @@ export async function fetchUnknownTracks(
   mode: Mode = cfg.mode,
 ): Promise<TrackInput[]> {
   let ids = await getJson<number[]>(
-    `${cfg.djalyApi}/api/genres/unknown-ids?mode=${mode}`,
+    `${cfg.plumdeckApi}/api/genres/unknown-ids?mode=${mode}`,
   );
   if (cfg.idsFile) {
     const only = new Set<number>(
@@ -76,7 +76,7 @@ export async function fetchUnknownTracks(
   const rows: TrackInput[] = [];
   for (let offset = 0; rows.length < targetCount; offset += page) {
     const chunk = await getJson<any[]>(
-      `${cfg.djalyApi}/api/genres/unknown?mode=${mode}&offset=${offset}&limit=${page}`,
+      `${cfg.plumdeckApi}/api/genres/unknown?mode=${mode}&offset=${offset}&limit=${page}`,
     );
     if (chunk.length === 0) break;
     for (const t of chunk) {
@@ -105,7 +105,7 @@ export function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-/** POST classifications back to Djaly so the DB is updated. */
+/** POST classifications back to plumdeck so the DB is updated. */
 export async function applyResults(
   cfg: Config,
   results: GenreResult[],
@@ -122,7 +122,7 @@ export async function applyResults(
 
   if (analyses.length === 0) return { applied: 0, skipped: 0 };
 
-  const res = await fetch(`${cfg.djalyApi}/api/genres/apply-analyses`, {
+  const res = await fetch(`${cfg.plumdeckApi}/api/genres/apply-analyses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

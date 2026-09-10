@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('real loaded grid correction preserves playback, pitch and track, updates native BPM and sync', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-beatgrid-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-beatgrid-'));
   const fixture = path.join(directory, 'grid.wav');
   const sampleRate = 44100, frameCount = sampleRate * 30;
   const wave = Buffer.alloc(44 + frameCount * 4);
@@ -23,7 +23,7 @@ test('real loaded grid correction preserves playback, pitch and track, updates n
     wave.writeInt16LE(value, 44 + i * 4); wave.writeInt16LE(value, 46 + i * 4);
   }
   await writeFile(fixture, wave);
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' } });
   let stderr = '', id = 0, hello;
   const pending = new Map(), events = [];
   child.stderr.on('data', data => { stderr += data; });

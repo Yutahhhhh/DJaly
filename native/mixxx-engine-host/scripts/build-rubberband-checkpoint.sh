@@ -14,4 +14,4 @@ python3 "$host_root/scripts/prepare-rubberband-checkpoint.py" "$checkpoint_root"
 cp "$host_root/cmake/rubberband-source.cmake" "$checkpoint_root/build-config/CMakeLists.txt"
 cmake -S "$checkpoint_root/build-config" -B "$checkpoint_root/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
  -DRB_SOURCE="$checkpoint_root/source" -DRB_ADAPTER="$host_root/src/junction" -DRB_PRIVATE="$checkpoint_root/private"
-cmake --build "$checkpoint_root/build" --parallel "${DJALY_BUILD_JOBS:-4}"
+cmake --build "$checkpoint_root/build" --parallel "${PLUMDECK_BUILD_JOBS:-4}"

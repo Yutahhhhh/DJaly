@@ -32,7 +32,7 @@ assert(peak > 100, 'captured audio must be nonzero');
 assert(left440 > left660 * 5, 'left output must contain the generated 440 Hz tone');
 assert(right660 > right440 * 5, 'right output must contain the generated 660 Hz tone');
 const report = { file, frames, durationSeconds: frames / rate, peakPCM16: peak, rmsDbFS: 20 * Math.log10(Math.sqrt(sum / (frames * 2)) / 32768), left440, left660, right440, right660, passed: true };
-if (process.env.DJALY_SMOKE_TWO_DECKS === '1') {
+if (process.env.PLUMDECK_SMOKE_TWO_DECKS === '1') {
   const windows = [];
   for (let start = 0; start + window < frames; start += window) {
     best = start;

@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 test('native streaming pyramid preserves antiphase peaks, weighted energy, filters and SPSC bounds',()=>{
- const dir=mkdtempSync(join(tmpdir(),'djaly-pyramid-'));
+ const dir=mkdtempSync(join(tmpdir(),'plumdeck-pyramid-'));
  try{
  const source=join(dir,'test.cpp'),binary=join(dir,'test');
  writeFileSync(source,`

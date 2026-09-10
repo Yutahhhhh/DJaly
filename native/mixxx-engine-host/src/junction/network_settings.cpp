@@ -74,7 +74,7 @@ QString validateConfig(const QJsonObject& config, qint64 now) {
 CFMutableDictionaryRef keychainQuery() {
     auto q = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFDictionarySetValue(q, kSecClass, kSecClassGenericPassword);
-    CFDictionarySetValue(q, kSecAttrService, CFSTR("com.djaly.junction.network"));
+    CFDictionarySetValue(q, kSecAttrService, CFSTR("com.plumdeck.junction.network"));
     CFDictionarySetValue(q, kSecAttrAccount, CFSTR("settings-v1"));
     return q;
 }
@@ -99,7 +99,7 @@ QString storeConfig(const QJsonObject&) { return "この環境では安全な永
 QString eraseConfig() { return {}; }
 #endif
 }
-NetworkSettings::NetworkSettings(bool readStored) : config_(defaults()), storageEnabled_(readStored && !qEnvironmentVariableIsSet("DJALY_JUNCTION_EPHEMERAL_NETWORK")) {
+NetworkSettings::NetworkSettings(bool readStored) : config_(defaults()), storageEnabled_(readStored && !qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_EPHEMERAL_NETWORK")) {
 #ifdef __APPLE__
     if (!storageEnabled_) return;
     auto query = keychainQuery(); CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue); CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
@@ -155,7 +155,7 @@ QJsonArray NetworkSettings::credentials(const QString& sessionId,const QString& 
     if(turn["mode"]=="rest") {
         end=now+lifetimeMs;
         const auto purpose=QCryptographicHash::hash((sessionId+":"+peerId).toUtf8(),QCryptographicHash::Sha256).toHex().left(24);
-        username=QString::number(end/1000)+":djaly-"+QString::fromLatin1(purpose);
+        username=QString::number(end/1000)+":plumdeck-"+QString::fromLatin1(purpose);
         password=QString::fromLatin1(QMessageAuthenticationCode::hash(username.toUtf8(),turn["secret"].toString().toUtf8(),QCryptographicHash::Sha1).toBase64());
     }else{end=qint64(turn["expiresAt"].toDouble());username=turn["username"].toString();password=turn["credential"].toString();}
     result.append(QJsonObject{{"urls",turn["urls"]},{"username",username},{"credential",password},{"expiresAt",double(end)}});return result;

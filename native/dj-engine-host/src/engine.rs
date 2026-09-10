@@ -38,7 +38,7 @@ pub enum DeckStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadedTrack {
-    /// DJaly 側の正本 ID。エンジンは解釈せず保持するだけ。
+    /// plumdeck 側の正本 ID。エンジンは解釈せず保持するだけ。
     pub track_id: String,
     pub path: String,
     pub title: Option<String>,

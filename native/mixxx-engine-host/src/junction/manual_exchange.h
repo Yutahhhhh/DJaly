@@ -88,7 +88,7 @@ struct ExchangePacket {
 /// no separators. Empty when absent or not SHA-256.
 QString sdpFingerprint(const QString& sdp);
 
-/// Serialises to `DJALY-JUNCTION-1.<base64url>`. Fails rather than truncate.
+/// Serialises to `PLUMDECK-JUNCTION-1.<base64url>`. Fails rather than truncate.
 QString encodeExchangePacket(const ExchangePacket& packet, QString* error = nullptr);
 
 /// Bounded parse. `errorCode` receives a stable machine code

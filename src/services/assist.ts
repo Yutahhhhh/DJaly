@@ -110,7 +110,7 @@ export const UNAVAILABLE_SNAPSHOT: AssistSnapshot = {
   signature: "",
   captured_at_ms: 0,
   unavailable_reason:
-    "デッキの読み取りは Djaly デスクトップアプリでのみ動作します（ブラウザプレビューでは無効）",
+    "デッキの読み取りは plumdeck デスクトップアプリでのみ動作します（ブラウザプレビューでは無効）",
   warnings: [],
 };
 

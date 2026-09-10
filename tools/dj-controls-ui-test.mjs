@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-const engines = await import(process.env.DJALY_PLAYWRIGHT_MODULE || 'playwright');
-const browser = await engines[process.env.DJALY_TEST_BROWSER || 'chromium'].launch();
+const engines = await import(process.env.PLUMDECK_PLAYWRIGHT_MODULE || 'playwright');
+const browser = await engines[process.env.PLUMDECK_TEST_BROWSER || 'chromium'].launch();
 try {
   const page=await browser.newPage({viewport:{width:1440,height:900}}), errors=[];
   page.on('pageerror',error=>errors.push(error.message));
@@ -34,7 +34,7 @@ try {
     await page.setViewportSize({width,height:900});
     for (const compact of [false,true]) {
       if (compact) await page.getByRole('button',{name:'Density',exact:true}).click();
-      await page.screenshot({path:`/tmp/djaly-controls-${width}-${compact?'compact':'normal'}.png`});
+      await page.screenshot({path:`/tmp/plumdeck-controls-${width}-${compact?'compact':'normal'}.png`});
       assert(await deck.getByRole('slider',{name:'Deck A tempo',exact:true}).isVisible());
       if(compact) await page.getByRole('button',{name:'Density',exact:true}).click();
     }

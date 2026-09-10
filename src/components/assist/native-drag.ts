@@ -5,8 +5,8 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
  * straight onto a rekordbox deck.
  *
  * The file itself is never copied, converted or re-exported: the OS drag
- * carries the path Djaly already has, and rekordbox loads that same original.
- * An HTML drag only ever carries `application/x-djaly-track`, which nothing
+ * carries the path plumdeck already has, and rekordbox loads that same original.
+ * An HTML drag only ever carries `application/x-plumdeck-track`, which nothing
  * outside this window understands, so the native session is what makes the drop
  * work at all.
  */

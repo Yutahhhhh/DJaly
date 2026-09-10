@@ -4,7 +4,7 @@ export const DEFAULT_MICROPHONE: MicrophoneSettings = {
   deviceId: null, channel: 0, enabled: false, gain: 1,
   duckingEnabled: false, duckingStrength: 0.65,
 };
-const STORAGE_KEY = "djaly.microphone";
+const STORAGE_KEY = "plumdeck.microphone";
 
 /** Audio snapshots also carry meters/status; the command accepts settings only. */
 export function microphoneCommandParams(settings: Partial<MicrophoneSettings>) {

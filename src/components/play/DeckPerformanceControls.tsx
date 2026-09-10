@@ -5,7 +5,7 @@ import type { DeckId, DeckState } from "@/types/dj-engine";
 export function DeckPerformanceControls({ deck, id, enabled }: { deck?: DeckState; id: DeckId; enabled: boolean }) {
   const [error, setError] = useState("");
   const [, redraw] = useState(0);
-  useEffect(()=>{const changed=()=>redraw(v=>v+1);window.addEventListener("djaly:memory-cues",changed);return()=>window.removeEventListener("djaly:memory-cues",changed);},[]);
+  useEffect(()=>{const changed=()=>redraw(v=>v+1);window.addEventListener("plumdeck:memory-cues",changed);return()=>window.removeEventListener("plumdeck:memory-cues",changed);},[]);
   const run = (task: () => Promise<unknown>) => { setError(""); void task().then(() => redraw(v=>v+1)).catch(e=>setError(String(e))); };
   const command = (op: string, params: Record<string, unknown> = {}) => run(()=>djEngineClient.send(op,{deck:id,trackId:deck?.track?.trackId,...params}));
   const points = deck?.track ? memoryCues(deck.track.trackId,deck.track.durationMs) : [];

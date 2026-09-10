@@ -329,7 +329,7 @@ private:
     std::atomic<quint64> exactBlocks_{0};
     static double monotonicMs() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     struct TraceRow { double audioMs, positionMs, speed, callbackMs, commandedSpeed, targetMs, requestAgeMs; bool held, scratching; };
-    const bool traceEnabled_ = qEnvironmentVariableIntValue("DJALY_MIXXX_TIMING_TRACE") == 1;
+    const bool traceEnabled_ = qEnvironmentVariableIntValue("PLUMDECK_MIXXX_TIMING_TRACE") == 1;
     std::array<TraceRow, 8192> trace_{};
     std::atomic<unsigned> traceWrite_{0}, traceRead_{0}, traceDropped_{0};
     double traceAudioMs_ = 0, beforeFrames_ = 0, requestAtMs_ = 0, requestAgeMs_ = 0;

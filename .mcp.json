@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "djaly": {
+    "plumdeck": {
       "type": "http",
       "url": "http://127.0.0.1:48123/mcp"
     },

@@ -1,8 +1,8 @@
-# Djaly
+# plumdeck
 
 ローカルの音楽ライブラリを整理し、選曲・DJプレイ・rekordboxの選曲補助に使うデスクトップアプリです。Tauri / React、FastAPI / DuckDB、Essentia / MusiCNN、Mixxx音声エンジンで構成しています。
 
-Djaly自身はLLMを呼び出しません。自然言語の解釈やジャンル分類の判断は、接続したMCPクライアントが行います。
+plumdeck自身はLLMを呼び出しません。自然言語の解釈やジャンル分類の判断は、接続したMCPクライアントが行います。
 
 ## 操作ガイド
 
@@ -62,7 +62,7 @@ Apple Siliconでは `/opt/homebrew` のARM64ツールチェーンを使用しま
 bash native/mixxx-engine-host/scripts/package-corresponding-source.sh
 ```
 
-このスクリプトは固定されたMixxx、GSL、libdatachannelとサブモジュール、Opus、libnice、SoundTouch、RubberBand、libsamplerateのソースとDjaly側のアダプター・ビルド手順をまとめます。実行には依存ソースの取得とネットワーク接続が必要です。
+このスクリプトは固定されたMixxx、GSL、libdatachannelとサブモジュール、Opus、libnice、SoundTouch、RubberBand、libsamplerateのソースとplumdeck側のアダプター・ビルド手順をまとめます。実行には依存ソースの取得とネットワーク接続が必要です。
 
 ### DDJ-1000・音声出力
 
@@ -107,20 +107,20 @@ pnpm junction:test:manual
 pnpm junction:test:integration # 既存サーバー方式の回帰試験
 ```
 
-実音声の統合試験は、ビルド済みのmacOSホストとステレオのループバックデバイスを使います。既定のデバイスはBlackHole 2chです。`DJALY_MIXXX_OUTPUT_DEVICE` で変更できます。実音声の試験は同じデバイスを奪い合わないよう直列で実行します。
+実音声の統合試験は、ビルド済みのmacOSホストとステレオのループバックデバイスを使います。既定のデバイスはBlackHole 2chです。`PLUMDECK_MIXXX_OUTPUT_DEVICE` で変更できます。実音声の試験は同じデバイスを奪い合わないよう直列で実行します。
 
-手動方式は `pnpm junction:test:manual` で3プロセスを起動し、招待・承認・取消・引き継ぎ・再交換とProgram音声を検証します。`JUNCTION_TURN_ADDRESS=127.0.0.1:3478?transport=tcp`、`JUNCTION_TURN_SECRET_FILE`、`DJALY_JUNCTION_FORCE_RELAY=1` を指定すると持ち込みTURNを検証します。テスト時は `DJALY_JUNCTION_EPHEMERAL_NETWORK=1` で実際のキーチェーンに触れません。
+手動方式は `pnpm junction:test:manual` で3プロセスを起動し、招待・承認・取消・引き継ぎ・再交換とProgram音声を検証します。`JUNCTION_TURN_ADDRESS=127.0.0.1:3478?transport=tcp`、`JUNCTION_TURN_SECRET_FILE`、`PLUMDECK_JUNCTION_FORCE_RELAY=1` を指定すると持ち込みTURNを検証します。テスト時は `PLUMDECK_JUNCTION_EPHEMERAL_NETWORK=1` で実際のキーチェーンに触れません。
 
 既存サーバー方式の統合試験には次の追加条件があります。
 
-- `DJALY_JUNCTION_TEST_DECKS=4`：4デッキ。
-- `DJALY_JUNCTION_TEST_THIRD=1`：3人、ゲスト間の交代。
-- `DJALY_JUNCTION_TEST_SAMPLER=1`：表示中・非表示バンクの発音。
-- `DJALY_JUNCTION_TEST_MUSIC_OPERATIONS=tempo,keylock,eq,loop,next`：交代後の演奏変更。
-- `DJALY_JUNCTION_TEST_FX` / `DJALY_JUNCTION_TEST_COLOR` / `DJALY_JUNCTION_TEST_PAD`：効果名を指定。
-- `DJALY_TEST_HOST`：パッケージ内など別のホスト実行ファイルを指定。
-- `DJALY_JUNCTION_TEST_TURN_TTL=8`：短いTURN認証期限で、更新後の参加・交代を確認。
-- `JUNCTION_TURN_ADDRESS` / `JUNCTION_TURN_TLS=1` / `JUNCTION_TURN_SECRET_FILE` / `DJALY_JUNCTION_FORCE_RELAY=1`：用意したTURN経由で接続。
+- `PLUMDECK_JUNCTION_TEST_DECKS=4`：4デッキ。
+- `PLUMDECK_JUNCTION_TEST_THIRD=1`：3人、ゲスト間の交代。
+- `PLUMDECK_JUNCTION_TEST_SAMPLER=1`：表示中・非表示バンクの発音。
+- `PLUMDECK_JUNCTION_TEST_MUSIC_OPERATIONS=tempo,keylock,eq,loop,next`：交代後の演奏変更。
+- `PLUMDECK_JUNCTION_TEST_FX` / `PLUMDECK_JUNCTION_TEST_COLOR` / `PLUMDECK_JUNCTION_TEST_PAD`：効果名を指定。
+- `PLUMDECK_TEST_HOST`：パッケージ内など別のホスト実行ファイルを指定。
+- `PLUMDECK_JUNCTION_TEST_TURN_TTL=8`：短いTURN認証期限で、更新後の参加・交代を確認。
+- `JUNCTION_TURN_ADDRESS` / `JUNCTION_TURN_TLS=1` / `JUNCTION_TURN_SECRET_FILE` / `PLUMDECK_JUNCTION_FORCE_RELAY=1`：用意したTURN経由で接続。
 
 ### 現在の制約
 
@@ -132,11 +132,11 @@ pnpm junction:test:integration # 既存サーバー方式の回帰試験
 
 ## rekordboxアシスト
 
-macOSのアクセシビリティから、rekordboxが表示しているデッキの曲情報を読み取ります。初回の案内に従ってDjalyのアクセシビリティを許可してください。OCRや画面録画は使用しません。
+macOSのアクセシビリティから、rekordboxが表示しているデッキの曲情報を読み取ります。初回の案内に従ってplumdeckのアクセシビリティを許可してください。OCRや画面録画は使用しません。
 
 「グルーヴ」「展開」「ワードプレイ」、エネルギーの方向、ジャンル条件を選んで候補を探します。現在の基準デッキは手動で選択します。ロードを確認した曲は履歴へ保存し、候補から除外します。新しいセットでは履歴をリセットできます。
 
-確認済みの画面構成はrekordbox 7.2.18の2Deck Horizontalです。同名曲などで一意に照合できない場合は未確認として表示します。アシストへの切り替えではDjalyの音声とコントローラー接続を解放します。
+確認済みの画面構成はrekordbox 7.2.18の2Deck Horizontalです。同名曲などで一意に照合できない場合は未確認として表示します。アシストへの切り替えではplumdeckの音声とコントローラー接続を解放します。
 
 `src-tauri/vendor/drag` はdrag 2.1.1を同梱しています。macOSの外部Copyドラッグで `NSDragOperationCopy | NSDragOperationGeneric` を許可し、JUCEがGenericを返す場合に対応する変更があります。Copy操作に移動・削除は追加していません。上流のApache-2.0 / MITライセンスは同ディレクトリに保持しています。
 
@@ -151,17 +151,17 @@ macOSのアクセシビリティから、rekordboxが表示しているデッキ
 - ワードプレイは歌詞を読んで提案し、承認と実際の試聴確認を区別します。
 - セットリスト、分類、解析ジョブはUIと共有する永続状態です。同じ対象へ複数の処理が並行して書き込まないようにします。
 
-rekordbox MCPの起動・DBモード・操作手順は [rekordbox-mcp/README.md](rekordbox-mcp/README.md) にあります。Djalyに同梱した接続設定は読み取り専用です。
+rekordbox MCPの起動・DBモード・操作手順は [rekordbox-mcp/README.md](rekordbox-mcp/README.md) にあります。plumdeckに同梱した接続設定は読み取り専用です。
 
 ## ブランチ・配布
 
 `main` を配布の基点とし、変更は `feature/*`、`fix/*`、`refactor/*`、`chore/*` で進めます。ブランチのプッシュと製品リリースは別の操作です。
 
-`pnpm release vX.Y.Z` はバックエンドの梱包、Tauriビルド、GitHub Releasesへのアップロードを含みます。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/DJaly/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
+`pnpm release vX.Y.Z` はバックエンドの梱包、Tauriビルド、GitHub Releasesへのアップロードを含みます。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/plumdeck/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
 
 ## ライセンスと対応ソース
 
-Mixxx音声ホストはMixxx 2.5.6のコミット `3ebac449e7e5fe2a0186596657696e87ce8b0e56` を利用し、GPL-2.0-or-laterの条件で配布します。Djalyのアダプターとビルドスクリプトも対応ソースの一部です。プロセスを分けることをライセンス適用の免除とは扱いません。
+Mixxx音声ホストはMixxx 2.5.6のコミット `3ebac449e7e5fe2a0186596657696e87ce8b0e56` を利用し、GPL-2.0-or-laterの条件で配布します。plumdeckのアダプターとビルドスクリプトも対応ソースの一部です。プロセスを分けることをライセンス適用の免除とは扱いません。
 
 JCTではSoundTouch 2.4.1、RubberBand 4.0.0、libdatachannel、libnice、Opus等を使用します。SoundTouchとRubberBandの状態移送用ビルドには上流のライセンス条件が適用されます。固定ソース・ビルド構成・変更用スクリプトは対応ソースのアーカイブへ含めます。Qtなど動的リンクのライブラリについては、互換ビルドへの置き換えを妨げない構成を維持します。
 

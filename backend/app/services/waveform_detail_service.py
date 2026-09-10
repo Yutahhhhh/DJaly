@@ -30,7 +30,7 @@ class WaveformDetailError(Exception):
 
 
 def _cache_dir() -> Path:
-    return Path(platformdirs.user_cache_dir("Djaly", "DjalyDev")) / "waveform-detail-v1"
+    return Path(platformdirs.user_cache_dir("plumdeck", "plumdeckDev")) / "waveform-detail-v1"
 
 
 def _decode(filepath: Path) -> tuple[np.ndarray, int]:

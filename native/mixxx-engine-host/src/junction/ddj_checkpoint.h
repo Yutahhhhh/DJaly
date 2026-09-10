@@ -58,10 +58,10 @@ inline bool read(const QString& path,Snapshot* result){
     QDataStream in(&file);in.setByteOrder(QDataStream::LittleEndian);in.setFloatingPointPrecision(QDataStream::DoublePrecision);
     char magic[8];quint32 version=0,count=0;QString identity,processor;
     if(in.readRawData(magic,8)!=8||QByteArray(magic,8)!="DJDDJ001")return false;
-    in>>version;if(version!=1||!text(in,&identity)||identity!=QString::fromLatin1(fingerprint)||!text(in,&processor)||!processor.startsWith("org.djaly.effects."))return false;
+    in>>version;if(version!=1||!text(in,&identity)||identity!=QString::fromLatin1(fingerprint)||!text(in,&processor)||!processor.startsWith("org.plumdeck.effects."))return false;
     const QStringList allowed={"lowcutecho","mtdelay","spiral","enigmajet","sliproll","roll","mobiussaw","mobiustri","tremolo"};
-    if(!allowed.contains(processor.mid(QStringLiteral("org.djaly.effects.").size())))return false;
-    const bool tremolo=processor=="org.djaly.effects.tremolo";
+    if(!allowed.contains(processor.mid(QStringLiteral("org.plumdeck.effects.").size())))return false;
+    const bool tremolo=processor=="org.plumdeck.effects.tremolo";
     in>>count;if(!count||count>8)return false;Snapshot snapshot;snapshot.processor=processor;
     for(quint32 i=0;i<count;++i){Route route;quint32 rate=0,samples=0;if(!text(in,&route.input)||!text(in,&route.output)||!route.input.startsWith('[')||!route.output.startsWith('['))return false;in>>rate>>samples;
         // Mixxx preallocates effect routes at its 96 kHz maximum even when

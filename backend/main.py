@@ -41,14 +41,14 @@ async def lifespan(app: FastAPI):
     checkpoint_db()  # WAL を本体へ畳み込む (肥大抑制の補助)
     close_db() # 終了時にDB接続を閉じる
 
-app = FastAPI(title="Djaly Backend API", lifespan=lifespan)
+app = FastAPI(title="plumdeck Backend API", lifespan=lifespan)
 
 # CORS Configuration
 origins = [
     f"http://localhost:{settings.FRONTEND_PORT}", # Tauri Dev Server
     f"http://127.0.0.1:{settings.FRONTEND_PORT}", # Tauri Dev Server (IP)
-    f"http://localhost:{settings.DJALY_PORT}",    # Dynamic Port
-    f"http://127.0.0.1:{settings.DJALY_PORT}",    # Dynamic Port
+    f"http://localhost:{settings.PLUMDECK_PORT}",    # Dynamic Port
+    f"http://127.0.0.1:{settings.PLUMDECK_PORT}",    # Dynamic Port
     "tauri://localhost",                          # Tauri Production (macOS)
     "https://tauri.localhost",                    # Tauri Production (Windows/Linux)
 ]
@@ -64,7 +64,7 @@ app.add_middleware(
 # Root endpoint for health check
 @app.get("/")
 async def root():
-    return {"message": "Djaly Backend API is running"}
+    return {"message": "plumdeck Backend API is running"}
 
 # Include Routers
 app.include_router(filesystem.router)

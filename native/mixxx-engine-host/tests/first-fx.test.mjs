@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = ms => new Promise(r => setTimeout(r, ms));
 function fixture() {
   const rate = 44100, frames = rate * 24;
@@ -66,8 +66,8 @@ function amplitudes(wav) {
  * 録音のたびに設定を読み直すので、op で書き換えれば次の録音から効く。
  */
 test('the recording directory can be changed without restarting the host', { timeout: 90000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-recdir-'));
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-recdir-'));
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', nextId = 0, hello;
   const pending = new Map();
   child.stderr.on('data', chunk => { stderr += chunk; });
@@ -112,10 +112,10 @@ test('the recording directory can be changed without restarting the host', { tim
 });
 
 test('the first FX command after startup is already audible', { timeout: 90000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-fxprobe-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-fxprobe-'));
   const audioPath = path.join(directory, 'tones.wav');
   await writeFile(audioPath, fixture());
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', DJALY_MIXXX_RECORDING_DIR: directory } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch', PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let stderr = '', nextId = 0, hello;
   const pending = new Map();
   child.stderr.on('data', c => { stderr += c; });

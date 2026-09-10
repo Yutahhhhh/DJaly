@@ -173,8 +173,8 @@ impl MidiController {
                     scan = Instant::now();
                     let result = (|| -> Result<(), String> {
                         let midi_in =
-                            MidiInput::new("DJaly DDJ-1000").map_err(|e| e.to_string())?;
-                        let midi_out = MidiOutput::new("DJaly DDJ-1000 feedback")
+                            MidiInput::new("plumdeck DDJ-1000").map_err(|e| e.to_string())?;
+                        let midi_out = MidiOutput::new("plumdeck DDJ-1000 feedback")
                             .map_err(|e| e.to_string())?;
                         let ins: Vec<_> = midi_in
                             .ports()
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     #[ignore = "Requires macOS CoreMIDI and Swift; creates isolated virtual ports"]
     fn coremidi_hotplug_reconnect() {
-        let name = format!("DJaly hotplug test {}", std::process::id());
+        let name = format!("plumdeck hotplug test {}", std::process::id());
         let expected = name.clone();
         let controller = MidiController::new_matching(|_| {}, move |n| n == expected);
         controller.lease(true).unwrap();
@@ -406,7 +406,7 @@ import Foundation
 import CoreMIDI
 let name = CommandLine.arguments[1] as CFString
 var client = MIDIClientRef(), source = MIDIEndpointRef(), destination = MIDIEndpointRef()
-MIDIClientCreateWithBlock("DJaly hotplug fixture" as CFString, &client, nil)
+MIDIClientCreateWithBlock("plumdeck hotplug fixture" as CFString, &client, nil)
 func pause(_ seconds: Double) { RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds)) }
 func connect() {
  MIDISourceCreate(client, name, &source)

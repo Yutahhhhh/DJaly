@@ -101,7 +101,7 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
           <AlertDescription className="flex items-center justify-between">
             <span>
               Please set your music folder location in Settings to start using
-              Djaly.
+              plumdeck.
             </span>
             <Button
               variant="outline"

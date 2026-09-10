@@ -1,5 +1,5 @@
 #include "waveform/manager.h"
-// DJaly-owned adapter. Upstream APIs pinned to Mixxx 2.5.6 / 3ebac449.
+// plumdeck-owned adapter. Upstream APIs pinned to Mixxx 2.5.6 / 3ebac449.
 #include "backend.h"
 #include "scratch_deck.h"
 #include "sampler_bank.h"
@@ -111,7 +111,7 @@ public:
         for(const auto value:dspAssets){const auto asset=value.toObject();
             if(asset["format"].toString()==junction::fx::format){if(!fxStates.empty()||asset["fingerprint"].toString()!=junction::fx::fingerprint||!junction::fx::read(asset["path"].toString(),&fxStates))return "Invalid verified FX checkpoint";continue;}
             if(asset["format"].toString()==junction::keylock::format){if(!keylockStates.empty()||asset["fingerprint"].toString()!=junction::keylock::fingerprint||!junction::keylock::read(asset["path"].toString(),&keylockStates))return "Invalid verified keylock checkpoint";continue;}
-            junction::ddj::Snapshot snapshot;if(asset["format"].toString()!="djaly-ddj-dsp-v1"||asset["fingerprint"].toString()!=QString::fromLatin1(junction::ddj::fingerprint)||!junction::ddj::read(asset["path"].toString(),&snapshot)||snapshot.processor!=asset["processor"].toString())return "Invalid verified Junction DSP checkpoint";dspStates.push_back(std::move(snapshot));}
+            junction::ddj::Snapshot snapshot;if(asset["format"].toString()!="plumdeck-ddj-dsp-v1"||asset["fingerprint"].toString()!=QString::fromLatin1(junction::ddj::fingerprint)||!junction::ddj::read(asset["path"].toString(),&snapshot)||snapshot.processor!=asset["processor"].toString())return "Invalid verified Junction DSP checkpoint";dspStates.push_back(std::move(snapshot));}
         pendingDsp_=std::move(dspStates);pendingKeylock_=std::move(keylockStates);pendingFx_=std::move(fxStates);
         for(int i=0;i<4;++i){restoreDecks_[i]={};restoreAfter_[i]=0;play(i,false);}
         const auto samplerError=samplers_->restoreJunction(graph["sampler"].toObject());if(!samplerError.isEmpty())return samplerError;
@@ -162,8 +162,8 @@ public:
         ControlObject::set(ConfigKey(kMixerProfile, kLowEqFrequency), 250);
         ControlObject::set(ConfigKey(kMixerProfile, kHighEqFrequency), 2500);
         mixer_ = std::make_unique<EngineMixer>(settings_, "[Master]", effects_.get(), handles_, true);
-        const QString defaultRecordingDir = QDir(QStandardPaths::writableLocation(QStandardPaths::MusicLocation)).filePath("Djaly Recordings");
-        const QString recordingDir = qEnvironmentVariable("DJALY_MIXXX_RECORDING_DIR", defaultRecordingDir);
+        const QString defaultRecordingDir = QDir(QStandardPaths::writableLocation(QStandardPaths::MusicLocation)).filePath("plumdeck Recordings");
+        const QString recordingDir = qEnvironmentVariable("PLUMDECK_MIXXX_RECORDING_DIR", defaultRecordingDir);
         settings_->set(ConfigKey(RECORDING_PREF_KEY, "Directory"), recordingDir);
         settings_->set(ConfigKey(RECORDING_PREF_KEY, "Encoding"), QStringLiteral("WAV"));
         recorder_ = std::make_unique<RecordingManager>(settings_, mixer_.get());
@@ -259,11 +259,11 @@ public:
         config.clearInputs(); config.clearOutputs(); config.setDeckCount(4);
         // Explicit device name keeps smoke tests on the intended virtual/built-in
         // device. Never select the DDJ-1000 or an arbitrary output implicitly.
-        const auto wanted = qEnvironmentVariable("DJALY_MIXXX_OUTPUT_DEVICE");
+        const auto wanted = qEnvironmentVariable("PLUMDECK_MIXXX_OUTPUT_DEVICE");
         auto devices = sound_->getDeviceList(MIXXX_PORTAUDIO_COREAUDIO_STRING, true, false);
         SoundDevicePointer selected;
         for (const auto& device : devices) {
-            qInfo() << "DJaly output device:" << device->getDisplayName();
+            qInfo() << "plumdeck output device:" << device->getDisplayName();
             if (!wanted.isEmpty() && device->getDisplayName() == wanted) {
                 if (selected) { problem_ = "Ambiguous output display name"; return; }
                 selected = device;
@@ -872,7 +872,7 @@ private:
         }
         if(audioBridge_.inputReaders.load(std::memory_order_acquire)||!renderDriver_.transferComplete(snapshotTransfer_))return;
         if(snapshotProcessor_&&snapshotProcessor_==junction::ddj::latest(preparedDsp_.processor)&&!preparedDsp_.routes.empty())capturedDspReady_=snapshotProcessor_->captureInto(preparedDsp_);
-        bool keylockFailed=false;for(auto& state:preparedKeylock_){const auto ok=junction::keylock::capture(*decks_[state.deck]->getEngineBuffer(),state);if(!ok)keylockFailed=true;if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction keylock capture"<<state.deck<<ok<<state.position<<state.speed<<state.pitch<<state.processor.virtualPitch<<state.processor.virtualTempo;}
+        bool keylockFailed=false;for(auto& state:preparedKeylock_){const auto ok=junction::keylock::capture(*decks_[state.deck]->getEngineBuffer(),state);if(!ok)keylockFailed=true;if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction keylock capture"<<state.deck<<ok<<state.position<<state.speed<<state.pitch<<state.processor.virtualPitch<<state.processor.virtualTempo;}
         bool fxFailed=false;for(size_t i=0;i<preparedFx_.size();i++)if(!junction::fx::capture(*preparedFxSlots_[i],preparedFx_[i]))fxFailed=true;
         auto graph=snapshotStoppedGraph();if(fxFailed){graph["snapshotError"]="FXの状態をまだ引き継げません";preparedFx_.clear();}if(keylockFailed){graph["snapshotError"]="キー固定処理の状態をまだ引き継げません";preparedKeylock_.clear();}
         renderDriver_.requestTransfer(junction::GraphDriver::Realtime,junction::RenderMode::Performing);audioBridge_.inputsEnabled.store(true,std::memory_order_release);
@@ -883,7 +883,7 @@ private:
         auto fxStates=std::move(preparedFx_);const auto fxPath=profile_.filePath("junction-fx.bin");preparedFxSlots_.clear();
         snapshotWrite_=std::async(std::launch::async,[path,keylockPath,fxPath,graph,snapshot=std::move(snapshot),keylocks=std::move(keylocks),fxStates=std::move(fxStates)]() mutable {
             QJsonArray assets;
-            if(!snapshot.routes.empty()&&junction::ddj::write(path,snapshot))assets.append(QJsonObject{{"path",path},{"format","djaly-ddj-dsp-v1"},{"fingerprint",QString::fromLatin1(junction::ddj::fingerprint)},{"processor",snapshot.processor},{"byteSize",double(QFileInfo(path).size())}});
+            if(!snapshot.routes.empty()&&junction::ddj::write(path,snapshot))assets.append(QJsonObject{{"path",path},{"format","plumdeck-ddj-dsp-v1"},{"fingerprint",QString::fromLatin1(junction::ddj::fingerprint)},{"processor",snapshot.processor},{"byteSize",double(QFileInfo(path).size())}});
             if(!keylocks.empty()&&junction::keylock::write(keylockPath,keylocks))assets.append(QJsonObject{{"path",keylockPath},{"format",junction::keylock::format},{"fingerprint",junction::keylock::fingerprint},{"byteSize",double(QFileInfo(keylockPath).size())}});
             if(!fxStates.empty()&&junction::fx::write(fxPath,fxStates))assets.append(QJsonObject{{"path",fxPath},{"format",junction::fx::format},{"fingerprint",junction::fx::fingerprint},{"byteSize",double(QFileInfo(fxPath).size())}});
             const int expected=int(!snapshot.routes.empty())+int(!keylocks.empty())+int(!fxStates.empty());
@@ -950,7 +950,7 @@ private:
             if(!pendingFx_.empty()){effects_->getEngineEffectsManager()->onCallbackStart();for(const auto& snapshot:pendingFx_){auto slot=findFxSlot(snapshot.group);if(!slot||!junction::fx::restore(*slot,snapshot,[this](const QString& name){return handles_->handleForGroup(name).handle();}))restoreError_="FX state or routes differ from checkpoint";}pendingFx_.clear();}
             for(const auto& snapshot:pendingDsp_){auto* processor=junction::ddj::latest(snapshot.processor);if(!processor||!processor->restore(snapshot,[this](const QString& name){return handles_->handleForGroup(name).handle();}))restoreError_="DSP processor routes differ from checkpoint";}
             pendingDsp_.clear();
-            for(const auto& state:pendingKeylock_){const auto ok=junction::keylock::restore(*decks_[state.deck]->getEngineBuffer(),state);if(!ok)restoreError_="Keylock DSP state differs from checkpoint";if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE"))qWarning()<<"junction keylock restore"<<state.deck<<ok<<state.position<<state.speed<<state.pitch<<state.processor.virtualPitch<<state.processor.virtualTempo;}
+            for(const auto& state:pendingKeylock_){const auto ok=junction::keylock::restore(*decks_[state.deck]->getEngineBuffer(),state);if(!ok)restoreError_="Keylock DSP state differs from checkpoint";if(qEnvironmentVariableIsSet("PLUMDECK_JUNCTION_TRACE"))qWarning()<<"junction keylock restore"<<state.deck<<ok<<state.position<<state.speed<<state.pitch<<state.processor.virtualPitch<<state.processor.virtualTempo;}
             pendingKeylock_.clear();
         }
         restoring_=false;restoreTransfer_=0;
@@ -1037,7 +1037,7 @@ private:
         if (active || !diagnosticDirty_) return;
         // Bounded per-process file, retained after the gesture so reproduction
         // doesn't require synchronizing with a short monitor window.
-        const auto path = QDir::temp().filePath(QString("djaly-scratch-%1.json").arg(QCoreApplication::applicationPid()));
+        const auto path = QDir::temp().filePath(QString("plumdeck-scratch-%1.json").arg(QCoreApplication::applicationPid()));
         QSaveFile file(path);
         if (file.open(QIODevice::WriteOnly)) {
             file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);

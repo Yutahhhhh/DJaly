@@ -1,8 +1,8 @@
 {
-  "name": "@djaly/junction-signaling",
+  "name": "@plumdeck/junction-signaling",
   "version": "0.1.0",
   "private": true,
-  "description": "WebSocket signaling service for Djaly Junction (peer-to-peer remote DJ): room discovery, invite validation, host admission control, and opaque WebRTC SDP/ICE relay. Never carries audio or music files.",
+  "description": "WebSocket signaling service for plumdeck Junction (peer-to-peer remote DJ): room discovery, invite validation, host admission control, and opaque WebRTC SDP/ICE relay. Never carries audio or music files.",
   "type": "module",
   "engines": {
     "node": ">=22"

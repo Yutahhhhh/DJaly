@@ -23,7 +23,7 @@ rm -rf build dist
 # --name: バイナリ名
 # --add-data: 静的ファイルやモデルがあれば追加 (例: "models/*.pb:models")
 # hidden-import: 自動検出されないライブラリを指定
-pyinstaller --clean --noconfirm --onefile --name djaly-server \
+pyinstaller --clean --noconfirm --onefile --name plumdeck-server \
     --add-binary="$RECORDING_FFMPEG:bin" \
     --hidden-import="uvicorn.logging" \
     --hidden-import="uvicorn.loops" \
@@ -46,12 +46,12 @@ pyinstaller --clean --noconfirm --onefile --name djaly-server \
 
 # Tauriが期待するディレクトリにバイナリを移動し、アーキテクチャ名を付与
 mkdir -p ../src-tauri/bin
-mv dist/djaly-server "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}"
+mv dist/plumdeck-server "../src-tauri/bin/plumdeck-server-${TARGET_TRIPLE}"
 
-ACTUAL_FILE_INFO=$(file "../src-tauri/bin/djaly-server-${TARGET_TRIPLE}")
+ACTUAL_FILE_INFO=$(file "../src-tauri/bin/plumdeck-server-${TARGET_TRIPLE}")
 if ! echo "$ACTUAL_FILE_INFO" | grep -q "$EXPECTED_FILE_ARCH"; then
   echo "Sidecar architecture mismatch. Expected: $EXPECTED_FILE_ARCH / Actual: $ACTUAL_FILE_INFO"
   exit 1
 fi
 
-echo "Backend build complete: src-tauri/bin/djaly-server-${TARGET_TRIPLE}"
+echo "Backend build complete: src-tauri/bin/plumdeck-server-${TARGET_TRIPLE}"

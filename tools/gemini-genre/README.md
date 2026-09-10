@@ -1,6 +1,6 @@
-# djaly-gemini-genre
+# plumdeck-gemini-genre
 
-Djaly の「ジャンル / サブジャンル未解析」トラックを、Gemini の Gem
+plumdeck の「ジャンル / サブジャンル未解析」トラックを、Gemini の Gem
 (<https://gemini.google.com/gem/0d9581d5a139>) にログイン済みブラウザで投げて判定させ、
 結果を **バッチごとに JSON へ都度保存** するツール。
 
@@ -12,7 +12,7 @@ Djaly の「ジャンル / サブジャンル未解析」トラックを、Gemin
 
 ## 仕組み
 
-1. Djaly バックエンド (`http://localhost:8001`) から未解析トラックを取得
+1. plumdeck バックエンド (`http://localhost:8001`) から未解析トラックを取得
    - `GET /api/genres/unknown-ids` … 対象 ID 全件
    - `GET /api/genres/unknown` … メタデータ + Essentia 特徴量
 2. `--batch` 件ずつに分割
@@ -35,7 +35,7 @@ npx playwright install chromium   # Google Chrome 未インストールなら
 
 ## 使い方
 
-Djaly バックエンドを起動しておく（`pnpm backend:dev` など、ポート 8001）。
+plumdeck バックエンドを起動しておく（`pnpm backend:dev` など、ポート 8001）。
 
 ```sh
 # 1) 初回だけ: ブラウザが開くので Google にログイン
@@ -44,7 +44,7 @@ npm run login
 # 2) 判定 → JSON 保存（DB は変更しない）
 npm run classify -- --mode genre --batch 200
 
-# 3) 保存済み results.json を Djaly に反映（DB 更新）
+# 3) 保存済み results.json を plumdeck に反映（DB 更新）
 npm run apply -- --mode genre
 #   または判定と同時に反映:
 npm run classify -- --mode genre --batch 200 --apply
@@ -54,7 +54,7 @@ npm run classify -- --mode genre --batch 200 --apply
 
 | フラグ | 環境変数 | 既定 | 説明 |
 | --- | --- | --- | --- |
-| `--api <url>` | `DJALY_API` | `http://localhost:8001` | Djaly バックエンド |
+| `--api <url>` | `PLUMDECK_API` | `http://localhost:8001` | plumdeck バックエンド |
 | `--gem <url>` | `GEMINI_GEM_URL` | 上記 Gem | 対象 Gem |
 | `--mode <m>` | `GEMINI_GENRE_MODE` | `genre` | `genre` / `subgenre` / `both` |
 | `--batch <n>` | `GEMINI_GENRE_BATCH` | `200` | 1 リクエストの曲数。応答が途中で切れるなら下げる |
@@ -64,7 +64,7 @@ npm run classify -- --mode genre --batch 200 --apply
 | `--headless` | `GEMINI_GENRE_HEADLESS=1` | off | ヘッドレス（ログイン済みなら可） |
 | `--chromium` | `GEMINI_GENRE_CHROMIUM=1` | off | Chrome ではなく同梱 Chromium を使う |
 | `--timeout <ms>` | `GEMINI_GENRE_TIMEOUT` | `240000` | 1 バッチの応答待ち上限 |
-| `--apply` | | off | 各バッチ保存後に Djaly へ反映 |
+| `--apply` | | off | 各バッチ保存後に plumdeck へ反映 |
 | `--overwrite` | | off | `--apply` 時、検証済みジャンルも上書き |
 | `--login-only` | | | ログインだけしてプロファイル保存して終了 |
 | `--apply-only` | | | ブラウザを使わず `out/<mode>/results.json` を反映するだけ |
@@ -85,7 +85,7 @@ out/
 ## 注意
 
 - DuckDB は単一ライターなので、DB 反映（`--apply` / `--apply-only`）は
-  **動作中の Djaly バックエンド経由**（`POST /api/genres/apply-analyses`）で行う。
+  **動作中の plumdeck バックエンド経由**（`POST /api/genres/apply-analyses`）で行う。
   バックエンドを止めて別プロセスから直接 DB を開かないこと。
 - Gemini の DOM 変更でセレクタが合わなくなったら `src/gemini.ts` 冒頭の定数を調整。
 - 大量に回すと Gemini 側のレート制限に当たることがある。`--limit` で刻むか時間を空ける。
@@ -101,7 +101,7 @@ out/
 
 あなたは DJ 用音楽ライブラリのジャンル判定エンジンです。ユーザーは、ジャンル / サブジャンルが未設定の楽曲を JSON 配列で渡します。あなたは各曲に対し **メインジャンル 1 つ + サブジャンル 1 つ** を英語ラベルで判定し、**JSON だけ** を返します。挨拶・前置き・後書き・マークダウン装飾は一切出力しません。
 
-このライブラリや「Djaly」という名前について事前知識は不要です。判定に必要な情報（データ形式・特徴量の意味・語彙）はこの指示とナレッジ内の語彙リストにすべて含まれています。
+このライブラリや「plumdeck」という名前について事前知識は不要です。判定に必要な情報（データ形式・特徴量の意味・語彙）はこの指示とナレッジ内の語彙リストにすべて含まれています。
 
 ## 入力フォーマット
 

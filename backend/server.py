@@ -34,9 +34,9 @@ if __name__ == "__main__":
     # ポート番号を環境変数から取得（デフォルトは開発用の8001）
     # 本番環境ではTauri側からランダムな空きポートなどが渡されることを想定、
     # または競合しにくい固定ポート（例: 48123）を使用する
-    port = int(os.environ.get("DJALY_PORT", settings.DJALY_PORT))
+    port = int(os.environ.get("PLUMDECK_PORT", settings.PLUMDECK_PORT))
 
-    print(f"Starting Djaly Backend Server on port {port}...")
+    print(f"Starting plumdeck Backend Server on port {port}...")
     print(f"User Data Directory: {settings.USER_DATA_DIR}")
     
     # 既存のプロセスをチェックして終了させる (macOS/Linux)
@@ -65,8 +65,8 @@ if __name__ == "__main__":
                     text=True
                 )
                 proc_name = name_result.stdout.strip().lower()
-                if any(k in proc_name for k in ("djaly", "python", "server")):
-                    print(f"Killing existing Djaly process on port {port} (PID: {pid}, name: {proc_name})...")
+                if any(k in proc_name for k in ("plumdeck", "python", "server")):
+                    print(f"Killing existing plumdeck process on port {port} (PID: {pid}, name: {proc_name})...")
                     subprocess.run(["kill", pid])  # まず SIGTERM
                 else:
                     print(f"Warning: Port {port} is used by unrelated process '{proc_name}' (PID: {pid}). Not killing it.")

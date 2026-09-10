@@ -63,7 +63,7 @@ def init_db():
             with Session(engine) as session:
                 seed_initial_data(session)
                 # v0.4+: model/API credentials are owned by the MCP client.
-                # Remove credentials previously stored by Djaly.
+                # Remove credentials previously stored by plumdeck.
                 from app.services.setting_app_service import is_retired_llm_setting_key
                 from domain.models.setting import Setting
                 for saved_setting in session.exec(select(Setting)).all():

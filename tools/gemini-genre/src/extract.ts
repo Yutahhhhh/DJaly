@@ -1,4 +1,4 @@
-import type { GenreResult } from "./djaly.ts";
+import type { GenreResult } from "./plumdeck.ts";
 
 /**
  * Pull the results array out of whatever the Gem replied with.

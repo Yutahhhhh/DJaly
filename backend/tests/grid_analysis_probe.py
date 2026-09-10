@@ -15,7 +15,7 @@ from domain.services.analysis.rhythm_grid import analyze_grid
 
 def main():
     reports = []
-    with tempfile.TemporaryDirectory(prefix="djaly-grid-probe-") as directory:
+    with tempfile.TemporaryDirectory(prefix="plumdeck-grid-probe-") as directory:
         for bpm, phase in [(120, 0.137), (100, 0.271)]:
             sr = 44100
             period = 60 / bpm

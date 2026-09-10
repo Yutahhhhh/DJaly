@@ -63,7 +63,7 @@ def test_local_playlist_crud_and_entry_pagination(client, session: Session):
     created = client.post("/api/play/playlists", json={"name": "Local crate"})
     assert created.status_code == 200
     playlist_id = created.json()["id"]
-    assert created.json()["source"] == "djaly"
+    assert created.json()["source"] == "plumdeck"
     assert created.json()["editable"] is True
 
     entry_ids = []
@@ -122,7 +122,7 @@ def test_mirror_pages_and_copy_skip_unresolved(client, session: Session):
     copied = client.post("/api/play/rekordbox/rb/playlists/one/copy", json={}).json()
     assert copied["copied"] == 1
     assert copied["skipped_unresolved"] == 1
-    assert copied["playlist"]["source"] == "djaly"
+    assert copied["playlist"]["source"] == "plumdeck"
     local_page = client.get(f"/api/play/playlists/{copied['playlist']['id']}/tracks").json()
     assert local_page["total"] == 1
 

@@ -24,7 +24,7 @@ def session_fixture(mocker) -> Generator[Session, None, None]:
     
     # ユニークなDBファイルパスを生成
     unique_id = str(uuid.uuid4())
-    test_db_path = os.path.join(tempfile.gettempdir(), f"djaly_test_{unique_id}.duckdb")
+    test_db_path = os.path.join(tempfile.gettempdir(), f"plumdeck_test_{unique_id}.duckdb")
     
     # アプリケーションが参照する環境変数を上書き
     os.environ["DB_PATH"] = test_db_path

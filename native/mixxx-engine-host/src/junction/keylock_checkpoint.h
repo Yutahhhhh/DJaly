@@ -6,7 +6,7 @@
 #include <QSaveFile>
 class EngineBuffer;
 namespace junction::keylock {
-inline constexpr auto format="djaly-keylock-v1";
+inline constexpr auto format="plumdeck-keylock-v1";
 inline constexpr auto fingerprint="mixxx-3ebac449-st241-rb400-state2";
 struct State {
     unsigned deck=0,logSize=0;st::State processor;rb::State rubberband;

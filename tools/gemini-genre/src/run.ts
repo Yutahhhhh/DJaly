@@ -7,7 +7,7 @@ import {
   applyResults,
   type GenreResult,
   type TrackInput,
-} from "./djaly.ts";
+} from "./plumdeck.ts";
 import { extractResults } from "./extract.ts";
 import { GeminiGem } from "./gemini.ts";
 
@@ -49,11 +49,11 @@ async function applyOnly(cfg: Config, dir: string) {
   console.log(`done: applied ${applied}, skipped ${skipped}`);
 }
 
-const HELP = `djaly-gemini-genre — classify Djaly's unanalyzed genres via a Gemini Gem
+const HELP = `plumdeck-gemini-genre — classify plumdeck's unanalyzed genres via a Gemini Gem
 
   npm run login                 open the browser once, log into Google
   npm run classify              -> out/<mode>/batch-NNN.json (+ results.json)
-  npm run classify -- --apply   also POST each batch back to Djaly
+  npm run classify -- --apply   also POST each batch back to plumdeck
   npm run apply                 POST an existing out/<mode>/results.json only
 
 flags: --mode genre|subgenre|both  --batch N  --limit N  --api URL  --gem URL
@@ -67,7 +67,7 @@ async function main() {
     return;
   }
   const cfg = loadConfig(process.argv);
-  console.log("djaly-gemini-genre\n" + describe(cfg) + "\n");
+  console.log("plumdeck-gemini-genre\n" + describe(cfg) + "\n");
 
   const dir = path.join(cfg.outDir, cfg.mode);
   fs.mkdirSync(dir, { recursive: true });
@@ -149,7 +149,7 @@ async function main() {
       if (cfg.apply) {
         const { applied } = await applyResults(cfg, results);
         appliedTotal += applied;
-        console.log(`  applied ${applied} to Djaly`);
+        console.log(`  applied ${applied} to plumdeck`);
       }
     } catch (err) {
       failed.push(i);
@@ -180,7 +180,7 @@ async function main() {
   console.log(
     `\ndone: ${okBatches}/${batches.length} batches ok` +
       (failed.length ? `, failed [${failed.map((n) => n + 1).join(", ")}]` : "") +
-      (cfg.apply ? `, applied ${appliedTotal} to Djaly` : "") +
+      (cfg.apply ? `, applied ${appliedTotal} to plumdeck` : "") +
       `\nmerged -> ${path.relative(process.cwd(), path.join(dir, "results.json"))}`,
   );
   if (failed.length) {

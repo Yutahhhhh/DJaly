@@ -3,5 +3,5 @@
 <plist version="1.0"><dict>
   <key>NSLocalNetworkUsageDescription</key><string>Junctionで参加者のMacと接続し、演奏音声と引き継ぎに必要な音源を送受信するために使用します。</string>
   <key>NSMicrophoneUsageDescription</key><string>DJプレイにマイクの音声をミックスし、出力・録音するために使用します。</string>
-  <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>Djaly Junction</string><key>CFBundleURLSchemes</key><array><string>djaly-junction</string></array></dict></array>
+  <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>plumdeck Junction</string><key>CFBundleURLSchemes</key><array><string>plumdeck-junction</string></array></dict></array>
 </dict></plist>

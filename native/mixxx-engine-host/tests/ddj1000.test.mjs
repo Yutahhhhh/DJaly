@@ -1,5 +1,5 @@
 // End-to-end mapping -> real host. Silent fixture; no physical audio emitted.
-// Opt in to the hardware route with DJALY_MIXXX_OUTPUT_DEVICE=DDJ-1000.
+// Opt in to the hardware route with PLUMDECK_MIXXX_OUTPUT_DEVICE=DDJ-1000.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -11,16 +11,16 @@ import { Ddj1000Decoder } from '../../../src/services/midi/ddj1000.ts';
 import { Ddj1000Runtime } from '../../../src/services/midi/ddj1000-runtime.ts';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 test('DDJ MIDI mapping controls real native transport, mixer, pads, scratch and cue output', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-ddj-integration-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-ddj-integration-'));
   const wav = Buffer.alloc(44 + 44100 * 4 * 20);
   wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22);
   wav.writeUInt32LE(44100, 24); wav.writeUInt32LE(176400, 28); wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34);
   wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
   const file = path.join(directory, 'silence.wav'); await writeFile(file, wav);
-  const output = process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch';
-  const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: output, DJALY_MIXXX_RECORDING_DIR: directory } });
+  const output = process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch';
+  const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: output, PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let id = 0, hello, snapshot, stderr = '', runtime;
   const pending = new Map(), errors = [];
   child.stderr.on('data', bytes => { stderr += bytes; });

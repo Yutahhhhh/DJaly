@@ -15,7 +15,7 @@ JTEST("asset-cache","rejects traversal symlink escape and quota overrun") {QTemp
 #include "junction/ddj_checkpoint.h"
 JTEST("dsp-checkpoint","96 kHz preallocated routes preserve live Roll state and reject unsupported capacity") {
  QTemporaryDir directory;const auto path=directory.path()+"/state";
- junction::ddj::Snapshot original;original.processor="org.djaly.effects.roll";
+ junction::ddj::Snapshot original;original.processor="org.plumdeck.effects.roll";
  junction::ddj::Route route;route.input="[Master]";route.output="[Master]";route.rate=96000;
  route.state.ring.resize(96000*8);route.state.ring[1024]=.375f;route.state.write=69376;route.state.captured=69376;route.state.loopLength=11025;route.state.loopRead=58351;route.state.phase=.2926;original.routes.push_back(route);
  CHECK(junction::ddj::write(path,original));junction::ddj::Snapshot restored;CHECK(junction::ddj::read(path,&restored));

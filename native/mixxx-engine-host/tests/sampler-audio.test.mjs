@@ -45,12 +45,12 @@ function rms(wav) {
 }
 
 test('sampler pads are audible on the master bus and obey bank, gain, stopAll and session changes', { timeout: 120000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-sampler-audio-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-sampler-audio-'));
   const file = path.join(directory, 'tone.wav');
   await writeFile(file, tone());
-  const output = process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch';
-  const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_OUTPUT_DEVICE: output, DJALY_MIXXX_RECORDING_DIR: directory } });
+  const output = process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch';
+  const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_OUTPUT_DEVICE: output, PLUMDECK_MIXXX_RECORDING_DIR: directory } });
   let id = 0, hello, snapshot, stderr = '';
   const pending = new Map();
   child.stderr.on('data', bytes => { stderr += bytes; });

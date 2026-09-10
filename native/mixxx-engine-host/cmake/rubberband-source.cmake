@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DjalyRubberBand LANGUAGES CXX)
+project(PlumdeckRubberBand LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(sources
  src/RubberBandStretcher.cpp src/RubberBandLiveShifter.cpp

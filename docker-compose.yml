@@ -3,7 +3,7 @@ services:
     build: 
       context: ./backend
       dockerfile: Dockerfile
-    container_name: djaly-api
+    container_name: plumdeck-api
     ports:
       - "8001:8001"
     volumes:
@@ -17,7 +17,7 @@ services:
       - ./db_data:/db_data
       
     environment:
-      - DB_PATH=/db_data/djaly.duckdb
+      - DB_PATH=/db_data/plumdeck.duckdb
       # 開発中のリロードは便利な反面、不安定要素になるため今回は無効化推奨
       # (start.sh で制御しているので、ここでの設定は念のため)
       - WATCHFILES_FORCE_POLLING=false

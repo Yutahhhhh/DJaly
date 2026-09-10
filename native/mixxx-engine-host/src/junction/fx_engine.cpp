@@ -108,7 +108,7 @@ class Access {
         return true;
     }
 public:
-#ifdef DJALY_JUNCTION_FX_TEST_MAIN
+#ifdef PLUMDECK_JUNCTION_FX_TEST_MAIN
     template<class Processor,class State>static bool continuation(double pitch=.25,int rate=44100){
         mixxx::EngineParameters parameters(mixxx::audio::SampleRate(rate),256);State original(parameters),resumed(parameters);Processor renderer;
         const auto manifest=Processor::getManifest();QMap<QString,EngineEffectParameterPointer> values;for(const auto& parameter:manifest->parameters())values[parameter->id()]=EngineEffectParameterPointer(new EngineEffectParameter(parameter));renderer.loadEngineEffectParameters(values);
@@ -127,7 +127,7 @@ public:
     }
 #endif
     static bool run(EffectSlot& slot,Slot& s,const std::function<QString(int)>& names,const std::function<int(const QString&)>& handles,int mode){
-        const auto id=QString(slot.id()).replace("org.djaly.effects.","org.mixxx.effects.");
+        const auto id=QString(slot.id()).replace("org.plumdeck.effects.","org.mixxx.effects.");
         if(id==WhiteNoiseEffect::getId())return visit<WhiteNoiseGroupState>(slot,s,names,handles,mode);
         if(id==FlangerEffect::getId())return visit<FlangerGroupState>(slot,s,names,handles,mode);
         if(id==PhaserEffect::getId())return visit<PhaserGroupState>(slot,s,names,handles,mode);
@@ -145,7 +145,7 @@ Slot prepare(EffectSlot& slot,const std::function<QString(int)>& names){Slot res
 bool capture(EffectSlot& slot,Slot& s){return Access::run(slot,s,{}, {},1);}
 bool restore(EffectSlot& slot,const Slot& s,const std::function<int(const QString&)>& handles){auto& mutableState=const_cast<Slot&>(s);return Access::run(slot,mutableState,{},handles,2);}
 bool validateRoute(const QString& processorId,const Route& route){
-    const auto id=QString(processorId).replace("org.djaly.effects.","org.mixxx.effects.");
+    const auto id=QString(processorId).replace("org.plumdeck.effects.","org.mixxx.effects.");
     if(!route.size||route.size>route.bytes.size()||route.size>maxStateBytes)return false;
     if(id==WhiteNoiseEffect::getId())return Access::validate<WhiteNoiseGroupState>(route);
     if(id==FlangerEffect::getId())return Access::validate<FlangerGroupState>(route);
@@ -159,7 +159,7 @@ bool validateRoute(const QString& processorId,const Route& route){
 }
 }
 
-#ifdef DJALY_JUNCTION_FX_TEST_MAIN
+#ifdef PLUMDECK_JUNCTION_FX_TEST_MAIN
 #include <QCoreApplication>
 #include <cstdio>
 int main(int argc,char** argv){

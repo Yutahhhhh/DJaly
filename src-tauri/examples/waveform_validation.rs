@@ -3,7 +3,7 @@
 //! Vite (既定 http://127.0.0.1:1420) が同じリポジトリを配信している必要がある。
 //!
 //!   cargo build --manifest-path src-tauri/Cargo.toml --example waveform_validation
-//!   DJALY_VALIDATION_SECONDS=600 src-tauri/target/debug/examples/waveform_validation
+//!   PLUMDECK_VALIDATION_SECONDS=600 src-tauri/target/debug/examples/waveform_validation
 //!
 //! ページが計測を終えると WAVEFORM_VALIDATION <json> を stdout へ 1 行出して終了する。
 use std::{env, process, time::{Duration, Instant}};
@@ -20,9 +20,9 @@ enum UserEvent {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let seconds: u64 = env::var("DJALY_VALIDATION_SECONDS").ok().and_then(|value| value.parse().ok()).unwrap_or(600);
-    let base = env::var("DJALY_VALIDATION_URL").unwrap_or_else(|_| "http://127.0.0.1:1420/tools/waveform-validation.html".to_string());
-    let surfaces: u32 = env::var("DJALY_VALIDATION_SURFACES").ok().and_then(|value| value.parse().ok()).unwrap_or(4);
+    let seconds: u64 = env::var("PLUMDECK_VALIDATION_SECONDS").ok().and_then(|value| value.parse().ok()).unwrap_or(600);
+    let base = env::var("PLUMDECK_VALIDATION_URL").unwrap_or_else(|_| "http://127.0.0.1:1420/tools/waveform-validation.html".to_string());
+    let surfaces: u32 = env::var("PLUMDECK_VALIDATION_SURFACES").ok().and_then(|value| value.parse().ok()).unwrap_or(4);
     let url = format!("{base}?seconds={seconds}&surfaces={surfaces}");
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // WKWebView は隠れたウィンドウの requestAnimationFrame を止めるため、
     // 計測中は前面に固定する。そうしないと 10 分の描画計測が成立しない。
     let window = WindowBuilder::new()
-        .with_title("Djaly waveform validation")
+        .with_title("plumdeck waveform validation")
         .with_inner_size(LogicalSize::new(1240.0, 640.0))
         .with_always_on_top(true)
         .with_focused(true)

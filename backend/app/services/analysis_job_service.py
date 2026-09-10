@@ -142,7 +142,7 @@ class AnalysisJobService:
         self._job_id = job_id
         self._stop.clear()
         self.repository.update_job(job_id, "running")
-        self._thread = threading.Thread(target=self._run, args=(job_id,), name="djaly-analysis-job", daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(job_id,), name="plumdeck-analysis-job", daemon=True)
         self._thread.start()
 
     def pause(self, job_id):

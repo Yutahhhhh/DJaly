@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import test from 'node:test';
 import path from 'node:path';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-seam/djaly-mixxx-host-seam');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-seam/plumdeck-mixxx-host-seam');
 function client() {
   const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
   const queue = [], waiters = [];

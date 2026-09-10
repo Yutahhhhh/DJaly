@@ -12,7 +12,7 @@ export function McpAnalysisTab({ mode }: { mode: AnalysisMode }) {
           <div>
             <h3 className="font-semibold">Analyze with your MCP client</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Djaly no longer chooses or calls a model. The model in your connected
+              plumdeck no longer chooses or calls a model. The model in your connected
               Codex, Claude, or other MCP client performs the {mode} classification.
             </p>
           </div>
@@ -34,7 +34,7 @@ export function McpAnalysisTab({ mode }: { mode: AnalysisMode }) {
         </div>
 
         <div className="rounded-md border bg-background p-3 text-xs">
-          Example request: “Analyze all missing {mode} labels in Djaly, reuse the
+          Example request: “Analyze all missing {mode} labels in plumdeck, reuse the
           existing taxonomy where appropriate, and apply Medium/High-confidence results.”
         </div>
       </div>

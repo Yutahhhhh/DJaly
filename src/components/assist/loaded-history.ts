@@ -1,4 +1,4 @@
-export const HISTORY_STORAGE_KEY = "djaly.assist.loaded-history.v1";
+export const HISTORY_STORAGE_KEY = "plumdeck.assist.loaded-history.v1";
 export const MAX_EXCLUDED_TRACKS = 10_000;
 
 type ObservedDeck = { status: string; track: { id: number } | null };

@@ -42,10 +42,10 @@ type HistoryRuntime = { key: string; trackId: number; loadedAt: string; startedA
 
 function restoredHistory(): [DeckId, HistoryRuntime][] {
   try {
-    const value = JSON.parse(sessionStorage.getItem("djaly.playHistoryRuntime") ?? "[]");
+    const value = JSON.parse(sessionStorage.getItem("plumdeck.playHistoryRuntime") ?? "[]");
     return Array.isArray(value) ? value : [];
   } catch {
-    sessionStorage.removeItem("djaly.playHistoryRuntime");
+    sessionStorage.removeItem("plumdeck.playHistoryRuntime");
     return [];
   }
 }
@@ -53,15 +53,15 @@ function restoredHistory(): [DeckId, HistoryRuntime][] {
 export function PlayWorkspace() {
   const { status, state, error, busy, client, start, stop, connect } = useDjEngine();
   useEffect(() => { const timer = setInterval(() => void sampler.poll(), 250); return () => { clearInterval(timer); }; }, []);
-  const [deckCount, setDeckCount] = useState<2 | 4>(() => localStorage.getItem("djaly.deckCount") === "4" ? 4 : 2);
+  const [deckCount, setDeckCount] = useState<2 | 4>(() => localStorage.getItem("plumdeck.deckCount") === "4" ? 4 : 2);
   const [expandedPair,setExpandedPair]=useState<'AB'|'CD'|null>(null);
-  const [waveContrast,setWaveContrast]=useState(()=>Number(localStorage.getItem('djaly.waveContrast'))||1);
-  const [waveMonochrome,setWaveMonochrome]=useState(()=>localStorage.getItem('djaly.waveMonochrome')==='true');
-  const [waveDelay,setWaveDelay]=useState(()=>Math.max(-50,Math.min(500,Number(localStorage.getItem('djaly.waveDelay'))||0)));
+  const [waveContrast,setWaveContrast]=useState(()=>Number(localStorage.getItem('plumdeck.waveContrast'))||1);
+  const [waveMonochrome,setWaveMonochrome]=useState(()=>localStorage.getItem('plumdeck.waveMonochrome')==='true');
+  const [waveDelay,setWaveDelay]=useState(()=>Math.max(-50,Math.min(500,Number(localStorage.getItem('plumdeck.waveDelay'))||0)));
   useEffect(()=>{deckRealtimeStore.setPresentationDelay(waveDelay);},[waveDelay]);
   useEffect(()=>{const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setExpandedPair(null);};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[]);
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
-  const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("djaly.djOutputDevice") ?? "");
+  const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("plumdeck.djOutputDevice") ?? "");
   const [recordingDir, setRecordingDir] = useState<string>("");
   const [recordingFormat, setRecordingFormat] = useState<string>("");
   useEffect(() => {
@@ -95,18 +95,18 @@ export function PlayWorkspace() {
   // 助走ぶんだけ UI 側で待ってから 0 秒地点を再生する。
   const manualLoopIn = useRef<Record<DeckId, number | null>>({ A: null, B: null, C: null, D: null });
   const [panels, setPanels] = useState<PanelVisibility>(() => {
-    try { return { ...PANEL_DEFAULTS, ...JSON.parse(localStorage.getItem("djaly.panels") ?? "{}") as Partial<PanelVisibility> }; }
+    try { return { ...PANEL_DEFAULTS, ...JSON.parse(localStorage.getItem("plumdeck.panels") ?? "{}") as Partial<PanelVisibility> }; }
     catch { return PANEL_DEFAULTS; }
   });
   const [fxUnits, setFxUnits] = useState<[FxUnitState, FxUnitState]>(FX_UNIT_DEFAULTS);
-  const [compactDecks, setCompactDecks] = useState(() => localStorage.getItem("djaly.compactDecks") === "true");
+  const [compactDecks, setCompactDecks] = useState(() => localStorage.getItem("plumdeck.compactDecks") === "true");
   const [laneDrop, setLaneDrop] = useState<DeckId | null>(null);
-  const [waveformLayout, setWaveformLayout] = useState<WaveformLayout>(() => localStorage.getItem("djaly.waveformLayout") === "vertical" ? "vertical" : "horizontal");
+  const [waveformLayout, setWaveformLayout] = useState<WaveformLayout>(() => localStorage.getItem("plumdeck.waveformLayout") === "vertical" ? "vertical" : "horizontal");
   const snapshot = state.snapshot;
   const loadedMetadataIds = [...new Set(DECK_IDS.map(id => snapshot?.decks[id]?.track?.trackId).filter(Boolean))].join(",");
-  const playSession = useRef(sessionStorage.getItem("djaly.playSession") ?? `play-${crypto.randomUUID()}`);
+  const playSession = useRef(sessionStorage.getItem("plumdeck.playSession") ?? `play-${crypto.randomUUID()}`);
   const historyKeys = useRef(new Map<DeckId, HistoryRuntime>(restoredHistory()));
-  const recordingKey = useRef<string | null>(sessionStorage.getItem("djaly.recordingKey"));
+  const recordingKey = useRef<string | null>(sessionStorage.getItem("plumdeck.recordingKey"));
   const previousRecording = useRef(snapshot?.recording);
   const snapshotRef = useRef(snapshot);
   const persistenceQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -155,13 +155,13 @@ export function PlayWorkspace() {
     void (status.running ? connect() : status.installed ? start(outputDevice || undefined, recordingDir || undefined) : Promise.resolve());
   }, [busy, connect, connected, outputDevice, start, status]);
 
-  useEffect(() => { sessionStorage.setItem("djaly.playSession", playSession.current); }, []);
+  useEffect(() => { sessionStorage.setItem("plumdeck.playSession", playSession.current); }, []);
 
   const saveRuntime = useCallback(() => {
     if (exiting.current) return;
-    sessionStorage.setItem("djaly.playHistoryRuntime", JSON.stringify([...historyKeys.current]));
-    if (recordingKey.current) sessionStorage.setItem("djaly.recordingKey", recordingKey.current);
-    else sessionStorage.removeItem("djaly.recordingKey");
+    sessionStorage.setItem("plumdeck.playHistoryRuntime", JSON.stringify([...historyKeys.current]));
+    if (recordingKey.current) sessionStorage.setItem("plumdeck.recordingKey", recordingKey.current);
+    else sessionStorage.removeItem("plumdeck.recordingKey");
   }, []);
 
   useEffect(() => {
@@ -212,9 +212,9 @@ export function PlayWorkspace() {
     return () => {
     exiting.current = true;
     if (junctionState.active()) return;
-    sessionStorage.removeItem("djaly.playSession");
-    sessionStorage.removeItem("djaly.playHistoryRuntime");
-    sessionStorage.removeItem("djaly.recordingKey");
+    sessionStorage.removeItem("plumdeck.playSession");
+    sessionStorage.removeItem("plumdeck.playHistoryRuntime");
+    sessionStorage.removeItem("plumdeck.recordingKey");
     void (async () => {
       await finalizeRecording().catch(() => undefined);
       await Promise.allSettled(DECK_IDS.map((deck) => finalizeHistory(deck, "mode_exit")));
@@ -479,7 +479,7 @@ export function PlayWorkspace() {
       }
     }
     setDeckCount(count);
-    localStorage.setItem("djaly.deckCount", String(count));
+    localStorage.setItem("plumdeck.deckCount", String(count));
   }, [activeDeck, client, deckCount, finalizeHistory, run]);
 
   const stopEngine = useCallback(() => {
@@ -536,7 +536,7 @@ export function PlayWorkspace() {
         }
         if (!client.getState().snapshot?.audio.applied) throw new Error(client.getState().snapshot?.audio.reason || "出力デバイスを開けませんでした");
         setOutputDevice(device);
-        localStorage.setItem("djaly.djOutputDevice", device);
+        localStorage.setItem("plumdeck.djOutputDevice", device);
         if (recordingFormat.trim()) await client.setRecordingFormat(recordingFormat.trim());
       }
       microphoneRestoredSession.current = client.getSessionId();
@@ -618,7 +618,7 @@ export function PlayWorkspace() {
       const targets = DECK_IDS.filter((id) => client.getState().snapshot?.decks[id]?.track?.trackId === String(editing.trackId));
       const results = await Promise.allSettled(targets.map((id) => client.setBeatgrid(id, String(editing.trackId), grid.bpm, grid.first_beat_ms, grid.beats_per_bar, grid.beat_times_ms, grid.beat_numbers)));
       const failed = results.flatMap((result, index) => result.status === "rejected" ? [targets[index]] : []);
-      if (failed.length) throw new Error(`Djalyへの保存は完了しましたが、デッキ ${failed.join(" / ")} への反映に失敗しました。再保存で適用を再試行できます。`);
+      if (failed.length) throw new Error(`plumdeckへの保存は完了しましたが、デッキ ${failed.join(" / ")} への反映に失敗しました。再保存で適用を再試行できます。`);
       await client.refreshSnapshot();
       });
     } catch (cause) {
@@ -663,9 +663,9 @@ export function PlayWorkspace() {
   const lane = (id: DeckId, layout: WaveformLayout) => <div key={id}
     className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"), laneDrop === id && "dj-lane--drop")}
     style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}
-    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-djaly-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setLaneDrop(id); } }}
+    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setLaneDrop(id); } }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setLaneDrop((current) => current === id ? null : current); }}
-    onDrop={(event) => { event.preventDefault(); setLaneDrop(null); try { const track = JSON.parse(event.dataTransfer.getData("application/x-djaly-track")) as Track; if (track.id && track.filepath && track.duration > 0) loadTrack(id, track); } catch { /* Ignore foreign drag data. */ } }}>
+    onDrop={(event) => { event.preventDefault(); setLaneDrop(null); try { const track = JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track; if (track.id && track.filepath && track.duration > 0) loadTrack(id, track); } catch { /* Ignore foreign drag data. */ } }}>
     {waveform(id, layout)}
     <button className="dj-wave-expand" aria-label={`デッキ ${id} のペアを拡大`} aria-pressed={!!expandedPair?.includes(id)} onClick={()=>setExpandedPair(current=>current?.includes(id)?null:(id==='A'||id==='B'?'AB':'CD'))}>拡大</button>
   </div>;
@@ -682,7 +682,7 @@ export function PlayWorkspace() {
 
   const togglePanel = (panel: PanelId) => setPanels((current) => {
     const next = { ...current, [panel]: !current[panel] };
-    localStorage.setItem("djaly.panels", JSON.stringify(next));
+    localStorage.setItem("plumdeck.panels", JSON.stringify(next));
     return next;
   });
 
@@ -756,7 +756,7 @@ export function PlayWorkspace() {
 
   const midi = useDdj1000({
     activate: (deck) => { setActiveDeck(deck); if (deck === "C" || deck === "D") changeDeckCount(4); },
-    library: (action) => { window.dispatchEvent(new CustomEvent("djaly:controller-library", { detail: action })); },
+    library: (action) => { window.dispatchEvent(new CustomEvent("plumdeck:controller-library", { detail: action })); },
     hotcue: editHotCue,
     memory: memoryAction,
     cuePoints: cuePoints.current,
@@ -768,14 +768,14 @@ export function PlayWorkspace() {
     <header className="dj-global-bar">
       <div className="dj-performance-label"><Disc3 /><strong>PERFORMANCE</strong></div>
       <PanelToolbar visible={panels} onToggle={togglePanel} />
-      <div className="dj-segmented" aria-label="デッキ表示サイズ">{([false, true] as const).map((compact) => <button key={String(compact)} title={compact ? "コンパクト表示（ブラウザを広く）" : "通常表示"} aria-pressed={compactDecks === compact} className={compactDecks === compact ? "is-on" : ""} onClick={() => { setCompactDecks(compact); localStorage.setItem("djaly.compactDecks", String(compact)); }}>{compact ? "コンパクト" : "通常"}</button>)}</div>
+      <div className="dj-segmented" aria-label="デッキ表示サイズ">{([false, true] as const).map((compact) => <button key={String(compact)} title={compact ? "コンパクト表示（ブラウザを広く）" : "通常表示"} aria-pressed={compactDecks === compact} className={compactDecks === compact ? "is-on" : ""} onClick={() => { setCompactDecks(compact); localStorage.setItem("plumdeck.compactDecks", String(compact)); }}>{compact ? "コンパクト" : "通常"}</button>)}</div>
       <div className="dj-segmented" aria-label="Deck count">{([2, 4] as const).map((count) => <button key={count} title={`${count} デッキ`} aria-pressed={deckCount === count} className={deckCount === count ? "is-on" : ""} onClick={() => changeDeckCount(count)}>{count}</button>)}</div>
       <details className="dj-wave-settings"><summary>表示設定</summary><div>
-        <label>波形コントラスト <input type="range" min="1" max="2" step="0.1" value={waveContrast} onChange={event=>{setWaveContrast(Number(event.target.value));localStorage.setItem('djaly.waveContrast',event.target.value);}} /></label>
-        <label><input type="checkbox" checked={waveMonochrome} onChange={event=>{setWaveMonochrome(event.target.checked);localStorage.setItem('djaly.waveMonochrome',String(event.target.checked));}} />波形を単色で表示</label>
-        <label title="音より波形が先行する場合は増やします。">波形の表示遅延（ms） <input type="number" min="-50" max="500" step="1" value={waveDelay} onChange={event=>{const value=Math.max(-50,Math.min(500,Number(event.target.value)||0));setWaveDelay(value);localStorage.setItem('djaly.waveDelay',String(value));}} /></label>
+        <label>波形コントラスト <input type="range" min="1" max="2" step="0.1" value={waveContrast} onChange={event=>{setWaveContrast(Number(event.target.value));localStorage.setItem('plumdeck.waveContrast',event.target.value);}} /></label>
+        <label><input type="checkbox" checked={waveMonochrome} onChange={event=>{setWaveMonochrome(event.target.checked);localStorage.setItem('plumdeck.waveMonochrome',String(event.target.checked));}} />波形を単色で表示</label>
+        <label title="音より波形が先行する場合は増やします。">波形の表示遅延（ms） <input type="number" min="-50" max="500" step="1" value={waveDelay} onChange={event=>{const value=Math.max(-50,Math.min(500,Number(event.target.value)||0));setWaveDelay(value);localStorage.setItem('plumdeck.waveDelay',String(value));}} /></label>
       </div></details>
-      <div className="dj-segmented" aria-label="波形レイアウト">{(["horizontal", "vertical"] as const).map((layout) => <button key={layout} title={layout === "horizontal" ? "横波形（デッキ上部に重ねて表示）" : "縦波形（デッキ中央に並べて表示）"} aria-label={layout === "horizontal" ? "横波形" : "縦波形（デッキ中央）"} aria-pressed={waveformLayout === layout} className={waveformLayout === layout ? "is-on" : ""} onClick={() => { setWaveformLayout(layout); localStorage.setItem("djaly.waveformLayout", layout); }}>{layout === "horizontal" ? <Rows3 /> : <Columns3 />}</button>)}</div>
+      <div className="dj-segmented" aria-label="波形レイアウト">{(["horizontal", "vertical"] as const).map((layout) => <button key={layout} title={layout === "horizontal" ? "横波形（デッキ上部に重ねて表示）" : "縦波形（デッキ中央に並べて表示）"} aria-label={layout === "horizontal" ? "横波形" : "縦波形（デッキ中央）"} aria-pressed={waveformLayout === layout} className={waveformLayout === layout ? "is-on" : ""} onClick={() => { setWaveformLayout(layout); localStorage.setItem("plumdeck.waveformLayout", layout); }}>{layout === "horizontal" ? <Rows3 /> : <Columns3 />}</button>)}</div>
       <div className="dj-engine-status"><i className={connected && snapshot?.audio.applied ? "is-connected" : ""} /><span>{connected ? snapshot?.engine.simulated ? "SIMULATOR · 音声出力なし" : snapshot?.audio.applied ? "AUDIO CONNECTED" : "音声出力を確認中" : busy ? "音声エンジンを起動中…" : "AUDIO OFFLINE"}</span></div>
       <div className="dj-global-actions">
         <details className="dj-midi-settings">
@@ -802,7 +802,7 @@ export function PlayWorkspace() {
           </div>
         </details>
         <button className="dj-button" title="オーディオ設定" onClick={() => setAudioSettingsOpen(true)}><Settings2 />オーディオ</button>
-        {!status?.running && <><input aria-label="音声出力デバイス" className="dj-device-input" value={outputDevice} onChange={(event) => { setOutputDevice(event.target.value); localStorage.setItem("djaly.djOutputDevice", event.target.value); }} placeholder="標準オーディオ出力" /><button className="dj-button" disabled={busy || !status?.installed} onClick={() => void start(outputDevice || undefined, recordingDir || undefined)}>{busy ? <Loader2 className="animate-spin" /> : <Power />}起動</button></>}
+        {!status?.running && <><input aria-label="音声出力デバイス" className="dj-device-input" value={outputDevice} onChange={(event) => { setOutputDevice(event.target.value); localStorage.setItem("plumdeck.djOutputDevice", event.target.value); }} placeholder="標準オーディオ出力" /><button className="dj-button" disabled={busy || !status?.installed} onClick={() => void start(outputDevice || undefined, recordingDir || undefined)}>{busy ? <Loader2 className="animate-spin" /> : <Power />}起動</button></>}
         {status?.running && !connected && <button className="dj-button" onClick={() => void connect()}>接続</button>}
         <button className={cn("dj-button", shortcuts && "is-on")} aria-label="キーボード操作" title="キーボード操作" onClick={() => setShortcuts((value) => !value)}><Keyboard /></button>
         <button className={cn("dj-button dj-record", snapshot?.recording?.active && "is-recording")} disabled={!connected || !recordingSupported || snapshot?.recording?.stopping} title={recordingSupported ? "録音開始 / 停止" : "録音は現在の音声ホストで利用できません"} onClick={() => void run(() => snapshot?.recording?.active ? finalizeRecording() : client.startRecording())}>{snapshot?.recording?.active ? <Square /> : <Circle />}<span>{snapshot?.recording?.active ? formatTime(snapshot.recording.elapsedMs) : "REC"}</span></button>

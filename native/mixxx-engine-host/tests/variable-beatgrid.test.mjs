@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 
-const binary = process.env.DJALY_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/djaly-mixxx-engine-host');
+const binary = process.env.PLUMDECK_TEST_HOST || path.resolve(import.meta.dirname, '../build-upstream/plumdeck-mixxx-engine-host');
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 function wav(seconds, sampleRate = 44100) {
@@ -21,10 +21,10 @@ function wav(seconds, sampleRate = 44100) {
 }
 
 test('native variable beat maps survive load and live replacement with strict validation', { timeout: 30000 }, async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'djaly-variable-grid-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'plumdeck-variable-grid-'));
   const fixture = path.join(directory, 'variable.wav');
   await writeFile(fixture, wav(8));
-  const child = spawn(binary, [], { env: { ...process.env, DJALY_MIXXX_TIMING_TRACE: '1', DJALY_MIXXX_OUTPUT_DEVICE: process.env.DJALY_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' } });
+  const child = spawn(binary, [], { env: { ...process.env, PLUMDECK_MIXXX_TIMING_TRACE: '1', PLUMDECK_MIXXX_OUTPUT_DEVICE: process.env.PLUMDECK_MIXXX_OUTPUT_DEVICE || 'BlackHole 2ch' } });
   let stderr = '', nextId = 0, hello;
   const pending = new Map();
   child.stderr.on('data', chunk => { stderr += chunk; });
