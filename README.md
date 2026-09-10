@@ -44,12 +44,15 @@ USBのXML取り込み、CDJ/XDJ、任意のMIDI機器、各音声出力は環境
 フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。MixxxホストとJCTの実音声経路はmacOS / Apple Silicon向けです。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
 
 ```bash
+cp .env.example .env
 pnpm install
 cd backend
 ./setup.sh
 cd ..
 pnpm tauri
 ```
+
+環境ごとの値はGit管理外の `.env` で変更します。本番用の環境ファイルが必要な場合は、`.env.production.example` を `.env.production` へコピーしてください。exampleファイルには共有可能な既定値だけを置き、認証情報や端末固有のパスは追加しません。
 
 個別に起動する場合は `pnpm backend:dev` と `pnpm dev` を使います。開発時のバックエンドは通常 `127.0.0.1:8001`、フロントエンドは `127.0.0.1:1420` です。APIの参照先は `src/services/api-client.ts` と環境変数に集約しています。
 
@@ -160,6 +163,15 @@ macOSのアクセシビリティから、rekordboxが表示しているデッキ
 ## MCP・データ操作
 
 アプリのMCP画面に表示されるURLでStreamable HTTPに接続します。通常の製品ビルドは `http://127.0.0.1:48123/mcp`、開発時は `http://127.0.0.1:8001/mcp` です。利用可能なツールは起動中のサーバーの一覧で確認してください。
+
+リポジトリ同梱の `.mcp.json` と `opencode.json` は端末固有の絶対パスを保持しません。Claude CodeまたはOpenCodeを起動するシェルで、rekordbox MCPの実行ファイルとデータベースを環境変数に設定してください。
+
+```bash
+export REKORDBOX_MCP_COMMAND="$HOME/.local/bin/rekordbox-mcp"
+export REKORDBOX_DB_PATH="$HOME/Library/Pioneer/rekordbox/master.db"
+```
+
+`rekordbox-mcp` が `PATH` にある場合、Claude Codeでは `REKORDBOX_MCP_COMMAND` を省略できます。OpenCodeでは設定ファイルの変数展開時に未設定値が空文字になるため、起動前に設定してください。
 
 - あいまいな選曲条件はクライアント側でBPM・Energy等の条件に変換し、検索へ渡します。
 - 書き込みには検索で取得したtrack id / setlist idを使います。名前から存在を仮定しません。

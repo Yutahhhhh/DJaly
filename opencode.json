@@ -8,10 +8,10 @@
     },
     "rekordbox": {
       "type": "local",
-      "command": ["rekordbox-mcp", "--mode", "readonly"],
+      "command": ["{env:REKORDBOX_MCP_COMMAND}", "--mode", "readonly"],
       "enabled": true,
       "environment": {
-        "REKORDBOX_DB_PATH": "/Users/horiyuuta/Library/Pioneer/rekordbox/master.db"
+        "REKORDBOX_DB_PATH": "{env:REKORDBOX_DB_PATH}"
       }
     }
   }

@@ -6,10 +6,10 @@
     },
     "rekordbox": {
       "type": "stdio",
-      "command": "/Users/horiyuuta/.local/bin/rekordbox-mcp",
+      "command": "${REKORDBOX_MCP_COMMAND:-rekordbox-mcp}",
       "args": ["--mode", "readonly"],
       "env": {
-        "REKORDBOX_DB_PATH": "/Users/horiyuuta/Library/Pioneer/rekordbox/master.db"
+        "REKORDBOX_DB_PATH": "${REKORDBOX_DB_PATH}"
       }
     }
   }

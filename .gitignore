@@ -48,3 +48,11 @@ coverage.xml
 
 output.txt
 backup/*
+
+# Local environment configuration. Copy the tracked examples before running.
+.env
+.env.*
+!.env.example
+!.env.*.example
+!**/.env.example
+!**/.env.*.example

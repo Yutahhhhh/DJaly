@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -14,7 +15,12 @@ import duckdb
 import numpy as np
 
 
-DB_PATH = Path("/Users/horiyuuta/Library/Application Support/plumdeck/plumdeck.duckdb")
+DB_PATH = Path(
+    os.environ.get(
+        "PLUMDECK_DB_PATH",
+        Path.home() / "Library/Application Support/plumdeck/plumdeck.duckdb",
+    )
+).expanduser()
 SR = 22050
 SEGMENT_SECONDS = 16.0
 
