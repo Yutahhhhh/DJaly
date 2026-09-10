@@ -1,3 +1,4 @@
+#include "../sound_file.h"
 #include "runtime.h"
 #include "media_transport.h"
 #include "program_output.h"
@@ -678,7 +679,7 @@ struct Runtime::Impl {
             const auto object=QJsonDocument::fromJson(file.readAll()).object();return object["schema"]==1&&object["decks"].toArray().size()==4;
         }
         if(kind!=assetKinds.end()&&(kind->second=="plumdeck-ddj-dsp-v1"||kind->second=="plumdeck-keylock-v1"||kind->second=="plumdeck-fx-v1"))return backend->validateDspAsset(path);
-        SF_INFO info{};auto* f=sf_open(path.toUtf8().constData(),SFM_READ,&info);if(f)sf_close(f);return f!=nullptr;
+        SF_INFO info{};auto* f=openSoundFile(path,SFM_READ,&info);if(f)sf_close(f);return f!=nullptr;
     }
     void sendGraph(Peer& peer,const QJsonObject& value) {
         const auto bytes=json(value);if(bytes.size()>8*1024*1024){fail("演奏状態が転送上限を超えています");return;}

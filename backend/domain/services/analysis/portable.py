@@ -17,7 +17,7 @@ def musicnn_bands(audio: np.ndarray) -> np.ndarray:
     import librosa
     # Essentia TensorflowInputMusiCNN: centered 512-sample symmetric Hann,
     # 256 hop, Slaney area-normalized 96 mel power bands, log10(1+10000*x).
-    padded = np.pad(np.asarray(audio, dtype=np.float32), (256, 256))
+    padded = np.pad(np.asarray(audio, dtype=np.float32), (256, 256 + (-len(audio) % 256)))
     frames = np.lib.stride_tricks.sliding_window_view(padded, 512)[::256]
     spectrum = np.abs(np.fft.rfft(frames * np.hanning(512), axis=1)) ** 2
     mel = librosa.filters.mel(sr=16000, n_fft=512, n_mels=96, norm="slaney")

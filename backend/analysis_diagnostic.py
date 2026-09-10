@@ -10,7 +10,7 @@ def run():
     from domain.services.analysis.analyzer import AudioAnalyzer
     sr = 44100
     t = np.arange(sr * 12) / sr
-    audio = sum(.12 * np.sin(2 * np.pi * frequency * t) for frequency in (261.626, 329.628, 391.995))
+    audio = sum(amplitude * np.sin(2 * np.pi * frequency * t) for amplitude, frequency in ((.15,261.626), (.12,329.628), (.10,391.995)))
     for beat in np.arange(.25, 12, .5):
         start = int(beat * sr)
         audio[start:start+400] += .5 * np.exp(-np.arange(400) / 70)
