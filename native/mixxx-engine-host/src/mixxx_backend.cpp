@@ -324,6 +324,8 @@ public:
         junction::audioBridge.store(&audioBridge_,std::memory_order_release);
         auto status = sound_->setConfig(config);
         if (status != SoundDeviceStatus::Ok) { problem_ = sound_->getLastErrorMessage(status); return; }
+        outputDevice_ = selected;
+        pflStart_ = pflAvailable_ ? 2 : -1;
         output_ = selected->getDisplayName(); problem_.clear(); available_ = true;
         auto* scratchDiagnostics = new QTimer(this);
         connect(scratchDiagnostics, &QTimer::timeout, this, [this] { saveScratchDiagnostics(); });
@@ -333,6 +335,7 @@ public:
     ~MixxxBackend() override {
         for (int index = 0; index < 4; ++index) if (decks_[index]) releaseScratch(index);
         if (recorder_ && (recordingActive_ || recordingPending_)) recorder_->stopRecording();
+        outputDevice_.reset();
         sound_.reset(); // Stops callbacks before any engine-owned memory is freed.
         junction::audioBridge.store(nullptr,std::memory_order_release);
         recorder_.reset(); samplers_.reset(); beatFx_.reset(); mixer_.reset(); decks_ = {}; effects_.reset();
@@ -370,7 +373,41 @@ public:
                 {"duckingEnabled", micDuckingEnabled_}, {"duckingStrength", micDuckingStrength_},
                 {"applied", micApplied}, {"level", micApplied ? ControlObject::get(ConfigKey("[Microphone1]", "vu_meter")) : 0},
                 {"reason", micProblem_}};
-        return {{"deviceId", output_}, {"sampleRateHz", 44100}, {"bufferFrames", 256}, {"masterChannels", QJsonArray{0, 1}}, {"pflChannels", available_ && pflAvailable_ ? QJsonValue(QJsonArray{2, 3}) : QJsonValue::Null}, {"pflApplied", available_ && pflAvailable_}, {"applied", available_}, {"reason", problem_}, {"microphone", mic}};
+        return {{"deviceId", output_}, {"sampleRateHz", 44100}, {"bufferFrames", 256}, {"masterChannels", QJsonArray{masterStart_, masterStart_ + 1}}, {"pflChannels", available_ && pflAvailable_ ? QJsonValue(QJsonArray{pflStart_, pflStart_ + 1}) : QJsonValue::Null}, {"pflApplied", available_ && pflAvailable_}, {"applied", available_}, {"reason", problem_}, {"microphone", mic}};
+    }
+    QString configureOutputRouting(const QJsonObject& params) override {
+        if (!available_ || !sound_ || !outputDevice_) return "Open an output device before configuring channels";
+        const auto master = params["masterChannels"].toArray();
+        const auto cue = params["pflChannels"].toArray();
+        const int count = outputDevice_->getNumOutputChannels().value();
+        const auto valid = [count](const QJsonArray& pair) {
+            return pair.size() == 2 && pair[0].isDouble() && pair[1].isDouble() &&
+                pair[0].toDouble() == pair[0].toInt() && pair[0].toInt() >= 0 &&
+                pair[1].toDouble() == pair[0].toInt() + 1 && pair[1].toInt() < count;
+        };
+        if (!valid(master) || (!params["pflChannels"].isNull() && !valid(cue))) return "Select two consecutive channels available on this output";
+        const int mainStart = master[0].toInt(), cueStart = cue.isEmpty() ? -1 : cue[0].toInt();
+        if (cueStart >= 0 && std::abs(mainStart - cueStart) < 2) return "Master and headphone channels must not overlap";
+        if (mainStart == masterStart_ && cueStart == pflStart_) return {};
+        if (recordingActive_ || recordingPending_ || recordingStopping_) return "Stop recording before changing output channels";
+        for (int i = 0; i < 4; ++i) if (playing(i)) return "Pause all decks before changing output channels";
+        const auto previous = sound_->getConfig();
+        auto config = previous;
+        config.clearOutputs();
+        config.addOutput(outputDevice_->getDeviceId(), AudioOutput(AudioPathType::Main, mainStart, mixxx::audio::ChannelCount::stereo()));
+        if (cueStart >= 0) config.addOutput(outputDevice_->getDeviceId(), AudioOutput(AudioPathType::Headphones, cueStart, mixxx::audio::ChannelCount::stereo()));
+        const auto status = sound_->setConfig(config);
+        if (status != SoundDeviceStatus::Ok) {
+            const auto failure = sound_->getLastErrorMessage(status);
+            if (sound_->setConfig(previous) != SoundDeviceStatus::Ok) { available_ = false; problem_ = failure; }
+            return failure;
+        }
+        masterStart_ = mainStart; pflStart_ = cueStart; pflAvailable_ = cueStart >= 0;
+        if (pflAvailable_) {
+            ControlObject::set(ConfigKey("[Master]", "headGain"), 1);
+            ControlObject::set(ConfigKey("[Master]", "headMix"), -1);
+        }
+        return {};
     }
     QString configureMicrophone(const QJsonObject& params) override {
         if (!available_ || !sound_ || !microphone_) return "Microphone input is unavailable until the audio output is ready";
@@ -1077,6 +1114,8 @@ private:
     double micGain_ = 1, micDuckingStrength_ = 0.65;
     bool micEnabled_ = false, micDuckingEnabled_ = false;
     std::unique_ptr<SoundManager> sound_;
+    SoundDevicePointer outputDevice_;
+    int masterStart_ = 0, pflStart_ = -1;
     std::array<TrackPointer, 4> tracks_;
     std::array<quint64, 4> generations_{};
     std::array<double, 4> diagnosticBuffers_{};

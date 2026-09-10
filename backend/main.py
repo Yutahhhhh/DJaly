@@ -31,7 +31,17 @@ import os
 # Lifespan event to handle startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # DuckDBの初期化 (Raw SQLによるSequence/Table作成)
+    init_db()
+    # A process crash cannot resume an in-flight inference. Keep the target
+    # intent and offer an explicit resume instead of leaving a permanent spinner.
+    from sqlmodel import Session
+    from sqlalchemy import text
+    import infra.database.connection as db_connection
+    with Session(db_connection.engine) as session:
+        session.exec(text("UPDATE import_items SET state='queued' WHERE state IN ('probing','analyzing')"))
+        session.exec(text("UPDATE import_batches SET state='paused',paused=true WHERE state IN ('queued','processing','pausing')"))
+        session.commit()
+    # DuckDBの初期化 (Raw SQLによるSequence/Table作成)
     # マウントされたサブアプリは lifespan イベントを直接受け取らないため、
     # MCP の session_manager は親アプリの lifespan 内で明示的に起動する。
     # session_manager は run() 完了後に再利用できないため、lifespan のたびに作り直す。

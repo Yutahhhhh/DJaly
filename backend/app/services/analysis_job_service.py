@@ -121,7 +121,7 @@ class AnalysisJobService:
         }
 
     def start(self, track_ids=None, genres=None, features=None, only_outdated=True, limit=None, workers=2):
-        with self._lock:
+        with connection.database_activity, self._lock:
             self._check_available(workers)
             features, _, tracks = self._select(track_ids, genres, features, only_outdated, limit)
             config = {"features": features, "only_outdated": only_outdated, "workers": workers}

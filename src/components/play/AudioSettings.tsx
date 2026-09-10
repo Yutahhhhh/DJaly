@@ -1,3 +1,4 @@
+import type { OutputRouting } from "@/services/dj-engine/audio-ready";
 import { useEffect, useState } from "react";
 import { Loader2, Mic, RefreshCw, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,10 +13,11 @@ const labelClass = "block text-[11px] font-semibold text-[#9b9fa6]";
 
 export function AudioSettings({ onClose, onApply }: {
   onClose: () => void;
-  onApply: (outputDevice: string, microphone?: MicrophoneSettings) => Promise<void>;
+  onApply: (outputDevice: string, microphone?: MicrophoneSettings, routing?: OutputRouting) => Promise<void>;
 }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selected, setSelected] = useState(() => localStorage.getItem("plumdeck.djOutputDevice") ?? "");
+  const [routing, setRouting] = useState<OutputRouting>({ masterChannels: [0, 1], pflChannels: null });
   const [audio, setAudio] = useState<AudioConfig | null>(null);
   const [microphone, setMicrophone] = useState<MicrophoneSettings>(() => savedMicrophoneSettings() ?? DEFAULT_MICROPHONE);
   const [loading, setLoading] = useState(true);
@@ -37,7 +39,7 @@ export function AudioSettings({ onClose, onApply }: {
       if (!Array.isArray(result.devices)) throw new Error("音声デバイス一覧を取得できませんでした");
       const config = await djEngineClient.send("audio.config.get") as AudioConfig;
       if (!cancelled) {
-        setDevices(result.devices); setAudio(config);
+        setDevices(result.devices); setAudio(config); setRouting({ masterChannels: config.masterChannels, pflChannels: config.pflChannels ?? null });
         if (config.microphone) setMicrophone(config.microphone);
         if (result.reason) setError(result.reason);
       }
@@ -57,12 +59,13 @@ export function AudioSettings({ onClose, onApply }: {
   const micAmbiguous = inputs.filter(device => device.name === microphone.deviceId).length > 1;
   const micSupported = Boolean(audio?.microphone?.available);
   const micValid = !microphone.deviceId ? !microphone.enabled : Boolean(micDevice && !micAmbiguous && microphone.channel < (micDevice.inputChannels ?? 0));
-  const canApply = Boolean(selectedDevice && selectedDevice.outputChannels >= 2 && !ambiguous && (!micSupported || micValid));
+  const routeValid = routing.masterChannels[1] < (selectedDevice?.outputChannels ?? 0) && (!routing.pflChannels || (routing.pflChannels[1] < (selectedDevice?.outputChannels ?? 0) && !routing.pflChannels.some(n => routing.masterChannels.includes(n))));
+  const canApply = routeValid && Boolean(selectedDevice && selectedDevice.outputChannels >= 2 && !ambiguous && micValid);
   const outputChanged = selected !== (localStorage.getItem("plumdeck.djOutputDevice") ?? "") || !audio?.applied;
   const setMic = (patch: Partial<MicrophoneSettings>) => setMicrophone(old => ({ ...old, ...patch }));
   const apply = async () => {
     setApplying(true); setError(null);
-    try { await onApply(selected, micSupported ? microphone : undefined); onClose(); }
+    try { await onApply(selected, microphone, routing); onClose(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setApplying(false); }
   };
@@ -79,17 +82,32 @@ export function AudioSettings({ onClose, onApply }: {
       <div className="space-y-3">
         <div className="rounded border border-[#2b2d31] p-3">
           <label className={labelClass}>機材プリセット（選択後に「適用」が必要です）</label>
-          <div className="mt-2"><select aria-label="音声プリセット" className={selectClass} defaultValue="" onChange={(event) => { const preset = presets.find((row) => row.id === event.target.value); if (!preset) return; const config = preset.config as {output_device?:string; microphone?:MicrophoneSettings}; setSelected(config.output_device ?? ""); if (config.microphone) setMicrophone(config.microphone); }}><option value="">プリセットを選択</option>{presets.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></div>
-          <div className="mt-2 flex gap-2"><input className={selectClass} value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="現在設定の保存名"/><Button size="sm" variant="outline" disabled={!presetName.trim() || !audio} onClick={() => { if (!audio) return; void workflowsService.saveAudioPreset(presetName.trim(), { output_device:selected, master:{device_id:selected || "default",channels:audio.masterChannels}, cue:audio.pflChannels ? {device_id:selected || "default",channels:audio.pflChannels} : null, sample_rate:audio.sampleRateHz, buffer_size:audio.bufferFrames, microphone }).then(() => workflowsService.audioPresets().then(setPresets)).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }}>保存</Button></div>
+          <div className="mt-2"><select aria-label="音声プリセット" className={selectClass} defaultValue="" onChange={(event) => { const preset = presets.find((row) => row.id === event.target.value); if (!preset) return; const config = preset.config as {output_device?:string; master?:{device_id?:string;channels:number[]};cue?:{device_id?:string;channels:number[]}|null; microphone?:MicrophoneSettings; sample_rate?:number; buffer_size?:number};
+            if ((config.sample_rate && config.sample_rate !== 44100) || (config.buffer_size && config.buffer_size !== 256)) { setError("このプリセットのサンプルレート／バッファは未対応です"); return; }
+            const id = config.output_device ?? config.master?.device_id ?? "";
+            const device = devices.find(row => row.id === id || row.name === id);
+            if (config.cue?.device_id && config.cue.device_id !== (config.master?.device_id ?? id)) { setError("MasterとCUEは同じ音声デバイスを選んでください"); return; }
+            setSelected(id === "default" ? "" : device?.name ?? id);
+            setRouting({ masterChannels: config.master?.channels ?? [0,1], pflChannels: config.cue?.channels ?? null });
+            if (config.microphone) setMicrophone(config.microphone); setError(null); }}><option value="">プリセットを選択</option>{presets.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></div>
+          <div className="mt-2 flex gap-2"><input className={selectClass} value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="現在設定の保存名"/><Button size="sm" variant="outline" disabled={disabled || !canApply || !presetName.trim() || !audio} onClick={() => { if (!audio) return; void workflowsService.saveAudioPreset(presetName.trim(), { output_device:selected, master:{device_id:selected || "default",channels:routing.masterChannels}, cue:routing.pflChannels ? {device_id:selected || "default",channels:routing.pflChannels} : null, sample_rate:audio.sampleRateHz, buffer_size:audio.bufferFrames, microphone }).then(() => workflowsService.audioPresets().then(setPresets)).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }}>保存</Button></div>
         </div>
         <label className={labelClass} htmlFor="dj-output-device">マスター出力</label>
-        <select id="dj-output-device" value={selected} disabled={disabled} onChange={event => setSelected(event.target.value)} className={selectClass}>
+        <select id="dj-output-device" value={selected} disabled={disabled} onChange={event => { setSelected(event.target.value); setRouting({ masterChannels: [0,1], pflChannels: event.target.value === "DDJ-1000" ? [2,3] : null }); }} className={selectClass}>
           <option value="">macOSの既定出力{defaultDevice ? ` — ${defaultDevice.displayName}` : ""}</option>
           {selected && !outputs.some(device => device.name === selected) && <option value={selected} disabled>{selected}（未接続）</option>}
           {outputs.map(device => <option key={device.id} value={device.name} disabled={device.outputChannels < 2}>{device.displayName} — {device.outputChannels} ch</option>)}
         </select>
         <p className="text-[11px] text-[#8b8f96]">{loading ? "デバイスを確認中…" : audio?.applied ? `${audio.deviceId} · ${audio.sampleRateHz.toLocaleString()} Hz · ${audio.bufferFrames} frames` : audio?.reason || "未適用"}</p>
-        {selectedDevice?.name === "DDJ-1000" && <p className="text-[11px] text-[#70d9b0]">MASTER: USB 1/2 · ヘッドホンCUE: USB 3/4。本体の入力切替を接続中のUSB A/Bに合わせてください。</p>}
+        <div className="grid grid-cols-2 gap-3">
+          {(["masterChannels", "pflChannels"] as const).map(key => <label key={key} className={labelClass}>{key === "masterChannels" ? "Masterチャンネル" : "ヘッドホンCUEチャンネル"}
+            <select className={selectClass} disabled={disabled} value={routing[key]?.[0] ?? -1} onChange={event => { const first = Number(event.target.value); setRouting(old => ({ ...old, [key]: first < 0 ? null : [first, first + 1] })); }}>
+              {key === "pflChannels" && <option value={-1}>使用しない</option>}
+              {Array.from({length: Math.max(0, (selectedDevice?.outputChannels ?? 0) - 1)}, (_, first) => <option key={first} value={first}>{first + 1} / {first + 2}</option>)}
+            </select>
+          </label>)}
+        </div>
+        {!routeValid && <p role="alert" className="text-xs text-amber-300">接続機器に存在する、重複しないMaster / CUEチャンネルを選択してください。</p>}
         {ambiguous && <p role="alert" className="text-xs text-amber-300">同名の出力が複数あります。macOSの既定出力を選択してください。</p>}
         <fieldset disabled={disabled || !micSupported} className="space-y-3 rounded border border-[#2b2d31] p-3 disabled:opacity-60">
           <legend className="flex items-center gap-1 px-1 text-xs"><Mic className="size-3.5" />マイク入力</legend>
@@ -119,7 +137,7 @@ export function AudioSettings({ onClose, onApply }: {
         {!loading && !micSupported && <p className="text-xs text-amber-300">この音声エンジンはマイク入力に未対応です。更新したエンジンを起動してください。</p>}
         {micSupported && !micValid && <p role="alert" className="text-xs text-amber-300">接続済みの入力デバイスと有効なチャンネルを選択してください。同名デバイスは名前を区別してください。</p>}
         {audio?.microphone?.reason && <p className="text-xs text-amber-300">{audio.microphone.reason}</p>}
-        <p className="text-[11px] leading-relaxed text-[#8b8f96]">Masterは出力1–2 chを使用します。{outputChanged ? "出力変更時は再生・録音を停止し、デッキの曲を解除します。" : "マイク音量・ON/OFF・自動調整は再生中も変更できます。入力デバイス・チャンネルの変更は録音停止後に適用してください。"}</p>
+        <p className="text-[11px] leading-relaxed text-[#8b8f96]">チャンネル変更時は再生・録音を停止します。{outputChanged ? "出力変更時は再生・録音を停止し、デッキの曲を解除します。" : "マイク音量・ON/OFF・自動調整は再生中も変更できます。入力デバイス・チャンネルの変更は録音停止後に適用してください。"}</p>
         {error && <p role="alert" className="break-words rounded border border-[#5b3835] bg-[#2e1e1d] px-2.5 py-1.5 text-xs text-[#e7a9a2]">{error}</p>}
       </div>
       <DialogFooter className="gap-2 sm:gap-2">

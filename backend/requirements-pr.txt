@@ -1,0 +1,10 @@
+# Lightweight PR tests: no Essentia/TensorFlow, FFmpeg, PyInstaller or native toolchain.
+pytest
+sqlmodel
+duckdb
+duckdb-engine
+pydantic-settings
+platformdirs
+mutagen
+tinytag
+numpy

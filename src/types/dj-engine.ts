@@ -327,7 +327,7 @@ export interface RecordingState {
   /** Authoritative count from Mixxx EngineRecord's record-tap clock. */
   frameCount?: number;
   sampleRateHz?: number;
-  timelineQuality?: "recording_frame_clock" | "incomplete";
+  timelineQuality?: "recording_frame_clock" | "engine_sampled" | "incomplete";
   timelineDroppedEvents?: number;
   timeline?: Array<{ eventKey: string; deck: DeckId; loadGeneration: number; trackId: number | string; title?: string; artist?: string; startFrame: number; endFrame: number | null; source: "engine_observed" }>;
   error: string | null;

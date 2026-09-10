@@ -14,11 +14,13 @@ import os
 import platform
 import plistlib
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
 import uuid
 import zipfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -356,7 +358,7 @@ class VersionService:
 DDJ400_PROFILE = {
     "id": "builtin-ddj400-v1", "schemaVersion": 1, "name": "Pioneer DDJ-400",
     "adapterId": "ddj400",
-    "capabilities": ["midi-input", "midi-output", "midi-learn", "jog-relative", "high-resolution", "led-feedback"],
+    "capabilities": ["midi-input", "midi-learn", "jog-relative", "high-resolution"],
     "source": {"url": "https://github.com/mixxxdj/mixxx/blob/f8b3523bb3be90621996c300ad23cfbe48ba8a5a/res/controllers/Pioneer-DDJ-400.midi.xml", "commit": "f8b3523bb3be90621996c300ad23cfbe48ba8a5a", "license": "GPL-2.0-or-later"},
     "bindings": [
         {"id": "play-a", "input": {"kind": "note", "channel": 0, "number": 11}, "encoding": "button", "actionId": "deck.play", "deck": "A", "trigger": "press"},
@@ -368,8 +370,8 @@ DDJ400_PROFILE = {
         {"id": "cue-b", "input": {"kind": "note", "channel": 1, "number": 12}, "encoding": "button", "actionId": "deck.cue", "deck": "B", "trigger": "hold"},
         {"id": "sync-a", "input": {"kind": "note", "channel": 0, "number": 88}, "encoding": "button", "actionId": "deck.sync", "deck": "A", "trigger": "toggle"},
         {"id": "sync-b", "input": {"kind": "note", "channel": 1, "number": 88}, "encoding": "button", "actionId": "deck.sync", "deck": "B", "trigger": "toggle"},
-        {"id": "jog-a", "input": {"kind": "cc", "channel": 0, "number": 34}, "encoding": "relative-twos-complement", "actionId": "deck.jog", "deck": "A"},
-        {"id": "jog-b", "input": {"kind": "cc", "channel": 1, "number": 34}, "encoding": "relative-twos-complement", "actionId": "deck.jog", "deck": "B"},
+        {"id": "jog-a", "input": {"kind": "cc", "channel": 0, "number": 34}, "encoding": "relative-offset", "actionId": "deck.jog", "deck": "A"},
+        {"id": "jog-b", "input": {"kind": "cc", "channel": 1, "number": 34}, "encoding": "relative-offset", "actionId": "deck.jog", "deck": "B"},
         {"id": "jog-touch-a", "input": {"kind": "note", "channel": 0, "number": 54}, "encoding": "button", "actionId": "deck.jog_touch", "deck": "A", "trigger": "hold"},
         {"id": "jog-touch-b", "input": {"kind": "note", "channel": 1, "number": 54}, "encoding": "button", "actionId": "deck.jog_touch", "deck": "B", "trigger": "hold"},
         {"id": "tempo-a", "input": {"kind": "cc14", "channel": 0, "number": 0}, "encoding": "absolute", "actionId": "deck.tempo", "deck": "A"},
@@ -388,7 +390,7 @@ DDJ400_PROFILE = {
         {"id": "loop-in-b", "input": {"kind": "note", "channel": 1, "number": 16}, "encoding": "button", "actionId": "loop.in", "deck": "B", "trigger": "press"},
         {"id": "loop-out-b", "input": {"kind": "note", "channel": 1, "number": 17}, "encoding": "button", "actionId": "loop.out", "deck": "B", "trigger": "press"},
     ],
-    "feedback": ["play", "cue", "sync", "hotcue", "loop"],
+    "feedback": [],
     "limitations": ["二次PADページとHIDディスプレイは未対応", "本体マイクはPC録音入力へ戻りません"],
 }
 
@@ -706,12 +708,12 @@ class UsbHandoffService:
         if current_hash != row._mapping["snapshot_hash"]:
             raise ValueError("セットリストまたは音源が変更されています。新しいUSB受け渡しを作成してください")
         level = evidence.get("level")
-        if level not in {"automated_file_check", "automated_library_check", "user_rekordbox_check", "user_hardware_check"}:
+        if level not in {"user_rekordbox_check", "user_hardware_check"}:
             raise ValueError("確認レベルが不正です")
         if level == "user_hardware_check" and not all(evidence.get(key) for key in ("model", "firmware", "checked_at", "checks")):
             raise ValueError("実機確認には機種・firmware・日時・確認項目が必要です")
         verification = {**evidence, "snapshot_hash": row._mapping["snapshot_hash"]}
-        state = "verified" if level in {"automated_library_check", "user_hardware_check"} else "needs_user_check"
+        state = "verified" if level == "user_hardware_check" else "needs_user_check"
         self.session.exec(text("UPDATE usb_exports SET state=:state,verification_json=:verification,updated_at=now() WHERE id=:id"),
                           params={"id": export_id, "state": state, "verification": _json(verification)})
         self.session.commit()
@@ -789,20 +791,20 @@ class RecordingTimelineService:
                   :title,:artist,'engine_observed',:confidence,:position)
                 ON CONFLICT(event_key) DO UPDATE SET end_frame=excluded.end_frame,end_ms=excluded.end_ms,
                   confidence=excluded.confidence,revision=recording_segments.revision+1
-            """), params={"recording": recording_id, "event": str(segment.get("eventKey") or f"engine:{recording_id}:{position}"),
+            """), params={"recording": recording_id, "event": f"engine:{recording_id}:" + str(segment.get("eventKey") or position),
                             "track": track_id, "deck": segment.get("deck"), "generation": segment.get("loadGeneration"),
                             "start_frame": start_frame, "end_frame": end_frame,
                             "start_ms": start_frame * 1000 // sample_rate_hz,
                             "end_ms": end_frame * 1000 // sample_rate_hz,
                             "title": str(segment.get("title") or "曲名未設定"),
                             "artist": str(segment.get("artist") or ""),
-                            "confidence": "incomplete" if dropped_events else "confirmed", "position": position})
+                            "confidence": "incomplete" if dropped_events else "estimated", "position": position})
         self.session.exec(text("""
             UPDATE recordings SET sample_rate_hz=:rate,frame_count=:frames,
               timeline_quality=:quality,timeline_dropped_events=:dropped,
               duration_ms=:duration,revision=revision+1 WHERE id=:id
         """), params={"rate": sample_rate_hz, "frames": frame_count, "dropped": dropped_events,
-                        "quality": "incomplete" if dropped_events else "recording_frame_clock",
+                        "quality": "incomplete" if dropped_events else "engine_sampled",
                         "duration": duration_ms, "id": recording_id})
         self.session.commit()
         return self.list(recording_id)
@@ -823,28 +825,31 @@ def create_backup(session: Session, destination: str, include_media: bool,
     files: list[dict[str, Any]] = []
     missing: list[str] = []
     try:
-        with WORKFLOW_LOCK, db_connection.database_activity, db_connection.db_lock:
-            session.commit()
+        session.commit()
+        with WORKFLOW_LOCK, db_connection.database_activity, db_connection.db_lock, db_connection.exclusive_database():
             session.exec(text("CHECKPOINT"))
             db_snapshot = stage / "plumdeck.duckdb"
             shutil.copy2(db_connection.DB_PATH, db_snapshot)
             analysis_path = Path(str(db_connection.DB_PATH) + ".analysis-jobs.sqlite3")
             if analysis_path.is_file():
-                shutil.copy2(analysis_path, stage / "analysis-jobs.sqlite3")
+                _snapshot_sqlite(analysis_path, stage / "analysis-jobs.sqlite3")
             table_counts = {}
             for table in ALL_TABLES:
                 table_counts[table] = int(session.exec(text(f'SELECT count(*) FROM "{table}"')).one()[0])
-        assets: list[tuple[str, str]] = []
-        if include_media:
-            assets.extend((row[0], "media") for row in session.exec(text("SELECT filepath FROM tracks ORDER BY id")).all())
-            try:
-                sampler_paths = json.loads(allowed_settings.get("plumdeck.sampler.paths", "[]"))
-            except (TypeError, json.JSONDecodeError):
-                sampler_paths = []
-            if isinstance(sampler_paths, list):
-                assets.extend((path, "sampler") for path in sampler_paths if isinstance(path, str) and path)
-        if include_recordings:
-            assets.extend((row[0], "recording") for row in session.exec(text("SELECT filepath FROM recordings WHERE status='completed' ORDER BY id")).all())
+        import duckdb
+        with duckdb.connect(str(db_snapshot), read_only=True) as snapshot:
+            assets: list[tuple[str, str]] = []
+            expected_hashes = dict(snapshot.execute("SELECT t.filepath,m.sha256 FROM tracks t JOIN track_media m ON m.track_id=t.id WHERE m.sha256 IS NOT NULL").fetchall())
+            if include_media:
+                assets.extend((row[0], "media") for row in snapshot.execute("SELECT filepath FROM tracks ORDER BY id").fetchall())
+                try:
+                    sampler_paths = json.loads(allowed_settings.get("plumdeck.sampler.paths", "[]"))
+                except (TypeError, json.JSONDecodeError):
+                    sampler_paths = []
+                if isinstance(sampler_paths, list):
+                    assets.extend((path, "sampler") for path in sampler_paths if isinstance(path, str) and path)
+            if include_recordings:
+                assets.extend((row[0], "recording") for row in snapshot.execute("SELECT filepath FROM recordings WHERE status='completed' ORDER BY id").fetchall())
         seen: dict[str, str] = {}
         for original, category in assets:
             source = Path(original)
@@ -852,6 +857,8 @@ def create_backup(session: Session, destination: str, include_media: bool,
                 missing.append(original)
                 continue
             identity = _file_identity(source)
+            if category == "media" and expected_hashes.get(original) not in (None, identity["sha256"]):
+                raise ValueError("保存済みの解析対象と音源内容が異なります。再解析してからバックアップしてください")
             relative = seen.get(identity["sha256"])
             if relative is None:
                 relative = f"assets/content/{identity['sha256']}{source.suffix.lower()}"
@@ -894,39 +901,63 @@ def create_backup(session: Session, destination: str, include_media: bool,
             archive_tmp.unlink()
 
 
+def _snapshot_sqlite(source: Path, destination: Path) -> None:
+    # A raw copy loses committed pages that still live in a WAL. backup()
+    # produces a standalone, transactionally consistent database.
+    from contextlib import closing
+    with closing(sqlite3.connect(source)) as live, closing(sqlite3.connect(destination)) as saved:
+        live.backup(saved)
+        if saved.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise ValueError("解析ジョブDBの検査に失敗しました")
+
+
 def _validated_archive(path: str) -> tuple[zipfile.ZipFile, dict[str, Any]]:
-    source = _safe_real_file(path)
-    archive = zipfile.ZipFile(source, "r")
-    infos = archive.infolist()
-    if len(infos) > MAX_BACKUP_ENTRIES or sum(info.file_size for info in infos) > MAX_BACKUP_UNCOMPRESSED:
+    archive = zipfile.ZipFile(_safe_real_file(path), "r")
+    try:
+        infos = archive.infolist()
+        if len(infos) > MAX_BACKUP_ENTRIES or sum(info.file_size for info in infos) > MAX_BACKUP_UNCOMPRESSED:
+            raise ValueError("バックアップの展開サイズが上限を超えています")
+        names: set[str] = set()
+        for info in infos:
+            posix = Path(info.filename)
+            if info.filename in names or posix.is_absolute() or ".." in posix.parts or "\\" in info.filename or info.is_dir():
+                raise ValueError("安全でないアーカイブパスです")
+            names.add(info.filename)
+        if not {"manifest.json", "plumdeck.duckdb", "ui-settings.json"} <= names:
+            raise ValueError("必須データがありません")
+        if archive.getinfo("manifest.json").file_size > 32 * 1024 * 1024:
+            raise ValueError("manifestが大きすぎます")
+        manifest = json.loads(archive.read("manifest.json"))
+        if manifest.get("format") != "plumdeck-backup" or manifest.get("format_version") != BACKUP_FORMAT_VERSION:
+            raise ValueError("未対応のバックアップ形式です")
+        snapshot_id = manifest.get("snapshot_id")
+        if not isinstance(snapshot_id, str) or not snapshot_id or len(snapshot_id) > 100 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in snapshot_id):
+            raise ValueError("snapshot IDが不正です")
+        if int(manifest.get("schema_version", 0)) > CURRENT_SCHEMA_VERSION:
+            raise ValueError("新しいバージョンのバックアップは復元できません")
+        checked: dict[str, tuple[str, int]] = {}
+        for item in manifest.get("files", []):
+            name = item.get("path")
+            if name not in names or name == "manifest.json":
+                raise ValueError("manifestに記載されたファイルがありません")
+            identity = (item.get("sha256"), item.get("size_bytes"))
+            if name in checked:
+                if checked[name] != identity:
+                    raise ValueError("重複したファイル情報が一致しません")
+                continue
+            digest = hashlib.sha256()
+            with archive.open(name) as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+            if digest.hexdigest() != identity[0] or archive.getinfo(name).file_size != identity[1]:
+                raise ValueError("バックアップのハッシュまたはサイズが一致しません")
+            checked[name] = identity
+        if set(checked) != names - {"manifest.json"}:
+            raise ValueError("manifestに未検証のファイルがあります")
+        return archive, manifest
+    except Exception:
         archive.close()
-        raise ValueError("バックアップの展開サイズが上限を超えています")
-    names: set[str] = set()
-    for info in infos:
-        posix = Path(info.filename)
-        if info.filename in names or posix.is_absolute() or ".." in posix.parts or info.is_dir() and info.filename.rstrip("/") in names:
-            archive.close()
-            raise ValueError("安全でないアーカイブパスです")
-        names.add(info.filename.rstrip("/"))
-    if "manifest.json" not in names or "plumdeck.duckdb" not in names:
-        archive.close()
-        raise ValueError("必須データがありません")
-    manifest = json.loads(archive.read("manifest.json"))
-    if manifest.get("format") != "plumdeck-backup" or manifest.get("format_version") != BACKUP_FORMAT_VERSION:
-        archive.close()
-        raise ValueError("未対応のバックアップ形式です")
-    if int(manifest.get("schema_version", 0)) > CURRENT_SCHEMA_VERSION:
-        archive.close()
-        raise ValueError("新しいバージョンのバックアップは復元できません")
-    for item in manifest.get("files", []):
-        if item.get("path") not in names:
-            archive.close()
-            raise ValueError("manifestに記載されたファイルがありません")
-        digest = hashlib.sha256(archive.read(item["path"])).hexdigest()
-        if digest != item.get("sha256"):
-            archive.close()
-            raise ValueError("バックアップのハッシュが一致しません")
-    return archive, manifest
+        raise
 
 
 def inspect_backup(path: str) -> dict[str, Any]:
@@ -941,7 +972,7 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
     archive, manifest = _validated_archive(path)
     db_path = Path(db_connection.DB_PATH)
     restore_root = db_path.parent / "restore-staging" / manifest["snapshot_id"]
-    rollback = db_path.with_name(f"{db_path.name}.pre-restore-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    rollback = db_path.with_name(f"{db_path.name}.pre-restore-{uuid.uuid4().hex}")
     restore_root.mkdir(parents=True, exist_ok=False)
     try:
         for info in archive.infolist():
@@ -978,6 +1009,7 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
                 else:
                     table = "tracks" if item["category"] == "media" else "recordings"
                     staged.execute(f"UPDATE {table} SET filepath=? WHERE filepath=?", [str(target), item.get("source_path")])
+            staged.execute("UPDATE import_items SET state='queued' WHERE state IN ('probing','analyzing')")
             staged.execute("UPDATE import_batches SET state='paused',paused=true WHERE state IN ('queued','processing','pausing')")
             staged.execute("UPDATE operation_journal SET state='paused',updated_at=now() WHERE state IN ('queued','running','processing')")
             staged.execute("CHECKPOINT")
@@ -986,25 +1018,43 @@ def restore_backup(path: str, confirmed: bool) -> dict[str, Any]:
         jobs = restore_root / "analysis-jobs.sqlite3"
         if jobs.exists():
             import sqlite3
-            with sqlite3.connect(jobs) as queue:
+            with closing(sqlite3.connect(jobs)) as queue, queue:
                 queue.execute("UPDATE jobs SET status='paused' WHERE status IN ('running','pausing')")
                 queue.execute("UPDATE items SET status='pending' WHERE status='running'")
-        with WORKFLOW_LOCK, db_connection.database_activity, db_connection.db_lock:
+        queue_path = Path(str(db_path) + ".analysis-jobs.sqlite3")
+        queue_rollback = Path(str(rollback) + ".analysis-jobs.sqlite3")
+        with WORKFLOW_LOCK, db_connection.database_activity, db_connection.db_lock, db_connection.exclusive_database():
             db_connection.checkpoint_db()
             db_connection.close_db()
+            queue_existed = queue_path.exists()
             if db_path.exists():
                 shutil.copy2(db_path, rollback)
+            if queue_existed:
+                _snapshot_sqlite(queue_path, queue_rollback)
             replacement = db_path.with_name(f".{db_path.name}.restore")
             shutil.copy2(staged_db, replacement)
+            from infra.database.restore_recovery import begin_restore, finish_restore
+            begin_restore(db_path, rollback, queue_existed)
             try:
                 os.replace(replacement, db_path)
+                # Both databases form one restore unit, including an absent queue.
+                for suffix in ("-wal", "-shm"):
+                    Path(str(queue_path) + suffix).unlink(missing_ok=True)
+                queue_path.unlink(missing_ok=True)
                 if jobs.exists():
-                    shutil.copy2(jobs, Path(str(db_path) + ".analysis-jobs.sqlite3"))
+                    _snapshot_sqlite(jobs, queue_path)
                 db_connection.reopen_db(str(db_path))
+                finish_restore(db_path)
             except Exception:
+                db_connection.close_db()
                 if rollback.exists():
                     shutil.copy2(rollback, db_path)
+                for suffix in ("", "-wal", "-shm"):
+                    Path(str(queue_path) + suffix).unlink(missing_ok=True)
+                if queue_existed:
+                    _snapshot_sqlite(queue_rollback, queue_path)
                 db_connection.reopen_db(str(db_path))
+                finish_restore(db_path)
                 raise
         restored_settings = json.loads((restore_root / "ui-settings.json").read_text(encoding="utf-8")) if (restore_root / "ui-settings.json").exists() else {}
         if sampler_mapping and "plumdeck.sampler.paths" in restored_settings:

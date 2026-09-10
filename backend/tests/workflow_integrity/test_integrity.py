@@ -1,0 +1,241 @@
+"""Database/filesystem regression tests; no audio hardware or inference required.
+
+Run: PYTHONPATH=backend pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity
+"""
+import json
+import sqlite3
+import zipfile
+from pathlib import Path
+
+import pytest
+from sqlmodel import Session
+from sqlalchemy import text
+
+import infra.database.connection as db
+from infra.database.schema import init_raw_db
+from domain.models.track import Track
+from domain.models.setlist import Setlist
+from app.services.play_import_service import PlayImportService, process_batch
+from app.services import workflow_service as workflow
+from infra.repositories.analysis_job_repository import AnalysisJobRepository
+
+
+@pytest.fixture
+def library(tmp_path, monkeypatch):
+    path = tmp_path / "library.duckdb"
+    engine = db.create_library_engine(f"duckdb:///{path}")
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    monkeypatch.setattr(db, "DATABASE_URL", f"duckdb:///{path}")
+    init_raw_db(engine)
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
+
+
+def track(session, tmp_path):
+    path = tmp_path / "song.wav"
+    path.write_bytes(b"audio content")
+    value = Track(filepath=str(path), title="Song", artist="DJ", album="", genre="House", duration=60)
+    session.add(value)
+    session.commit()
+    session.refresh(value)
+    return value
+
+
+@pytest.mark.parametrize("state", ["probing", "analyzing"])
+def test_interrupted_item_is_processed(library, tmp_path, state):
+    song = track(library, tmp_path)
+    batch = PlayImportService(library).create("retry", "collection", None, [song.filepath])
+    library.exec(text("UPDATE import_items SET state=:state WHERE batch_id=:id"), params={"state": state, "id": batch["id"]})
+    library.commit()
+    process_batch(batch["id"])
+    result = PlayImportService(library).get(batch["id"])
+    assert result["state"] == "completed"
+    assert result["items"][0]["state"] == "existing"
+
+
+def test_removed_playlist_entry_can_be_imported_again(library, tmp_path):
+    song = track(library, tmp_path)
+    playlist = Setlist(name="Set")
+    library.add(playlist); library.commit(); library.refresh(playlist)
+    service = PlayImportService(library)
+    first = service.create("first", "local_playlist", playlist.id, [song.filepath])
+    process_batch(first["id"])
+    library.exec(text("DELETE FROM setlist_tracks")); library.commit()
+    second = service.create("second", "local_playlist", playlist.id, [song.filepath])
+    process_batch(second["id"])
+    assert library.exec(text("SELECT count(*) FROM setlist_tracks")).one()[0] == 1
+
+
+def test_membership_and_completion_rollback_together(library, tmp_path, monkeypatch):
+    song = track(library, tmp_path)
+    playlist = Setlist(name="Set")
+    library.add(playlist); library.commit(); library.refresh(playlist)
+    batch = PlayImportService(library).create("atomic", "local_playlist", playlist.id, [song.filepath])
+    original = Session.exec
+    def fail(self, statement, *args, **kwargs):
+        if "UPDATE import_items SET track_id=" in str(statement):
+            raise RuntimeError("injected failure after membership insert")
+        return original(self, statement, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(Session, "exec", fail)
+        process_batch(batch["id"])
+    assert library.exec(text("SELECT count(*) FROM setlist_tracks")).one()[0] == 0
+    library.commit()
+    process_batch(batch["id"])
+    assert library.exec(text("SELECT count(*) FROM setlist_tracks")).one()[0] == 1
+
+
+def test_sqlite_snapshot_includes_live_wal(tmp_path):
+    source, saved = tmp_path / "queue", tmp_path / "copy"
+    con = sqlite3.connect(source)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA wal_autocheckpoint=0")
+        con.execute("CREATE TABLE test (value TEXT)")
+        con.execute("INSERT INTO test VALUES ('committed in WAL')"); con.commit()
+        assert Path(str(source) + "-wal").stat().st_size > 0
+        workflow._snapshot_sqlite(source, saved)
+        with sqlite3.connect(saved) as snapshot:
+            assert snapshot.execute("SELECT value FROM test").fetchone()[0] == "committed in WAL"
+    finally:
+        con.close()
+
+
+def make_backup(library, tmp_path):
+    path = tmp_path / "saved.plumdeck-backup"
+    workflow.create_backup(library, str(path), False, False, {"plumdeck.deckCount": "4"})
+    library.close()
+    return path
+
+
+def test_restore_absent_queue_does_not_keep_future_jobs(library, tmp_path):
+    archive = make_backup(library, tmp_path)
+    path = db.DB_PATH + ".analysis-jobs.sqlite3"
+    AnalysisJobRepository(path).create({"features": []}, [])
+    result = workflow.restore_backup(str(archive), True)
+    assert result["restored"]
+    assert not Path(path).exists()
+    assert Path(result["rollback_path"] + ".analysis-jobs.sqlite3").exists()
+
+
+def test_failed_restore_rolls_back_both_databases(library, tmp_path, monkeypatch):
+    song = track(library, tmp_path)
+    queue_path = db.DB_PATH + ".analysis-jobs.sqlite3"
+    repo = AnalysisJobRepository(queue_path)
+    repo.create({"generation": "old"}, [])
+    archive = make_backup(library, tmp_path)
+    library.exec(text("UPDATE tracks SET title='Live generation'")); library.commit(); library.close()
+    latest = repo.create({"generation": "live"}, [])
+    original = db.reopen_db
+    calls = 0
+    def fail_once(path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected reopen failure")
+        return original(path)
+    monkeypatch.setattr(db, "reopen_db", fail_once)
+    with pytest.raises(RuntimeError, match="injected"):
+        workflow.restore_backup(str(archive), True)
+    with Session(db.engine) as restored:
+        assert restored.exec(text("SELECT title FROM tracks")).one()[0] == "Live generation"
+    assert repo.get(latest)["config"]["generation"] == "live"
+
+
+@pytest.mark.parametrize("mutate", ["id", "missing_digest", "extra"])
+def test_archive_rejects_unsafe_or_unverified_payload(library, tmp_path, mutate):
+    archive = make_backup(library, tmp_path)
+    with zipfile.ZipFile(archive) as source:
+        contents = {name: source.read(name) for name in source.namelist()}
+    manifest = json.loads(contents["manifest.json"])
+    if mutate == "id": manifest["snapshot_id"] = "../../escape"
+    if mutate == "missing_digest": manifest["files"] = [f for f in manifest["files"] if f["path"] != "plumdeck.duckdb"]
+    if mutate == "extra": contents["unverified.bin"] = b"unexpected"
+    contents["manifest.json"] = json.dumps(manifest).encode()
+    bad = tmp_path / "bad.zip"
+    with zipfile.ZipFile(bad, "w") as output:
+        for name, data in contents.items(): output.writestr(name, data)
+    with pytest.raises(ValueError): workflow.inspect_backup(str(bad))
+
+
+@pytest.mark.parametrize("level", ["automated_file_check", "automated_library_check"])
+def test_client_cannot_claim_automatic_usb_verification(library, tmp_path, monkeypatch, level):
+    service = workflow.UsbHandoffService(library)
+    library.exec(text("INSERT INTO usb_exports (id,setlist_id,state,snapshot_hash,snapshot_json,handoff_path) VALUES ('test',1,'awaiting_rekordbox','hash','{}','/tmp')")); library.commit()
+    monkeypatch.setattr(service, "_snapshot", lambda _: {"hash": "hash"})
+    with pytest.raises(ValueError): service.mark_checked("test", {"level": level})
+    assert library.exec(text("SELECT state FROM usb_exports")).one()[0] != "verified"
+
+
+def test_restore_gate_rejects_active_connection(library):
+    library.exec(text("SELECT 1"))
+    with pytest.raises(ValueError):
+        with db.exclusive_database(): pass
+    library.close()
+    with db.exclusive_database(): pass
+
+
+def test_crash_between_database_replacements_recovers_original_pair(library, tmp_path):
+    from infra.database.restore_recovery import begin_restore, recover_pending_restore, marker_path
+    import shutil
+    track(library, tmp_path)
+    library.close()
+    db.checkpoint_db(); db.close_db()
+    db_path = Path(db.DB_PATH)
+    rollback = db_path.with_name(db_path.name + ".pre-restore-crash-test")
+    shutil.copy2(db_path, rollback)
+    repo = AnalysisJobRepository(str(db_path) + ".analysis-jobs.sqlite3")
+    job = repo.create({"generation": "original"}, [])
+    workflow._snapshot_sqlite(Path(repo.path), Path(str(rollback) + ".analysis-jobs.sqlite3"))
+    begin_restore(db_path, rollback, True)
+    db_path.write_bytes(b"interrupted replacement")
+    Path(repo.path).write_bytes(b"interrupted queue replacement")
+    assert recover_pending_restore(db_path)
+    db.reopen_db(str(db_path))
+    with Session(db.engine) as session:
+        assert session.exec(text("SELECT title FROM tracks")).one()[0] == "Song"
+    assert repo.get(job)["config"]["generation"] == "original"
+    assert not marker_path(db_path).exists()
+
+
+def test_cancel_during_analysis_prevents_membership_until_explicit_retry(library, tmp_path, monkeypatch):
+    from domain.services.ingestion_domain_service import IngestionDomainService
+    path = tmp_path / "new.wav"
+    path.write_bytes(b"new audio content")
+    playlist = Setlist(name="Target")
+    library.add(playlist); library.commit(); library.refresh(playlist)
+    batch = PlayImportService(library).create("cancel", "local_playlist", playlist.id, [str(path)])
+    async def analyze(self, *args, **kwargs):
+        assert kwargs["write_source_metadata"] is False
+        assert kwargs["executor"] is not None
+        with Session(db.engine) as other:
+            PlayImportService(other).set_state(batch["id"], "cancel")
+        return {"filepath": str(path), "title": "New", "artist": "DJ", "duration": 60}
+    monkeypatch.setattr(IngestionDomainService, "process_track_ingestion", analyze)
+    library.commit()  # End the request snapshot before background work.
+    process_batch(batch["id"])
+    result = PlayImportService(library).get(batch["id"])
+    assert result["state"] == "canceled"
+    assert library.exec(text("SELECT count(*) FROM setlist_tracks")).one()[0] == 0
+    library.commit()
+    PlayImportService(library).set_state(batch["id"], "retry")
+    library.commit()
+    process_batch(batch["id"])
+    assert library.exec(text("SELECT count(*) FROM setlist_tracks")).one()[0] == 1
+
+
+def test_timeline_keys_are_scoped_to_recording_and_quality_is_estimated(library):
+    ids = []
+    for key in ("first", "second"):
+        ids.append(library.exec(text("INSERT INTO recordings (recording_key,filepath,started_at) VALUES (:key,'/tmp/audio.wav',now()) RETURNING id"), params={"key": key}).one()[0])
+    library.commit()
+    service = workflow.RecordingTimelineService(library)
+    segment = {"eventKey": "same-wire-key", "startFrame": 0, "endFrame": 44100, "title": "Song"}
+    for recording_id in ids:
+        service.upsert_engine(recording_id, 44100, 88200, 0, [segment])
+        result = service.list(recording_id)
+        assert len(result) == 1
+        assert result[0]["confidence"] == "estimated"
+    assert library.exec(text("SELECT DISTINCT timeline_quality FROM recordings")).one()[0] == "engine_sampled"

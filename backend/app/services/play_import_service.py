@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import os
 import uuid
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,6 @@ from sqlmodel import Session, select
 
 from domain.constants import SUPPORTED_EXTENSIONS
 from domain.models.track import Track
-from domain.services.ingestion_domain_service import IngestionDomainService
 from infra.repositories.ingestion_repository import IngestionRepository
 from infra.repositories.setlist_repository import SetlistRepository
 import infra.database.connection as db_connection
@@ -142,7 +143,8 @@ class PlayImportService:
             self.session.exec(text("UPDATE import_batches SET cancel_requested=true,state='canceled',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
             self.session.exec(text("UPDATE import_target_intents SET state='cancelled' WHERE batch_id=:id AND state='pending'"), params={"id": batch_id})
         else:
-            self.session.exec(text("UPDATE import_items SET state='queued',error_code=NULL,error_message=NULL WHERE batch_id=:id AND state='failed'"), params={"id": batch_id})
+            self.session.exec(text("UPDATE import_items SET state='queued',error_code=NULL,error_message=NULL WHERE batch_id=:id AND state IN ('failed','probing','analyzing')"), params={"id": batch_id})
+            self.session.exec(text("UPDATE import_target_intents SET state='pending' WHERE batch_id=:id AND state='cancelled'"), params={"id": batch_id})
             self.session.exec(text("UPDATE import_batches SET paused=false,cancel_requested=false,state='queued',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
         self.session.commit()
         return self.get(batch_id)
@@ -150,7 +152,7 @@ class PlayImportService:
 
 def process_batch(batch_id: str) -> None:
     """Single-worker processor. Re-fetches state at every commit boundary."""
-    with db_connection.database_activity, Session(db_connection.engine) as session:
+    with db_connection.database_activity, ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as executor, Session(db_connection.engine) as session:
         service = PlayImportService(session)
         try:
             batch = service.get(batch_id)
@@ -164,24 +166,29 @@ def process_batch(batch_id: str) -> None:
             current = session.exec(text("SELECT paused,cancel_requested FROM import_batches WHERE id=:id"), params={"id": batch_id}).first()
             if not current or current[0] or current[1]:
                 return
-            if item["state"] not in {"queued", "failed"}:
+            if item["state"] not in {"queued", "failed", "probing", "analyzing"}:
                 continue
             path = Path(item["canonical_path"])
             try:
                 if not path.is_file() or not os.access(path, os.R_OK) or path.stat().st_size == 0:
                     raise ValueError("音源を読み取れません")
+                before = path.stat()
                 identity = _sha(path)
                 session.exec(text("UPDATE import_items SET state='probing',sha256=:hash,attempts=attempts+1 WHERE id=:id"),
                              params={"id": item["id"], "hash": identity})
                 session.commit()
                 track = session.exec(select(Track).where(Track.filepath == str(path))).first()
+                if track:
+                    known = session.exec(text("SELECT sha256 FROM track_media WHERE track_id=:id"), params={"id": track.id}).first()
+                    if known and known[0] and known[0] != identity:
+                        raise ValueError("登録済み音源の内容が変化しています。参照修復または再解析を行ってください")
                 reused = bool(track)
                 if not track:
                     matches = _rows(session.exec(text("""
                         SELECT t.* FROM track_media m JOIN tracks t ON t.id=m.track_id
                         WHERE m.sha256=:hash
                     """), params={"hash": identity}))
-                    if len(matches) == 1 and Path(matches[0]["filepath"]).is_file():
+                    if len(matches) == 1 and Path(matches[0]["filepath"]).is_file() and _sha(Path(matches[0]["filepath"])) == identity:
                         track = session.get(Track, matches[0]["id"])
                         reused = True
                     elif len(matches) > 1:
@@ -189,12 +196,13 @@ def process_batch(batch_id: str) -> None:
                 if not track:
                     session.exec(text("UPDATE import_items SET state='analyzing' WHERE id=:id"), params={"id": item["id"]})
                     session.commit()
+                    from domain.services.ingestion_domain_service import IngestionDomainService
                     domain = IngestionDomainService()
 
                     async def analyze():
                         loop = asyncio.get_running_loop()
                         return await domain.process_track_ingestion(
-                            str(path), False, loop, executor=None, timeout=600,
+                            str(path), False, loop, executor=executor, timeout=600,
                             save_to_db=False, write_source_metadata=False,
                         )
 
@@ -203,11 +211,22 @@ def process_batch(batch_id: str) -> None:
                         raise ValueError("音源の基本解析に失敗しました")
                     if not isinstance(result.get("bpm"), (int, float)) or result.get("bpm", 0) <= 0:
                         result["bpm"] = None
+                    after = path.stat()
+                    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or _sha(path) != identity:
+                        raise ValueError("解析中に音源が変更されました。再試行してください")
                     saved = IngestionRepository().save_track_result(session, result, True)
                     track = session.get(Track, saved["track_id"])
                 if not track:
                     raise ValueError("曲を保存できませんでした")
-                stat = path.stat()
+                # End the read transaction before observing control changes made
+                # while inference was running. A canceled intent must never insert.
+                session.commit()
+                current = session.exec(text("SELECT paused,cancel_requested FROM import_batches WHERE id=:id"), params={"id": batch_id}).first()
+                if not current or current[0] or current[1]:
+                    session.exec(text("UPDATE import_items SET state='queued' WHERE id=:id"), params={"id": item["id"]})
+                    session.commit()
+                    return
+                stat = Path(track.filepath).stat()
                 session.exec(text("""
                     INSERT INTO track_media (track_id,sha256,size_bytes,mtime_ns,status,last_verified_at)
                     VALUES (:track,:hash,:size,:mtime,'available',now())
@@ -217,7 +236,7 @@ def process_batch(batch_id: str) -> None:
                 intent = session.exec(text("SELECT * FROM import_target_intents WHERE item_id=:id"), params={"id": item["id"]}).first()
                 membership = "not_required"
                 entry_id = None
-                if intent and intent._mapping["target_kind"] == "local_playlist":
+                if intent and intent._mapping["state"] != "cancelled" and intent._mapping["target_kind"] == "local_playlist":
                     target_id = intent._mapping["target_id"]
                     target = session.exec(text("SELECT id FROM setlists WHERE id=:id"), params={"id": target_id}).first()
                     if not target:
@@ -227,14 +246,15 @@ def process_batch(batch_id: str) -> None:
                             SELECT intent.setlist_track_id FROM import_target_intents intent
                             JOIN import_items old_item ON old_item.id=intent.item_id
                             JOIN import_batches old_batch ON old_batch.id=intent.batch_id
+                            JOIN setlist_tracks entry ON entry.id=intent.setlist_track_id AND entry.setlist_id=intent.target_id AND entry.track_id=:track
                             WHERE intent.target_id=:target AND old_item.canonical_path=:path
-                              AND intent.state='applied' AND intent.setlist_track_id IS NOT NULL
+                              AND intent.state IN ('applied','applied_existing') AND intent.setlist_track_id IS NOT NULL
                               AND old_batch.id<>:batch ORDER BY old_batch.created_at DESC LIMIT 1
-                        """), params={"target": target_id, "path": str(path), "batch": batch_id}).first()
+                        """), params={"target": target_id, "path": str(path), "batch": batch_id, "track": track.id}).first()
                         if previous:
                             entry_id, membership = int(previous[0]), "applied_existing"
                         else:
-                            entry_id = SetlistRepository(session).insert_track(int(target_id), int(track.id), None)
+                            entry_id = SetlistRepository(session).insert_track(int(target_id), int(track.id), None, commit=False)
                             membership = "applied"
                 session.exec(text("""
                     UPDATE import_items SET track_id=:track,state=:state,load_ready=true,error_code=NULL,error_message=NULL WHERE id=:id
@@ -248,7 +268,8 @@ def process_batch(batch_id: str) -> None:
                              params={"id": item["id"], "error": str(exc)[:1000]})
                 session.commit()
         failed = int(session.exec(text("SELECT count(*) FROM import_items WHERE batch_id=:id AND state='failed'"), params={"id": batch_id}).one()[0])
-        state = "completed_with_errors" if failed else "completed"
-        session.exec(text("UPDATE import_batches SET state=:state,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND NOT cancel_requested"),
+        unfinished = int(session.exec(text("SELECT count(*) FROM import_items WHERE batch_id=:id AND state NOT IN ('completed','existing','failed','skipped')"), params={"id": batch_id}).one()[0])
+        state = "paused" if unfinished else "completed_with_errors" if failed else "completed"
+        session.exec(text("UPDATE import_batches SET state=:state,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND NOT cancel_requested AND NOT paused"),
                      params={"id": batch_id, "state": state})
         session.commit()

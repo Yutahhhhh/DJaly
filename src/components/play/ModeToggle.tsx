@@ -19,10 +19,10 @@ export function ModeToggle({ mode, onChange, disabled = false }: { mode: AppMode
   return (
     <div className="flex gap-px rounded border border-slate-700 bg-slate-950 p-px" role="group" aria-label="Application mode">
       {BUTTONS.map(({ mode: value, label, icon: Icon, active }) => (
-        <button key={value} disabled={disabled} type="button" onClick={() => onChange(value)} aria-pressed={mode === value}
-          className={cn("flex h-6 items-center gap-1.5 rounded-sm px-2.5 text-[11px] font-semibold transition",
+        <button key={value} disabled={disabled} type="button" onClick={() => onChange(value)} aria-label={label} title={label} aria-pressed={mode === value}
+          className={cn("flex size-6 items-center justify-center rounded-sm text-[11px] font-semibold transition sm:w-auto sm:gap-1.5 sm:px-2.5",
             mode === value ? active : "text-muted-foreground hover:bg-muted")}>
-          <Icon className="size-3" />{label}
+          <Icon className="size-3" /><span className="hidden sm:inline">{label}</span>
         </button>
       ))}
     </div>

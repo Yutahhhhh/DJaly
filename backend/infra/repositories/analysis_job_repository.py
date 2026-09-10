@@ -4,7 +4,8 @@ import os
 import sqlite3
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
+import infra.database.connection as connection
 
 
 class AnalysisJobRepository:
@@ -14,7 +15,7 @@ class AnalysisJobRepository:
     @contextmanager
     def connect(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with sqlite3.connect(self.path, timeout=30) as con:
+        with connection.database_activity, closing(sqlite3.connect(self.path, timeout=30)) as con, con:
             con.row_factory = sqlite3.Row
             con.execute("PRAGMA journal_mode=WAL")
             con.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, status TEXT, config TEXT, created REAL, updated REAL, elapsed REAL DEFAULT 0, error TEXT)")

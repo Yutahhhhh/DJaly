@@ -38,6 +38,7 @@ public:
     }
     // Empty string means success. Recover the previous routing on failure and
     // expose an unavailable audio state if recovery itself fails.
+    virtual QString configureOutputRouting(const QJsonObject&) { return "Output routing is unavailable on this host"; }
     virtual QString configureMicrophone(const QJsonObject&) { return "Microphone input is unavailable on this host"; }
     virtual QJsonObject mixer() const {
         const auto channel = [](const QString& deck) { return QJsonObject{{"deck", deck}, {"gain", 0.0}, {"eqLow", 1.0}, {"eqMid", 1.0}, {"eqHigh", 1.0}, {"pfl", false}, {"available", false}}; };
