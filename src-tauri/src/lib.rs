@@ -35,8 +35,7 @@ mod dj_engine;
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-        for value in args { receive_junction_invite(app, &value); }
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus();
         }

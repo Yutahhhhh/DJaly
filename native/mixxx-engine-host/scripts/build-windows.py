@@ -72,8 +72,14 @@ def main():
     fetch("https://github.com/microsoft/vcpkg.git", VCPKG, vcpkg)
     if not (vcpkg / "vcpkg.exe").exists():
         run("cmd", "/c", vcpkg / "bootstrap-vcpkg.bat", "-disableMetrics")
-    run(vcpkg / "vcpkg.exe", "install", "libnice:x64-windows", "opus:x64-windows", "--clean-after-build")
-    extra = vcpkg / "installed" / "x64-windows"
+    triplets = DEPS / "triplets"
+    triplets.mkdir(exist_ok=True)
+    (triplets / "x64-windows-release.cmake").write_text(
+        "set(VCPKG_TARGET_ARCHITECTURE x64)\nset(VCPKG_CRT_LINKAGE dynamic)\n"
+        "set(VCPKG_LIBRARY_LINKAGE dynamic)\nset(VCPKG_BUILD_TYPE release)\n")
+    run(vcpkg / "vcpkg.exe", "install", "libnice:x64-windows-release", "opus:x64-windows-release",
+        "--host-triplet=x64-windows-release", f"--overlay-triplets={triplets}", "--clean-after-build")
+    extra = vcpkg / "installed" / "x64-windows-release"
     prefixes = f"{prefix.as_posix()};{extra.as_posix()}"
     ldc = DEPS / "libdatachannel"
     fetch("https://github.com/paullouisageneau/libdatachannel.git", LDC, ldc)

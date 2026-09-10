@@ -122,6 +122,11 @@ jobs:
         run: Rename-Item src-tauri/bin/plumdeck-server.exe plumdeck-server-x86_64-pc-windows-msvc.exe
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tauri build --config src-tauri/tauri.windows.conf.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install and start desktop app from a relocated Unicode directory
+        run: python scripts/smoke-windows-installer.py
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installers
