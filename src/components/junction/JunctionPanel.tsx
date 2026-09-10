@@ -204,7 +204,7 @@ export function JunctionPanel({ open, onClose, incomingInvite, onConsumeIncoming
   };
 
   const outputOptions = devices.filter((d) => d.outputChannels >= 2);
-  const deviceValue = (id: string) => (/^coreaudio:\d+$/.test(id) ? id.slice(10) : id);
+  const deviceValue = (id: string) => (/^(coreaudio|portaudio):\d+$/.test(id) ? id.split(":")[1] : id);
 
   return (
     <div

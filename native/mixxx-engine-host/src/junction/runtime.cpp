@@ -19,7 +19,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
-#include <unistd.h>
+#include "../platform_file.h"
 #ifdef __APPLE__
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #endif
@@ -800,7 +800,7 @@ struct Runtime::Impl {
         if(program.open(programDevice,&error)){
             programOpened=true;programState="running";separateLocalMaster.store(true);
             const auto localName=backend->audio()["deviceId"].toString();
-            for(const auto& v:backend->audioDevices()["devices"].toArray()){const auto device=v.toObject();if(device["id"].toString()==QStringLiteral("coreaudio:")+QString::number(programDevice)&&device["name"].toString()==localName)separateLocalMaster.store(false);}
+            for(const auto& v:backend->audioDevices()["devices"].toArray()){const auto device=v.toObject();if(device["id"].toString().section(':',-1)==QString::number(programDevice)&&device["name"].toString()==localName)separateLocalMaster.store(false);}
         }else {programState="error";fail(error);}
     }
     void beginRecovery(const QString& reason){
@@ -881,7 +881,7 @@ struct Runtime::Impl {
         if(!QDir().mkpath(directory))return "引き継ぎ状態を保存できません";
         QSaveFile file(directory+"/"+auth.sessionId+".commit");
         const auto bytes=json(commit.toJson());
-        if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.flush()||::fsync(file.handle())!=0||!file.commit())return "引き継ぎ状態を保存できません";
+        if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.flush()||platform_file::sync(file.handle())!=0||!file.commit())return "引き継ぎ状態を保存できません";
         auth=std::move(next);return {};
     }
     void scheduleCaptureCommit(const HandoffCommitMessage& commit) {
@@ -1164,7 +1164,7 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         d->recoveryResumeFrame=d->now()+24000;d->recoveryEpoch=std::max(d->auth.epoch,d->auth.committed?d->auth.committed->newEpoch:quint64(0))+1;
         QSaveFile record(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)+"/junction/"+d->auth.sessionId+".recovery");
         const auto bytes=json({{"sessionId",d->auth.sessionId},{"epoch",u64(d->recoveryEpoch)},{"frame",u64(d->recoveryResumeFrame)},{"owner",d->auth.host}});
-        if(!record.open(QIODevice::WriteOnly)||record.write(bytes)!=bytes.size()||!record.flush()||::fsync(record.handle())!=0||!record.commit()){d->recoveryResumeFrame=0;return reject("復旧状態を保存できません");}
+        if(!record.open(QIODevice::WriteOnly)||record.write(bytes)!=bytes.size()||!record.flush()||platform_file::sync(record.handle())!=0||!record.commit()){d->recoveryResumeFrame=0;return reject("復旧状態を保存できません");}
         setCaptureAnchor(d->lastCaptureSourceEnd.load(),d->now());d->scheduledEpoch.store(d->recoveryEpoch);d->scheduledFrame.store(d->recoveryResumeFrame);d->captureEnabled.store(true);d->tap.enable(false,true);
         auto it=d->programPending.lower_bound(d->recoveryResumeFrame);d->programPending.erase(it,d->programPending.end());
         d->broadcast("session.recovery",{{"stage","scheduled"},{"reason","ホストの手元の演奏へ切り替えます"},{"frame",u64(d->recoveryResumeFrame)},{"epoch",u64(d->recoveryEpoch)}});return snapshot();

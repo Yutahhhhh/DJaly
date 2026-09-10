@@ -2,6 +2,7 @@
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 from pathlib import Path
 import runpy
+import sys
 
 datas = [('models/msd-musicnn-1.pb', 'models')]
 binaries = []
@@ -48,7 +49,16 @@ for package in [
         pass
 
 # Essentia ships native libraries on supported platforms.
-binaries += collect_dynamic_libs('essentia')
+if sys.platform != 'win32':
+    binaries += collect_dynamic_libs('essentia')
+else:
+    # Include librosa's lazy-loaded module map and TensorFlow's native CPU runtime.
+    for package in ['librosa', 'lazy_loader', 'pyloudnorm', 'tensorflow']:
+        package_datas, package_binaries, package_imports = collect_all(package)
+        datas += package_datas
+        binaries += package_binaries
+        hiddenimports += package_imports
+    hiddenimports.append('domain.services.analysis.portable')
 
 # Fail the build if Rekordbox-import dependencies are missing; do not silently
 # ship a package that relies on another checkout or virtual environment.

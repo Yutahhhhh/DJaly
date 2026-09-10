@@ -13,6 +13,11 @@ for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMU
 multiprocessing.freeze_support()
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--diagnose-analysis"]:
+        from analysis_diagnostic import run
+        run()
+        raise SystemExit(0)
+
     # 設定の読み込みと環境変数のセットアップ
     # これを最初に行うことで、後続のインポート(librosa等)が正しいパスを使用できる
     from config import settings

@@ -884,6 +884,14 @@ fn resolve_binary() -> Result<PathBuf, String> {
         return Ok(path);
     }
 
+    #[cfg(target_os = "windows")]
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            let host = directory.join("engine").join("plumdeck-mixxx-engine-host.exe");
+            if host.is_file() { return Ok(host); }
+        }
+    }
+
     // Optional packaged Performance build. The nested .app must be bundled as
     // a whole because the executable depends on its Frameworks/Resources.
     if let Ok(current_exe) = std::env::current_exe() {

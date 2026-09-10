@@ -1,6 +1,7 @@
 #pragma once
 #include "sources/soundsourceproxy.h"
 #include <QFileInfo>
+#include <QFile>
 #include <QDateTime>
 #include <QCryptographicHash>
 #include <sys/stat.h>
@@ -8,11 +9,18 @@
 #include <mutex>
 namespace waveform {
 inline QString sourceFingerprint(const QString& path) {
-    QFileInfo file(path);struct stat info{};if(::stat(path.toUtf8().constData(),&info)!=0)return {};
+    QFileInfo file(path);
+    if (!file.isFile()) return {};
+#ifdef Q_OS_WIN
+    // QFileInfo uses the wide Win32 API, including non-ASCII paths.
+    const auto nanos = (file.lastModified().toMSecsSinceEpoch() % 1000) * 1000000;
+#else
+    struct stat info{};if(::stat(QFile::encodeName(path).constData(),&info)!=0)return {};
 #ifdef __APPLE__
     const auto nanos=info.st_mtimespec.tv_nsec;
 #else
     const auto nanos=info.st_mtim.tv_nsec;
+#endif
 #endif
     return QString::fromLatin1(QCryptographicHash::hash((file.canonicalFilePath()+":"+QString::number(file.size())+":"+QString::number(file.lastModified().toMSecsSinceEpoch())+":"+QString::number(nanos)).toUtf8(),QCryptographicHash::Sha256).toHex());
 }

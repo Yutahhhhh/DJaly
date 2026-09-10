@@ -7,6 +7,18 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <cmath>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QStandardPaths>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <wincrypt.h>
+#endif
 #ifdef __APPLE__
 #include <Security/Security.h>
 #endif
@@ -94,6 +106,25 @@ QString storeConfig(const QJsonObject& config) {
     return status == errSecSuccess ? QString{} : QStringLiteral("キーチェーンへ保存できません。Macの許可を確認してもう一度試してください");
 }
 QString eraseConfig() { auto q = keychainQuery(); const auto status = SecItemDelete(q); CFRelease(q); return status == errSecSuccess || status == errSecItemNotFound ? QString{} : QStringLiteral("キーチェーンの保存設定を削除できません"); }
+#elif defined(Q_OS_WIN)
+QString settingsPath() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/plumdeck/junction-network.dpapi";
+}
+QString storeConfig(const QJsonObject& config) {
+    auto bytes = QJsonDocument(config).toJson(QJsonDocument::Compact);
+    if (bytes.size() > maxStoredBytes) return "中継設定が大きすぎます";
+    DATA_BLOB input{static_cast<DWORD>(bytes.size()), reinterpret_cast<BYTE*>(bytes.data())}, output{};
+    if (!CryptProtectData(&input, L"Plumdeck Junction settings", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output)) return "Windowsのユーザー資格情報で中継設定を暗号化できません";
+    const auto path = settingsPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
+    const bool ok = file.open(QIODevice::WriteOnly) && file.write(reinterpret_cast<const char*>(output.pbData), output.cbData) == output.cbData && file.commit();
+    SecureZeroMemory(output.pbData, output.cbData); LocalFree(output.pbData);
+    return ok ? QString{} : QStringLiteral("暗号化した中継設定を保存できません");
+}
+QString eraseConfig() {
+    return !QFile::exists(settingsPath()) || QFile::remove(settingsPath()) ? QString{} : QStringLiteral("保存した中継設定を削除できません");
+}
 #else
 QString storeConfig(const QJsonObject&) { return "この環境では安全な永続保存を利用できません。保存せず今回だけ使用してください"; }
 QString eraseConfig() { return {}; }
@@ -118,12 +149,35 @@ NetworkSettings::NetworkSettings(bool readStored) : config_(defaults()), storage
         else storageError_="保存した中継設定の形式を確認してください";
     } else storageError_="保存した中継設定の形式を確認してください";
     CFRelease(result);
+#elif defined(Q_OS_WIN)
+    if (!storageEnabled_) return;
+    QFile file(settingsPath());
+    if (!file.exists()) return;
+    if (!file.open(QIODevice::ReadOnly) || file.size() > maxStoredBytes + 4096) { storageError_="保存した中継設定を読み込めません"; return; }
+    auto bytes=file.readAll();
+    DATA_BLOB input{static_cast<DWORD>(bytes.size()), reinterpret_cast<BYTE*>(bytes.data())}, output{};
+    if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output)) { storageError_="保存した中継設定を復号できません。保存時と同じWindowsユーザーで開いてください"; return; }
+    if (output.cbData <= maxStoredBytes) {
+        const auto parsed=QJsonDocument::fromJson(QByteArray(reinterpret_cast<const char*>(output.pbData), int(output.cbData)));
+        const auto config=parsed.object();
+        const auto end=config["turn"].toObject()["expiresAt"].toDouble();
+        const auto now=QDateTime::currentMSecsSinceEpoch();
+        const auto checkTime=end>1000 && end<double(now) ? qint64(end)-1000 : now;
+        if (parsed.isObject() && validateConfig(config,checkTime).isEmpty()) { config_=config; saved_=true; }
+        else storageError_="保存した中継設定の形式を確認してください";
+    } else storageError_="保存した中継設定の形式を確認してください";
+    SecureZeroMemory(output.pbData, output.cbData); LocalFree(output.pbData);
 #else
     Q_UNUSED(readStored);
 #endif
 }
 QJsonObject NetworkSettings::summary() const {
-    QJsonObject result{{"stunUrls",config_["stunUrls"]},{"saved",saved_},{"storage",QStringLiteral("keychain")},{"detail",storageError_},{"errors",storageError_.isEmpty()?QJsonArray{}:QJsonArray{storageError_}}};
+#ifdef Q_OS_WIN
+    const auto storage=QStringLiteral("windows-dpapi");
+#else
+    const auto storage=QStringLiteral("keychain");
+#endif
+    QJsonObject result{{"stunUrls",config_["stunUrls"]},{"saved",saved_},{"storage",storage},{"detail",storageError_},{"errors",storageError_.isEmpty()?QJsonArray{}:QJsonArray{storageError_}}};
     auto turn = config_["turn"].toObject();
     if(!turn.isEmpty()) {
         turn.remove("secret");turn.remove("credential");

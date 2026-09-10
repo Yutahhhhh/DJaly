@@ -1,5 +1,7 @@
 {
   "bundle": {
-    "resources": []
+    "resources": {
+      "../native/mixxx-engine-host/stage/PlumdeckMixxxHost.app/": "PlumdeckMixxxHost.app/"
+    }
   }
 }
