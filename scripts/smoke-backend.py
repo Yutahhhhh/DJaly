@@ -10,24 +10,43 @@ import time
 from urllib.request import Request, urlopen
 
 
-def close_desktop(pid):
+def enum_pid_windows(pid):
+    """Top-level windows owned by pid, as (hwnd, visible, class, title) tuples."""
     import ctypes
     from ctypes import wintypes
     user = ctypes.WinDLL("user32", use_last_error=True)
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-    user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
-    sent = []
+    user.IsWindowVisible.argtypes = [wintypes.HWND]
+    user.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    found = []
     @callback_type
-    def visit(window, context):
+    def visit(window, _context):
         owner = wintypes.DWORD()
         user.GetWindowThreadProcessId(window, ctypes.byref(owner))
         if owner.value == pid:
-            sent.append(bool(user.PostMessageW(window, 0x10, 0, 0)))  # WM_CLOSE
+            cls = ctypes.create_unicode_buffer(256)
+            user.GetClassNameW(window, cls, 256)
+            title = ctypes.create_unicode_buffer(256)
+            user.GetWindowTextW(window, title, 256)
+            found.append((window, bool(user.IsWindowVisible(window)), cls.value, title.value))
         return True
     user.EnumWindows(visit, 0)
-    assert any(sent), "Desktop window not found for normal close"
+    return found
+
+
+def close_desktop(pid):
+    import ctypes
+    from ctypes import wintypes
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    windows = enum_pid_windows(pid)
+    assert windows, "Desktop window not found for normal close"
+    for hwnd, _visible, _cls, _title in windows:
+        user.PostMessageW(hwnd, 0x10, 0, 0)  # WM_CLOSE
+    return windows
 
 
 def main():
@@ -90,12 +109,24 @@ def main():
                 assert data.get("count") == 0 and data.get("tracks") == [], data
                 print("Packaged API, MCP initialization, tool discovery and library search passed")
                 if desktop:
-                    close_desktop(child.pid)
+                    windows = close_desktop(child.pid)
+                    print(f"Posted WM_CLOSE to {len(windows)} window(s): {windows}", flush=True)
+                    started_close = time.monotonic()
+                    while time.monotonic() - started_close < 150:
+                        if child.poll() is not None:
+                            break
+                        time.sleep(5)
+                        elapsed = int(time.monotonic() - started_close)
+                        print(f"  +{elapsed}s: still running, windows={enum_pid_windows(child.pid)}", flush=True)
+                    else:
+                        subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32/tasklist.exe"), "/v"])
+                        raise TimeoutError("Desktop app did not exit within 150s of WM_CLOSE")
+                    assert child.returncode == 0, f"Desktop exited with {child.returncode}"
                 else:
                     child.stdin.write(b"plumdeck:shutdown\n")
                     child.stdin.flush()
                     child.stdin.close()
-                assert child.wait(timeout=60) == 0, "Normal shutdown failed"
+                    assert child.wait(timeout=60) == 0, "Normal shutdown failed"
                 with socket.socket() as probe:
                     probe.settimeout(1)
                     assert probe.connect_ex(("127.0.0.1", port)) != 0, "Backend listener survived app shutdown"
