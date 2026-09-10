@@ -13,6 +13,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+import platformdirs
 
 from rekordbox_mcp.db.repository import RekordboxRepository
 
@@ -146,7 +147,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument(
         "--audit-dir",
-        default=str(Path.home() / "Library/Application Support/plumdeck/backups"),
+        default=str(Path(platformdirs.user_data_dir("plumdeck", "plumdeck")) / "backups"),
     )
     args = parser.parse_args()
 

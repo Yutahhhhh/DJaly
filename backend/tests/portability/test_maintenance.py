@@ -19,11 +19,16 @@ def test_backup_preserves_database_and_previous_destination(tmp_path):
     source = tmp_path / "日本語 user's library.duckdb"
     target = tmp_path / "backup" / "library.duckdb"
     with duckdb.connect(str(source)) as connection:
-        connection.execute("CREATE TABLE tracks AS SELECT 12 id")
+        connection.execute("CREATE SEQUENCE ids START 12")
+        connection.execute("CREATE TABLE tracks(id INTEGER DEFAULT nextval('ids'))")
+        connection.execute("INSERT INTO tracks DEFAULT VALUES")
+        connection.execute("CREATE VIEW track_view AS SELECT * FROM tracks")
     maintenance.copy_database(source, target)
     maintenance.copy_database(source, target)
     with duckdb.connect(str(target)) as connection:
-        assert connection.execute("SELECT id FROM tracks").fetchone() == (12,)
+        assert connection.execute("SELECT id FROM track_view").fetchone() == (12,)
+        connection.execute("INSERT INTO tracks DEFAULT VALUES")
+        assert connection.execute("SELECT id FROM tracks ORDER BY id").fetchall() == [(12,), (13,)]
     assert len(list(target.parent.glob("*.bak"))) == 1
 
 

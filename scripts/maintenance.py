@@ -1,7 +1,6 @@
 """Developer maintenance commands using the application's platform-specific paths."""
 from pathlib import Path
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -17,23 +16,30 @@ def copy_database(source, destination):
         raise FileNotFoundError(source)
     if source.resolve() == destination.resolve():
         raise ValueError("Source and destination must differ")
-    # Opening for write rejects a running app's database lock and checkpoints
-    # pending WAL data before copying. Never copy an active database blindly.
+    # Keep the source locked throughout the snapshot. Windows does not permit
+    # shutil.copy while DuckDB owns the file; COPY FROM DATABASE preserves the
+    # schema, data, views and sequences without a second filesystem reader.
     with duckdb.connect(str(source)) as connection:
         connection.execute("CHECKPOINT")
         if destination.exists():
-            with duckdb.connect(str(destination)) as target:
-                target.execute("CHECKPOINT")
             saved = destination.with_name(destination.name + f".{time.time_ns()}.bak")
-            shutil.copy2(destination, saved)
+            copy_database(destination, saved)
             print(f"Previous database saved: {saved}")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(destination.name + ".copying")
+        temporary = destination.with_name(destination.name + f".{time.time_ns()}.copying")
         try:
-            shutil.copy2(source, temporary)
+            database = connection.execute("SELECT current_database()").fetchone()[0].replace('"', '""')
+            quoted_path = str(temporary).replace("'", "''")
+            connection.execute(f"ATTACH '{quoted_path}' AS plumdeck_snapshot")
+            connection.execute(f'COPY FROM DATABASE "{database}" TO plumdeck_snapshot')
+            connection.execute("CHECKPOINT plumdeck_snapshot")
+            connection.execute("DETACH plumdeck_snapshot")
             os.replace(temporary, destination)
         finally:
+            # Also releases the snapshot file on a failed COPY before cleanup.
+            connection.close()
             temporary.unlink(missing_ok=True)
+            Path(str(temporary) + ".wal").unlink(missing_ok=True)
     print(destination)
 
 

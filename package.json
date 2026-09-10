@@ -35,7 +35,8 @@
     "junction:test:audio": "node scripts/project.mjs junction-test program-output",
     "junction:test:ui": "tsc --noEmit && node --experimental-strip-types --test src/services/junction/control-boundary.test.mjs",
     "junction:test:network": "pnpm --dir services/junction-signaling build && node scripts/project.mjs junction-test media-transport && pnpm --dir services/junction-signaling test",
-    "package": "node scripts/project.mjs package"
+    "package": "node scripts/project.mjs package",
+    "backend:build": "node scripts/project.mjs backend-build"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

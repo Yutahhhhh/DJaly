@@ -21,6 +21,19 @@ function run(command, args, options = {}) {
 function requireVenv() {
     if (!existsSync(venv)) throw new Error('Run pnpm backend:install first.');
 }
+async function backendBuild() {
+    requireVenv();
+    if (!win && process.platform !== 'darwin') throw new Error('Desktop packages target macOS or Windows.');
+    if (win && process.arch !== 'x64') throw new Error('Use the Windows x64 Node/Python/MSVC toolchain.');
+    const machines = process.arch === 'arm64' ? ['arm64', 'aarch64'] : ['amd64', 'x86_64'];
+    await run(venv, ['-c', 'import platform,sys; assert sys.maxsize>2**32 and platform.machine().lower() in sys.argv[1:], "Use a 64-bit Python matching the Node/desktop architecture"', ...machines]);
+    await run(venv, ['-m', 'PyInstaller', '--clean', '--noconfirm', 'plumdeck-server.spec'], { cwd: join(root, 'backend') });
+    const triple = win ? 'x86_64-pc-windows-msvc' : `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin`;
+    const destination = join(root, `src-tauri/bin/plumdeck-server-${triple}${win ? '.exe' : ''}`);
+    mkdirSync(join(root, 'src-tauri/bin'), { recursive: true });
+    copyFileSync(join(root, `backend/dist/plumdeck-server${win ? '.exe' : ''}`), destination);
+    return destination;
+}
 async function engineBuild() {
     if (win) await run(python, [join(host, 'scripts/build-windows.py')]);
     else if (process.platform === 'darwin') await run('bash', [join(host, 'scripts/build-macos.sh')]);
@@ -67,6 +80,7 @@ try {
             requireVenv();
             await run(venv, ['-m', 'pytest', 'backend/tests', ...process.argv.slice(3)]);
             break;
+        case 'backend-build': await backendBuild(); break;
         case 'junction-test': {
             const executable = join(host, win ? 'build-seam/junction-core-tests.exe' : 'build-junction/junction-core-tests');
             await run(executable, process.argv.slice(3), { env: { ...process.env, JUNCTION_AUDIO_DEVICE_TEST: '1' } });
@@ -74,14 +88,10 @@ try {
         }
         case 'pre-release':
         case 'package': {
-            requireVenv();
-            await run(venv, ['-m', 'PyInstaller', '--clean', '--noconfirm', 'plumdeck-server.spec'], { cwd: join(root, 'backend') });
-            const triple = win ? 'x86_64-pc-windows-msvc' : `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin`;
-            mkdirSync(join(root, 'src-tauri/bin'), { recursive: true });
-            copyFileSync(join(root, `backend/dist/plumdeck-server${win ? '.exe' : ''}`), join(root, `src-tauri/bin/plumdeck-server-${triple}${win ? '.exe' : ''}`));
+            const sidecar = await backendBuild();
             await engineBuild(); await engineStage(); await appBuild();
             if (process.argv[2] === 'pre-release') {
-                await run(venv, [join(root, 'scripts/smoke-backend.py'), join(root, `src-tauri/bin/plumdeck-server-${triple}${win ? '.exe' : ''}`)]);
+                await run(venv, [join(root, 'scripts/smoke-backend.py'), sidecar]);
             }
             break;
         }
