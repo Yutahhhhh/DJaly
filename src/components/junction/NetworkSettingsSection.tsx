@@ -193,7 +193,7 @@ export function NetworkSettingsSection() {
 
       <label className="junction-check">
         <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} disabled={busy} />
-        この端末のキーチェーンに安全に保存する（オフだとアプリ内メモリのみ）
+        OSの保護機能を使ってこの端末に保存する（オフだとアプリ内メモリのみ）
       </label>
 
       <div className="junction-card-actions">
@@ -240,7 +240,7 @@ export function NetworkSettingsSection() {
                 summary.turn.hasSecret ? '・シークレット保持' : ''
               }${summary.turn.expiresAt ? `・期限 ${new Date(summary.turn.expiresAt).toLocaleString()}` : ''}）`
             : 'なし'}
-          ／ 保存 {summary.saved ? 'あり（キーチェーン）' : 'なし'}
+          ／ 保存 {summary.saved ? 'あり（この端末）' : 'なし'}
         </p>
       )}
       </div>}
