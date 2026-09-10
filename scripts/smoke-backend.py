@@ -95,7 +95,7 @@ def main():
                     child.stdin.write(b"plumdeck:shutdown\n")
                     child.stdin.flush()
                     child.stdin.close()
-                assert child.wait(timeout=25) == 0, "Normal shutdown failed"
+                assert child.wait(timeout=60) == 0, "Normal shutdown failed"
                 with socket.socket() as probe:
                     probe.settimeout(1)
                     assert probe.connect_ex(("127.0.0.1", port)) != 0, "Backend listener survived app shutdown"

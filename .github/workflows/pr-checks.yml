@@ -9,6 +9,7 @@ on:
       - 'src/**'
       - 'src-tauri/**'
       - 'native/**'
+      - 'scripts/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig*.json'

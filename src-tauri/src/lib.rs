@@ -31,7 +31,9 @@ struct ManagedBackend {
 }
 fn stop_backend(mut backend: ManagedBackend) {
     let _ = backend.child.write(b"plumdeck:shutdown\n");
-    if backend.ended.recv_timeout(std::time::Duration::from_secs(15)).is_ok() { return; }
+    // The analysis worker gets 30 seconds to checkpoint; Uvicorn first drains
+    // requests for up to 5 seconds. Do not kill it before that work can finish.
+    if backend.ended.recv_timeout(std::time::Duration::from_secs(40)).is_ok() { return; }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

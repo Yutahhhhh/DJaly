@@ -46,7 +46,9 @@ const MAX_TIMEOUT_MS: u64 = 60_000;
 /// 壁時計モードのティック間隔。
 const TICK_MS: u64 = 20;
 /// stop 時に正常終了を待つ猶予。
-const STOP_GRACE: Duration = Duration::from_millis(500);
+// Give recorder finalization and audio/transport teardown time to finish before
+// the bounded fallback, including on Windows with a busy storage device.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 const WRITER_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize)]
@@ -1061,7 +1063,7 @@ mod tests {
             Some(Arc::downgrade(&notifications)),
             "overflow",
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + STOP_GRACE + Duration::from_secs(2);
         loop {
             if let Some(status) = lock(&child).try_wait().unwrap() {
                 assert!(!status.success());
