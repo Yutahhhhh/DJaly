@@ -11,6 +11,7 @@ import { JOG_DEFAULT, jogSetting } from "@/services/midi/jog-settings";
 import { coloredPadFeedback } from "@/services/midi/pad-colors";
 import { jogFrame, isJogScreenMidi, type JogAssets } from "@/services/midi/ddj1000-display";
 import { loadJogAssets } from "@/services/midi/ddj1000-display-assets";
+import { GenericMidiDecoder, parseGenericProfile } from "@/services/midi/generic-midi";
 export type MidiStatus = { enabled: boolean; connected: boolean; generation: number; device: string | null; received: number; sent: number; error: string | null;
   nativePerformance?: {active:boolean;cues:number[];ranges:number[]};
   display?: { midiOpen: boolean; hidOpen: boolean; authenticated: boolean; reportsSent: number; error: string | null } };
@@ -37,7 +38,9 @@ export function useDdj1000(actions: ControllerActions) {
     if (!("__TAURI_INTERNALS__" in window || "__TAURI__" in window)) { setStatus({ ...OFF, error: "MIDI接続はデスクトップ版で利用できます" }); return; }
     let live = true, polling = false, writing = false, initialized = false;
     let connection = OFF, engineSession = djEngineClient.getSessionId();
-    const decoder = new Ddj1000Decoder();
+    const genericProfile = parseGenericProfile(localStorage.getItem("plumdeck.midi.profile"));
+    const decoder = genericProfile?.adapterId === "generic-midi" ? new GenericMidiDecoder(genericProfile) : new Ddj1000Decoder();
+    void invoke("dj_midi_select_device", { device: localStorage.getItem("plumdeck.midi.device") || null }).catch(() => undefined);
     const runtime = new Ddj1000Runtime(djEngineClient, () => latest.current);
     for (const deck of ["A", "B", "C", "D"] as const) runtime.setTempoRange(deck, Number(localStorage.getItem(`plumdeck.tempoRange.${deck}`)) || 16);
     const tempoRange = (event: Event) => {
@@ -67,7 +70,7 @@ export function useDdj1000(actions: ControllerActions) {
           }
           const cue = next.nativePerformance.cues[i]; if (Number.isFinite(cue)) latest.current.cuePoints[deck] = cue;
         }
-        if (snapshot?.engine.capabilities.includes("performance.midi.v2") && djEngineClient.getSessionId()) {
+        if (next.device?.toUpperCase().startsWith("DDJ-1000") && snapshot?.engine.capabilities.includes("performance.midi.v2") && djEngineClient.getSessionId()) {
           const ranges = (["A","B","C","D"] as const).map(deck => Number(localStorage.getItem(`plumdeck.tempoRange.${deck}`)) || 16);
           const token = `${djEngineClient.getSessionId()}:${sensitivityRef.current}:${ranges.join(',')}`;
           if (token !== performanceConfigured) {
@@ -75,7 +78,7 @@ export function useDdj1000(actions: ControllerActions) {
             performanceConfigured = token;
           }
         }
-        if (enabled && next.connected && !initialized) {
+        if (enabled && next.connected && !initialized && next.device?.toUpperCase().startsWith("DDJ-")) {
           // DDJ-1000 PC APP CONNECT: request the current hardware controls.
           // Install the listener and generation first, or the reply is lost.
           await invoke("dj_midi_send", { generation: next.generation, messages: [[0x9f, 0x09, 0x7f]] });
@@ -107,7 +110,7 @@ export function useDdj1000(actions: ControllerActions) {
     }, 4); // Match the MIDI worker cadence; frame-rate polling adds latency to cuts.
     const pollTimer = setInterval(() => void poll(), 500);
     const displayTimer = setInterval(() => {
-      if (!live || !enabled || !connection.connected || displayWriting) return;
+      if (!live || !enabled || !connection.connected || displayWriting || !connection.device?.toUpperCase().startsWith("DDJ-1000")) return;
       const snapshot = djEngineClient.getState().snapshot;
       const decks = (["A", "B", "C", "D"] as const).map(id => {
         const deck = snapshot?.decks[id];
@@ -128,7 +131,7 @@ export function useDdj1000(actions: ControllerActions) {
         .finally(() => { displayWriting = false; });
     }, 50);
     const feedbackTimer = setInterval(() => {
-      if (!live || !enabled || !connection.connected || !initialized || writing) return;
+      if (!live || !enabled || !connection.connected || !initialized || writing || !connection.device?.toUpperCase().startsWith("DDJ-")) return;
       const session = djEngineClient.getSessionId();
       if (session !== engineSession) { reset(); engineSession = session; }
       // MIDI output has no delivery acknowledgement. Re-send static LEDs too

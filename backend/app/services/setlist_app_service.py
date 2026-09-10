@@ -19,6 +19,7 @@ from infra.database.connection import get_setting_value
 from domain.services.target_parameters import sanitize_target_parameters
 from utils.audio_math import calculate_mixability_score
 from utils.embedding import cosine_similarity
+from domain.services.set_duration import calculate_set_duration
 
 class SetlistAppService:
     def __init__(self, session: Session):
@@ -132,6 +133,14 @@ class SetlistAppService:
             t_dict["setlist_track_id"] = st.id
             t_dict["position"] = st.position
             t_dict["wordplay_json"] = st.wordplay_json
+            t_dict.update({
+                "in_ms": st.in_ms,
+                "out_ms": st.out_ms,
+                "playback_rate": st.playback_rate,
+                "extra_duration_ms": st.extra_duration_ms,
+                "overlap_next_ms": st.overlap_next_ms,
+                "revision": st.revision,
+            })
             # JOIN結果から歌詞の有無を判定
             t_dict["has_lyrics"] = bool(lyrics_content and lyrics_content.strip())
             tracks.append(t_dict)
@@ -159,27 +168,67 @@ class SetlistAppService:
         if not setlist:
             return False
 
-        # 削除・挿入・updated_at 更新を単一トランザクションで行う
-        # (途中で失敗した場合に旧データが消えるのを防ぐ)
-        self.repository.clear_tracks(setlist_id, commit=False)
-
+        existing = self.session.exec(
+            select(SetlistTrack).where(SetlistTrack.setlist_id == setlist_id)
+        ).all()
+        existing_by_id = {row.id: row for row in existing}
+        ordered_existing = sorted(existing, key=lambda item: (item.position, item.id or 0))
+        reusable_by_track: dict[int, list[SetlistTrack]] = {}
+        for existing_row in ordered_existing:
+            reusable_by_track.setdefault(existing_row.track_id, []).append(existing_row)
+        previous_next = {row.id: ordered_existing[index + 1].id if index + 1 < len(ordered_existing) else None
+                         for index, row in enumerate(ordered_existing)}
+        desired: List[SetlistTrack] = []
+        claimed: set[int] = set()
         for i, data in enumerate(track_data):
             if isinstance(data, dict):
-                tid = data.get("id")
-                wp_json = data.get("wordplay_json")
+                tid = data.get("track_id", data.get("id"))
+                entry_id = data.get("entry_id", data.get("setlist_track_id"))
             else:
-                tid = data
-                wp_json = None
+                tid, entry_id = data, None
+                data = {}
+            if tid is None:
+                continue
+            if not self.track_repository.get_by_id(int(tid)):
+                raise ValueError(f"Track not found: {tid}")
+            row = existing_by_id.get(int(entry_id)) if entry_id else None
+            if entry_id and row is None:
+                raise ValueError("Setlist entry is stale or belongs to another setlist")
+            if row is None:
+                # Compatibility for older clients that only send track IDs:
+                # preserve the Nth existing occurrence of the same track.
+                candidates = reusable_by_track.get(int(tid), [])
+                row = next((candidate for candidate in candidates if candidate.id not in claimed), None)
+            if row and row.id in claimed:
+                raise ValueError("The same setlist entry was supplied more than once")
+            if row:
+                claimed.add(int(row.id))
+                expected = data.get("revision")
+                if expected is not None and int(expected) != row.revision:
+                    raise ValueError("Setlist entry was changed in another view")
+                row.track_id = int(tid)
+            else:
+                row = SetlistTrack(setlist_id=setlist_id, track_id=int(tid), position=i)
+            row.position = i
+            for field in ("wordplay_json", "in_ms", "out_ms", "playback_rate", "extra_duration_ms", "overlap_next_ms"):
+                if field in data:
+                    setattr(row, field, data[field])
+            desired.append(row)
 
-            if tid is None: continue
-
-            st = SetlistTrack(
-                setlist_id=setlist_id,
-                track_id=tid,
-                position=i,
-                wordplay_json=wp_json
-            )
-            self.session.add(st)
+        # A connection overlap belongs to an exact adjacent entry pair. Moving
+        # either side clears it instead of silently applying it to a new pair.
+        for index, row in enumerate(desired):
+            next_id = desired[index + 1].id if index + 1 < len(desired) else None
+            if row.id and previous_next.get(row.id) != next_id:
+                row.overlap_next_ms = 0
+        calculate_set_duration([{**row.model_dump(), "duration": self.track_repository.get_by_id(row.track_id).duration}
+                                for row in desired])
+        for row in existing:
+            if row.id not in claimed:
+                self.session.delete(row)
+        for row in desired:
+            row.revision = (row.revision or 0) + 1 if row.id else 1
+            self.session.add(row)
 
         setlist.updated_at = datetime.now()
         self.session.add(setlist)
@@ -189,6 +238,13 @@ class SetlistAppService:
             self.session.rollback()
             raise
         return True
+
+    def set_duration(self, setlist_id: int) -> Dict[str, Any]:
+        rows = self.get_setlist_tracks(setlist_id)
+        result = calculate_set_duration(rows)
+        result["full_duration_ms"] = sum(float(row.get("duration") or 0) * 1000 for row in rows)
+        result["track_count"] = len(rows)
+        return result
 
     def export_as_m3u8(self, setlist_id: int) -> str:
         setlist = self.repository.get_by_id(setlist_id)

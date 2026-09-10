@@ -25,6 +25,7 @@ import { releasePerformanceHardware, suspendPerformanceAudio, type ReleaseOutcom
 import { isAppMode } from "@/components/play/ModeToggle";
 import { AssistWorkspace } from "@/components/assist/AssistWorkspace";
 import { ModeToggle, PlayWorkspace, type AppMode } from "@/components/play";
+import { WorkflowView } from "@/components/workflows/WorkflowView";
 
 function App() {
   const junction = useJunction();
@@ -147,6 +148,8 @@ function App() {
         return <DocsView />;
       case "settings":
         return <SettingsView />;
+      case "workflows":
+        return <WorkflowView />;
       default:
         return <DashboardView onNavigate={setActiveView} />;
     }

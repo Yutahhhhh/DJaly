@@ -9,7 +9,9 @@ logger = get_logger(__name__)
 # 現在のスキーマバージョン
 # v4: track_analyses の波形/ビートを JSON テキスト -> BLOB 化 (DuckDB ファイル肥大化対策)。
 #     v4 への移行は infra/database/compaction.py がファイル再構築で行う。
-CURRENT_SCHEMA_VERSION = 4
+# v5: library workflow tools (media repair, backup, versions, planned set timing,
+#     audio/controller presets, USB handoff, recording timeline and Play imports).
+CURRENT_SCHEMA_VERSION = 5
 
 # id を採番するシーケンス (テーブルより先に作成する必要がある)
 SEQUENCES = {
@@ -19,6 +21,8 @@ SEQUENCES = {
     "seq_wordplay_pairs_id": "wordplay_pairs",
     "seq_play_history_id": "play_history",
     "seq_recordings_id": "recordings",
+    "seq_track_version_groups_id": "track_version_groups",
+    "seq_recording_segments_id": "recording_segments",
 }
 
 # 再構築時にそのままコピーできる (変換不要の) テーブル
@@ -26,7 +30,11 @@ PLAIN_TABLES = [
     "tracks", "lyrics", "setlists", "setlist_tracks", "wordplay_pairs",
     "track_performance_metadata", "track_grid_candidates", "rekordbox_sources", "rekordbox_playlists",
     "rekordbox_playlist_tracks", "play_sessions", "play_history", "recordings",
-    "settings", "schema_info"
+    "settings", "schema_info", "track_media", "media_repair_operations",
+    "operation_journal", "track_version_groups", "track_version_members",
+    "audio_presets", "controller_profiles", "controller_device_bindings",
+    "usb_devices", "usb_exports", "recording_segments", "import_batches",
+    "import_items", "import_target_intents"
 ]
 # 再構築時に行単位の変換が必要なテーブル
 CONVERTED_TABLES = ["track_analyses", "track_embeddings"]
@@ -45,6 +53,7 @@ MIGRATIONS = {
         "DROP TABLE IF EXISTS presets",
         "DROP TABLE IF EXISTS prompts",
     ],
+    5: [],
 }
 
 # Additive fields that must also reach databases already marked schema v4. These
@@ -62,6 +71,19 @@ COMPATIBILITY_STATEMENTS = [
     # 録音に名前を付けて保存できるようにする。既存の録音は名前なしのまま残る。
     "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS artist VARCHAR",
     "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS title VARCHAR",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'internal'",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS sample_rate_hz INTEGER",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS frame_count BIGINT",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS timeline_quality VARCHAR DEFAULT 'unavailable'",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS timeline_dropped_events BIGINT DEFAULT 0",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS revision INTEGER DEFAULT 1",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS in_ms DOUBLE DEFAULT 0",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS out_ms DOUBLE",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS playback_rate DOUBLE DEFAULT 1",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS extra_duration_ms DOUBLE DEFAULT 0",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS overlap_next_ms DOUBLE DEFAULT 0",
+    "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS revision INTEGER DEFAULT 1",
+    "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT 'native_file_drop'",
 ]
 
 
@@ -164,6 +186,12 @@ def get_table_ddl() -> Dict[str, str]:
                 position INTEGER NOT NULL,
                 transition_note VARCHAR,
                 wordplay_json VARCHAR,
+                in_ms DOUBLE NOT NULL DEFAULT 0,
+                out_ms DOUBLE,
+                playback_rate DOUBLE NOT NULL DEFAULT 1,
+                extra_duration_ms DOUBLE NOT NULL DEFAULT 0,
+                overlap_next_ms DOUBLE NOT NULL DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """,
@@ -275,7 +303,197 @@ def get_table_ddl() -> Dict[str, str]:
                 status VARCHAR NOT NULL DEFAULT 'recording',
                 error VARCHAR,
                 artist VARCHAR,
-                title VARCHAR
+                title VARCHAR,
+                source VARCHAR NOT NULL DEFAULT 'internal',
+                sample_rate_hz INTEGER,
+                frame_count BIGINT,
+                timeline_quality VARCHAR NOT NULL DEFAULT 'unavailable',
+                timeline_dropped_events BIGINT NOT NULL DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 1
+            )
+        """,
+        "track_media": """
+            CREATE TABLE IF NOT EXISTS track_media (
+                track_id INTEGER PRIMARY KEY,
+                sha256 VARCHAR,
+                size_bytes BIGINT,
+                mtime_ns BIGINT,
+                volume_id VARCHAR,
+                relative_path VARCHAR,
+                status VARCHAR NOT NULL DEFAULT 'unknown',
+                last_verified_at TIMESTAMP,
+                revision INTEGER NOT NULL DEFAULT 1
+            )
+        """,
+        "media_repair_operations": """
+            CREATE TABLE IF NOT EXISTS media_repair_operations (
+                id VARCHAR PRIMARY KEY,
+                state VARCHAR NOT NULL,
+                plan_json VARCHAR NOT NULL DEFAULT '{}',
+                result_json VARCHAR NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "operation_journal": """
+            CREATE TABLE IF NOT EXISTS operation_journal (
+                id VARCHAR PRIMARY KEY,
+                kind VARCHAR NOT NULL,
+                target VARCHAR NOT NULL DEFAULT '',
+                state VARCHAR NOT NULL,
+                progress DOUBLE NOT NULL DEFAULT 0,
+                detail_json VARCHAR NOT NULL DEFAULT '{}',
+                cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "track_version_groups": """
+            CREATE TABLE IF NOT EXISTS track_version_groups (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_track_version_groups_id'),
+                name VARCHAR,
+                preferred_track_id INTEGER,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "track_version_members": """
+            CREATE TABLE IF NOT EXISTS track_version_members (
+                group_id INTEGER NOT NULL,
+                track_id INTEGER PRIMARY KEY,
+                version_label VARCHAR NOT NULL DEFAULT 'Original',
+                content_label VARCHAR NOT NULL DEFAULT 'Unknown',
+                note VARCHAR
+            )
+        """,
+        "audio_presets": """
+            CREATE TABLE IF NOT EXISTS audio_presets (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                revision INTEGER NOT NULL DEFAULT 1,
+                config_json VARCHAR NOT NULL,
+                last_applied_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "controller_profiles": """
+            CREATE TABLE IF NOT EXISTS controller_profiles (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                adapter_id VARCHAR NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                revision INTEGER NOT NULL DEFAULT 1,
+                built_in BOOLEAN NOT NULL DEFAULT FALSE,
+                definition_json VARCHAR NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "controller_device_bindings": """
+            CREATE TABLE IF NOT EXISTS controller_device_bindings (
+                profile_id VARCHAR PRIMARY KEY,
+                input_selector_json VARCHAR NOT NULL,
+                output_selector_json VARCHAR,
+                resolved BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "usb_devices": """
+            CREATE TABLE IF NOT EXISTS usb_devices (
+                id VARCHAR PRIMARY KEY,
+                device_identifier VARCHAR,
+                volume_uuid VARCHAR,
+                label VARCHAR NOT NULL,
+                mount_path VARCHAR,
+                filesystem VARCHAR,
+                capacity_bytes BIGINT,
+                free_bytes BIGINT,
+                read_only BOOLEAN NOT NULL DEFAULT FALSE,
+                connected BOOLEAN NOT NULL DEFAULT FALSE,
+                last_seen_at TIMESTAMP
+            )
+        """,
+        "usb_exports": """
+            CREATE TABLE IF NOT EXISTS usb_exports (
+                id VARCHAR PRIMARY KEY,
+                usb_device_id VARCHAR,
+                setlist_id INTEGER NOT NULL,
+                state VARCHAR NOT NULL,
+                snapshot_hash VARCHAR NOT NULL,
+                snapshot_json VARCHAR NOT NULL,
+                handoff_path VARCHAR,
+                verification_json VARCHAR NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "recording_segments": """
+            CREATE TABLE IF NOT EXISTS recording_segments (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_recording_segments_id'),
+                recording_id INTEGER NOT NULL,
+                event_key VARCHAR NOT NULL UNIQUE,
+                track_id INTEGER,
+                deck VARCHAR,
+                load_generation BIGINT,
+                start_frame BIGINT,
+                end_frame BIGINT,
+                start_ms BIGINT NOT NULL,
+                end_ms BIGINT,
+                title_snapshot VARCHAR NOT NULL,
+                artist_snapshot VARCHAR NOT NULL,
+                version_snapshot VARCHAR,
+                source VARCHAR NOT NULL,
+                confidence VARCHAR NOT NULL DEFAULT 'confirmed',
+                position INTEGER NOT NULL DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 1
+            )
+        """,
+        "import_batches": """
+            CREATE TABLE IF NOT EXISTS import_batches (
+                id VARCHAR PRIMARY KEY,
+                request_id VARCHAR NOT NULL UNIQUE,
+                target_kind VARCHAR NOT NULL,
+                target_id INTEGER,
+                target_name_snapshot VARCHAR,
+                origin VARCHAR NOT NULL DEFAULT 'native_file_drop',
+                state VARCHAR NOT NULL,
+                paused BOOLEAN NOT NULL DEFAULT FALSE,
+                cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "import_items": """
+            CREATE TABLE IF NOT EXISTS import_items (
+                id VARCHAR PRIMARY KEY,
+                batch_id VARCHAR NOT NULL,
+                input_order INTEGER NOT NULL,
+                source_path VARCHAR NOT NULL,
+                canonical_path VARCHAR,
+                sha256 VARCHAR,
+                size_bytes BIGINT,
+                mtime_ns BIGINT,
+                track_id INTEGER,
+                state VARCHAR NOT NULL,
+                load_ready BOOLEAN NOT NULL DEFAULT FALSE,
+                error_code VARCHAR,
+                error_message VARCHAR,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(batch_id, input_order)
+            )
+        """,
+        "import_target_intents": """
+            CREATE TABLE IF NOT EXISTS import_target_intents (
+                item_id VARCHAR PRIMARY KEY,
+                batch_id VARCHAR NOT NULL,
+                target_kind VARCHAR NOT NULL,
+                target_id INTEGER,
+                reserved_position INTEGER,
+                state VARCHAR NOT NULL,
+                setlist_track_id INTEGER
             )
         """,
         "settings": """

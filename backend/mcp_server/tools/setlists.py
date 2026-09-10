@@ -86,13 +86,8 @@ def add_track_to_setlist(setlist_id: int, track_id: int, position: Optional[int]
     """セットリストに1曲追加する。position を指定しない場合は末尾に追加。"""
     with db_session() as session:
         service = SetlistAppService(session)
-        current = service.get_setlist_tracks(setlist_id)
-        ids = [t["id"] for t in current]
-        if position is None:
-            ids.append(track_id)
-        else:
-            ids.insert(max(0, min(position, len(ids))), track_id)
-        service.update_setlist_tracks(setlist_id, ids)
+        if service.add_setlist_track(setlist_id, track_id, position) is None:
+            raise ValueError(f"Setlist {setlist_id} not found")
         return track_list_payload(service.get_setlist_tracks(setlist_id))
 
 
@@ -102,10 +97,9 @@ def remove_track_from_setlist(setlist_id: int, track_id: int) -> Dict[str, Any]:
     with db_session() as session:
         service = SetlistAppService(session)
         current = service.get_setlist_tracks(setlist_id)
-        ids = [t["id"] for t in current]
-        if track_id in ids:
-            ids.remove(track_id)
-        service.update_setlist_tracks(setlist_id, ids)
+        entry = next((item for item in current if item["id"] == track_id), None)
+        if entry:
+            service.remove_setlist_track(setlist_id, int(entry["setlist_track_id"]))
         return track_list_payload(service.get_setlist_tracks(setlist_id))
 
 

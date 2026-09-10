@@ -13,7 +13,7 @@ class IngestionRepository:
     def __init__(self):
         pass
 
-    def _prepare_track_models(self, session: Session, result: Dict[str, Any], update_metadata: bool = True) -> None:
+    def _prepare_track_models(self, session: Session, result: Dict[str, Any], update_metadata: bool = True) -> int:
         filepath = result["filepath"]
         
         track_update_data = {
@@ -63,6 +63,8 @@ class IngestionRepository:
                         final_data[k] = v if v is not None else ""
                 if not final_data.get("title"): final_data["title"] = "Unknown"
                 if not final_data.get("artist"): final_data["artist"] = "Unknown"
+                if not isinstance(final_data.get("bpm"), (int, float)) or final_data.get("bpm", 0) <= 0:
+                    final_data["bpm"] = None
                 new_track = Track(filepath=filepath, **final_data)
                 session.add(new_track)
                 session.flush()
@@ -114,14 +116,24 @@ class IngestionRepository:
                     ly.content = result["lyrics"]
                     ly.updated_at = datetime.now()
                     session.add(ly)
+            return int(track_id)
 
     def save_track(self, result: Dict[str, Any], update_metadata: bool = True):
         try:
             with Session(db_connection.engine) as session:
-                self._prepare_track_models(session, result, update_metadata)
+                track_id = self._prepare_track_models(session, result, update_metadata)
                 session.commit()
+                return track_id
         except Exception as e:
             print(f"ERROR: Save track failed: {e}")
+            return None
+
+    def save_track_result(self, session: Session, result: Dict[str, Any], update_metadata: bool = True) -> Dict[str, Any]:
+        """Structured writer used by persistent imports; commit failures propagate."""
+        existing = session.exec(select(Track).where(Track.filepath == result["filepath"])).first()
+        track_id = self._prepare_track_models(session, result, update_metadata)
+        session.commit()
+        return {"status": "updated" if existing else "created", "track_id": track_id}
 
     async def batch_save_tracks(self, results: List[Dict[str, Any]]):
         if not results: return

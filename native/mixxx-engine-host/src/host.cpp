@@ -141,8 +141,8 @@ Host::Host(std::unique_ptr<PlaybackBackend> backend) : backend_(std::move(backen
         // Even immediate decoder failures are delivered after the accepted reply.
         QTimer::singleShot(0, this, [this, index, generation, metadata, error] { completed(index, generation, metadata, error); });
     };
-    backend_->recordingChanged = [this](QJsonObject state) {
-        QTimer::singleShot(0, this, [this, state] { ++rev_; event("recording.state", state); });
+    backend_->recordingChanged = [this](QJsonObject) {
+        QTimer::singleShot(0, this, [this] { ++rev_; event("recording.state", recordingState()); });
     };
     connect(&timer_, &QTimer::timeout, this, [this] { sample(); });
     timer_.start(20);
@@ -211,7 +211,58 @@ void Host::event(const QString& name, const QJsonObject& data) {
     auto message = envelope("event"); message.insert("event", name); message.insert("seq", static_cast<qint64>(++seq_)); message.insert("data", data); send(message);
 }
 QJsonObject Host::snapshot() {
-    return {{"rev", static_cast<qint64>(rev_)}, {"seq", static_cast<qint64>(seq_)}, {"engineId", engineId_}, {"sessionId", sessionId_}, {"engineTimeMs", static_cast<double>(clock_.elapsed())}, {"engine", info()}, {"decks", QJsonObject{{"A", slots_[0].state}, {"B", slots_[1].state}, {"C", slots_[2].state}, {"D", slots_[3].state}}}, {"mixer", backend_->mixer()}, {"audio", backend_->audio()}, {"recording", backend_->recording()}, {"meters", QJsonObject{{"enabled", false}, {"intervalMs", 100}, {"simulated", false}}}};
+    return {{"rev", static_cast<qint64>(rev_)}, {"seq", static_cast<qint64>(seq_)}, {"engineId", engineId_}, {"sessionId", sessionId_}, {"engineTimeMs", static_cast<double>(clock_.elapsed())}, {"engine", info()}, {"decks", QJsonObject{{"A", slots_[0].state}, {"B", slots_[1].state}, {"C", slots_[2].state}, {"D", slots_[3].state}}}, {"mixer", backend_->mixer()}, {"audio", backend_->audio()}, {"recording", recordingState()}, {"meters", QJsonObject{{"enabled", false}, {"intervalMs", 100}, {"simulated", false}}}};
+}
+
+void Host::sampleRecordingTimeline() {
+    const auto recording = backend_->recording();
+    const bool active = recording["active"].toBool();
+    const qint64 frame = static_cast<qint64>(recording["frameCount"].toDouble());
+    const QString key = recording["path"].toString() + QLatin1Char('|') + recording["startedAt"].toString();
+    if (active && key != recordingTimelineKey_) {
+        recordingTimelineKey_ = key;
+        recordingTimeline_ = {};
+        recordingOpenSegments_.fill(-1);
+        recordingTimelineDropped_ = 0;
+    }
+    const auto mixer = backend_->mixer();
+    const auto channels = mixer["channels"].toObject();
+    const double crossfader = mixer["crossfader"].toDouble();
+    for (int index = 0; index < 4; ++index) {
+        const auto channel = channels[deckNames[index]].toObject();
+        const double orientation = channel["orientation"].toDouble();
+        const double crossGain = orientation < -0.5 ? (1.0 - crossfader) * 0.5
+                : orientation > 0.5 ? (1.0 + crossfader) * 0.5 : 1.0;
+        const bool contributing = active && slots_[index].state["status"] == "playing" &&
+                channel["gain"].toDouble() * channel["trim"].toDouble(1.0) * crossGain > 0.0001 &&
+                slots_[index].state["track"].isObject();
+        int& open = recordingOpenSegments_[index];
+        if (contributing && open < 0) {
+            if (recordingTimeline_.size() >= 10000) { ++recordingTimelineDropped_; continue; }
+            const auto track = slots_[index].state["track"].toObject();
+            QJsonObject segment{{"eventKey", QString("%1:%2:%3").arg(key, deckNames[index]).arg(slots_[index].generation)},
+                    {"deck", deckNames[index]}, {"loadGeneration", static_cast<qint64>(slots_[index].generation)},
+                    {"trackId", track["localTrackId"].isDouble() ? track["localTrackId"] : track["trackId"]},
+                    {"title", track["title"]}, {"artist", track["artist"]},
+                    {"startFrame", frame}, {"endFrame", QJsonValue::Null}, {"source", "engine_observed"}};
+            recordingTimeline_.append(segment);
+            open = recordingTimeline_.size() - 1;
+        } else if (!contributing && open >= 0) {
+            auto segment = recordingTimeline_[open].toObject();
+            segment["endFrame"] = frame;
+            recordingTimeline_[open] = segment;
+            open = -1;
+        }
+    }
+}
+
+QJsonObject Host::recordingState() {
+    sampleRecordingTimeline();
+    auto state = backend_->recording();
+    state["timeline"] = recordingTimeline_;
+    state["timelineDroppedEvents"] = static_cast<int>(recordingTimelineDropped_);
+    if (recordingTimelineDropped_) state["timelineQuality"] = "incomplete";
+    return state;
 }
 void Host::line(const QByteArray& bytes) {
     if (bytes.trimmed().isEmpty()) return;
@@ -325,14 +376,14 @@ void Host::line(const QByteArray& bytes) {
         if (directory.isEmpty() || directory.size() > 1024 || !directory.startsWith('/')) { error(cmd, "invalid_params", "directory must be an absolute path"); return; }
         const auto resolved = backend_->recordingDirectory(directory);
         if (resolved.isEmpty()) { error(cmd, "unsupported_operation", "Recording is unavailable on this host"); return; }
-        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+        ++rev_; const auto state = recordingState(); result(cmd, state); event("recording.state", state); return;
     }
     if (op == "recording.format.set") {
         if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
         if (!cmd["params"].isObject()) { error(cmd, "invalid_params", "params must be an object"); return; }
         const auto format = cmd["params"].toObject()["format"].toString();
         if (backend_->recordingFormat(format).isEmpty()) { error(cmd, "invalid_params", "This host cannot write that recording format"); return; }
-        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+        ++rev_; const auto state = recordingState(); result(cmd, state); event("recording.state", state); return;
     }
     const bool recordingOp = op == "recording.start" || op == "recording.stop";
     if (!transport.contains(op) && !deckControls.contains(op) && !mixerOps.contains(op) && !recordingOp && op != "deck.timing.trace") { error(cmd, "unsupported_operation", "This host does not implement the requested controller operation"); return; }
@@ -341,7 +392,7 @@ void Host::line(const QByteArray& bytes) {
     if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
     if (recordingOp) {
         if (op == "recording.start") backend_->startRecording(); else backend_->stopRecording();
-        ++rev_; const auto state = backend_->recording(); result(cmd, state); event("recording.state", state); return;
+        ++rev_; const auto state = recordingState(); result(cmd, state); event("recording.state", state); return;
     }
     if (mixerOps.contains(op)) {
         if (op == "mixer.channel.orientation") {
@@ -700,6 +751,7 @@ void Host::sample() {
     }
     if (!clockPoints.isEmpty()) event("deck.clock.v2", {{"points", clockPoints}, {"dropped", int(dropped)}});
     if (!positions.isEmpty()) event("deck.position", {{"decks", positions}});
+    sampleRecordingTimeline();
 }
 QJsonObject Host::sampleDeck(int index) {
     auto& deck_ = slots_[index].state;

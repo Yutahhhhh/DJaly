@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Bot,
   MessageSquareQuote,
+  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,13 @@ export function Sidebar({
           label="Wordplay"
           isActive={activeView === "wordplay"}
           onClick={() => onNavigate("wordplay")}
+          isOpen={isOpen}
+        />
+        <NavButton
+          icon={<Wrench className="h-5 w-5" />}
+          label="Workflow Tools"
+          isActive={activeView === "workflows"}
+          onClick={() => onNavigate("workflows")}
           isOpen={isOpen}
         />
         <NavButton

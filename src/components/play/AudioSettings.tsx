@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { djEngineClient } from "@/services/dj-engine/client";
 import { DEFAULT_MICROPHONE, savedMicrophoneSettings } from "@/services/dj-engine/audio-settings";
 import type { AudioConfig, AudioDevice, MicrophoneSettings } from "@/types/dj-engine";
+import { workflowsService, type AudioPreset } from "@/services/workflows";
 
 const selectClass = "h-8 w-full rounded border border-[#2b2d31] bg-[#0d0e0f] px-2 text-xs text-[#d8dadd] disabled:opacity-50";
 const labelClass = "block text-[11px] font-semibold text-[#9b9fa6]";
@@ -21,6 +22,8 @@ export function AudioSettings({ onClose, onApply }: {
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [presets, setPresets] = useState<AudioPreset[]>([]);
+  const [presetName, setPresetName] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +46,7 @@ export function AudioSettings({ onClose, onApply }: {
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [revision]);
+  useEffect(() => { void workflowsService.audioPresets().then(setPresets).catch(() => undefined); }, []);
 
   const outputs = devices.filter(device => device.outputChannels > 0);
   const inputs = devices.filter(device => (device.inputChannels ?? 0) > 0);
@@ -73,6 +77,11 @@ export function AudioSettings({ onClose, onApply }: {
         <DialogDescription className="text-xs text-[#8b8f96]">DJの音とマイク入力をまとめてMasterへ出力します。</DialogDescription>
       </DialogHeader>
       <div className="space-y-3">
+        <div className="rounded border border-[#2b2d31] p-3">
+          <label className={labelClass}>機材プリセット（選択後に「適用」が必要です）</label>
+          <div className="mt-2"><select aria-label="音声プリセット" className={selectClass} defaultValue="" onChange={(event) => { const preset = presets.find((row) => row.id === event.target.value); if (!preset) return; const config = preset.config as {output_device?:string; microphone?:MicrophoneSettings}; setSelected(config.output_device ?? ""); if (config.microphone) setMicrophone(config.microphone); }}><option value="">プリセットを選択</option>{presets.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></div>
+          <div className="mt-2 flex gap-2"><input className={selectClass} value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="現在設定の保存名"/><Button size="sm" variant="outline" disabled={!presetName.trim() || !audio} onClick={() => { if (!audio) return; void workflowsService.saveAudioPreset(presetName.trim(), { output_device:selected, master:{device_id:selected || "default",channels:audio.masterChannels}, cue:audio.pflChannels ? {device_id:selected || "default",channels:audio.pflChannels} : null, sample_rate:audio.sampleRateHz, buffer_size:audio.bufferFrames, microphone }).then(() => workflowsService.audioPresets().then(setPresets)).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }}>保存</Button></div>
+        </div>
         <label className={labelClass} htmlFor="dj-output-device">マスター出力</label>
         <select id="dj-output-device" value={selected} disabled={disabled} onChange={event => setSelected(event.target.value)} className={selectClass}>
           <option value="">macOSの既定出力{defaultDevice ? ` — ${defaultDevice.displayName}` : ""}</option>

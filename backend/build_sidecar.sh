@@ -1,7 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-RECORDING_FFMPEG=$(python packaging_ffmpeg.py)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+PYINSTALLER="$SCRIPT_DIR/.venv/bin/pyinstaller"
+if [ ! -x "$PYINSTALLER" ]; then
+  echo "PyInstaller is not installed in backend/.venv. Run backend/setup.sh first."
+  exit 1
+fi
 
 ARCH_NAME=$(uname -m)
 if [ "$ARCH_NAME" = "x86_64" ]; then
@@ -15,34 +21,9 @@ else
   exit 1
 fi
 
-# クリーンアップ
-rm -rf build dist
-
-# PyInstallerの実行
-# --onefile: 1つのファイルにまとめる
-# --name: バイナリ名
-# --add-data: 静的ファイルやモデルがあれば追加 (例: "models/*.pb:models")
-# hidden-import: 自動検出されないライブラリを指定
-pyinstaller --clean --noconfirm --onefile --name plumdeck-server \
-    --add-binary="$RECORDING_FFMPEG:bin" \
-    --hidden-import="uvicorn.logging" \
-    --hidden-import="uvicorn.loops" \
-    --hidden-import="uvicorn.loops.auto" \
-    --hidden-import="uvicorn.protocols" \
-    --hidden-import="uvicorn.protocols.http" \
-    --hidden-import="uvicorn.protocols.http.auto" \
-    --hidden-import="uvicorn.lifespan" \
-    --hidden-import="uvicorn.lifespan.on" \
-    --hidden-import="sqlmodel" \
-    --hidden-import="platformdirs" \
-    --hidden-import="pydantic_settings" \
-    --hidden-import="sklearn.utils._typedefs" \
-    --hidden-import="sklearn.neighbors._partition_nodes" \
-    --hidden-import="scipy.special.cython_special" \
-    --collect-all="pyrekordbox" \
-    --collect-all="sqlcipher3" \
-    --add-data="models/msd-musicnn-1.pb:models" \
-    server.py
+# Keep the checked-in spec authoritative. It owns dynamic imports, Rekordbox
+# dependencies, Essentia libraries, and the packaged ffmpeg executable.
+"$PYINSTALLER" --clean --noconfirm plumdeck-server.spec
 
 # Tauriが期待するディレクトリにバイナリを移動し、アーキテクチャ名を付与
 mkdir -p ../src-tauri/bin

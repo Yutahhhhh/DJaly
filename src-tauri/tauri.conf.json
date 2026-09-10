@@ -1,6 +1,6 @@
 {
   "productName": "plumdeck",
-  "version": "0.4.9",
+  "version": "0.5.0",
   "identifier": "com.plumdeck.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -33,7 +33,7 @@
         "width": 1200,
         "height": 800,
         "resizable": true,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "fullscreen": false,
         "devtools": true
       }

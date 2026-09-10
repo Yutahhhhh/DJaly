@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import os
+import uuid
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import text
+from sqlmodel import Session, select
+
+from domain.constants import SUPPORTED_EXTENSIONS
+from domain.models.track import Track
+from domain.services.ingestion_domain_service import IngestionDomainService
+from infra.repositories.ingestion_repository import IngestionRepository
+from infra.repositories.setlist_repository import SetlistRepository
+import infra.database.connection as db_connection
+
+
+def _rows(result) -> list[dict[str, Any]]:
+    return [dict(row._mapping) for row in result]
+
+
+def _sha(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _expand(paths: list[str]) -> list[Path]:
+    output: list[Path] = []
+    seen: set[str] = set()
+    for raw in paths:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        found: list[Path]
+        if resolved.is_file():
+            found = [resolved]
+        elif resolved.is_dir():
+            found = sorted(
+                (item for item in resolved.rglob("*") if item.is_file() and not item.is_symlink()),
+                key=lambda item: item.relative_to(resolved).as_posix(),
+            )
+        else:
+            found = []
+        for item in found:
+            if item.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            real = str(item.resolve())
+            if real not in seen:
+                seen.add(real)
+                output.append(item.resolve())
+    return output
+
+
+class PlayImportService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, request_id: str, target_kind: str, target_id: int | None,
+               paths: list[str], origin: str = "native_file_drop") -> dict[str, Any]:
+        duplicate = self.session.exec(text("SELECT id FROM import_batches WHERE request_id=:id"), params={"id": request_id}).first()
+        if duplicate:
+            return self.get(str(duplicate[0]))
+        if target_kind not in {"collection", "local_playlist"}:
+            raise ValueError("この場所には音源を取り込めません")
+        target_name = "Collection"
+        if target_kind == "local_playlist":
+            target = self.session.exec(text("SELECT name FROM setlists WHERE id=:id"), params={"id": target_id}).first()
+            if not target:
+                raise ValueError("追加先プレイリストが見つかりません")
+            target_name = str(target[0])
+        expanded = _expand(paths)
+        if not expanded:
+            raise ValueError("対応する読み取り可能な音源がありません")
+        batch_id = f"import-{uuid.uuid4()}"
+        self.session.exec(text("""
+            INSERT INTO import_batches (id,request_id,target_kind,target_id,target_name_snapshot,origin,state)
+            VALUES (:id,:request,:kind,:target,:name,:origin,'queued')
+        """), params={"id": batch_id, "request": request_id, "kind": target_kind,
+                        "target": target_id, "name": target_name, "origin": origin})
+        for index, path in enumerate(expanded):
+            item_id = f"item-{uuid.uuid4()}"
+            stat = path.stat()
+            self.session.exec(text("""
+                INSERT INTO import_items (id,batch_id,input_order,source_path,canonical_path,size_bytes,mtime_ns,state)
+                VALUES (:id,:batch,:ordering,:source,:canonical,:size,:mtime,'queued')
+            """), params={"id": item_id, "batch": batch_id, "ordering": index,
+                            "source": str(path), "canonical": str(path), "size": stat.st_size, "mtime": stat.st_mtime_ns})
+            self.session.exec(text("""
+                INSERT INTO import_target_intents (item_id,batch_id,target_kind,target_id,reserved_position,state)
+                VALUES (:item,:batch,:kind,:target,:position,'pending')
+            """), params={"item": item_id, "batch": batch_id, "kind": target_kind,
+                            "target": target_id, "position": index})
+        self.session.commit()
+        return self.get(batch_id)
+
+    def get(self, batch_id: str) -> dict[str, Any]:
+        batch = self.session.exec(text("SELECT * FROM import_batches WHERE id=:id"), params={"id": batch_id}).first()
+        if not batch:
+            raise ValueError("取込ジョブが見つかりません")
+        result = dict(batch._mapping)
+        result["items"] = _rows(self.session.exec(text("""
+            SELECT i.*,intent.state AS membership_state,intent.setlist_track_id
+            FROM import_items i JOIN import_target_intents intent ON intent.item_id=i.id
+            WHERE i.batch_id=:id ORDER BY i.input_order
+        """), params={"id": batch_id}))
+        result["summary"] = {state: sum(item["state"] == state for item in result["items"])
+                             for state in {item["state"] for item in result["items"]}}
+        return result
+
+    def list(self, active: bool = False) -> list[dict[str, Any]]:
+        where = "WHERE state NOT IN ('completed','completed_with_errors','canceled')" if active else ""
+        qualified_where = where.replace("state ", "b.state ")
+        return _rows(self.session.exec(text(f"""
+            SELECT b.*,
+              count(i.id) AS total_items,
+              count(i.id) FILTER (WHERE i.state IN ('completed','existing')) AS succeeded_items,
+              count(i.id) FILTER (WHERE i.state='failed') AS failed_items,
+              count(i.id) FILTER (WHERE i.state='skipped') AS skipped_items
+            FROM import_batches b LEFT JOIN import_items i ON i.batch_id=b.id
+            {qualified_where}
+            GROUP BY ALL ORDER BY b.created_at DESC LIMIT 100
+        """)))
+
+    def set_state(self, batch_id: str, action: str) -> dict[str, Any]:
+        if action not in {"pause", "resume", "cancel", "retry"}:
+            raise ValueError("不正な操作です")
+        if action == "pause":
+            self.session.exec(text("UPDATE import_batches SET paused=true,state='paused',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
+        elif action == "resume":
+            self.session.exec(text("UPDATE import_batches SET paused=false,state='queued',updated_at=CURRENT_TIMESTAMP WHERE id=:id AND NOT cancel_requested"), params={"id": batch_id})
+        elif action == "cancel":
+            self.session.exec(text("UPDATE import_batches SET cancel_requested=true,state='canceled',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
+            self.session.exec(text("UPDATE import_target_intents SET state='cancelled' WHERE batch_id=:id AND state='pending'"), params={"id": batch_id})
+        else:
+            self.session.exec(text("UPDATE import_items SET state='queued',error_code=NULL,error_message=NULL WHERE batch_id=:id AND state='failed'"), params={"id": batch_id})
+            self.session.exec(text("UPDATE import_batches SET paused=false,cancel_requested=false,state='queued',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
+        self.session.commit()
+        return self.get(batch_id)
+
+
+def process_batch(batch_id: str) -> None:
+    """Single-worker processor. Re-fetches state at every commit boundary."""
+    with db_connection.database_activity, Session(db_connection.engine) as session:
+        service = PlayImportService(session)
+        try:
+            batch = service.get(batch_id)
+        except ValueError:
+            return
+        if batch["cancel_requested"] or batch["paused"]:
+            return
+        session.exec(text("UPDATE import_batches SET state='processing',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
+        session.commit()
+        for item in batch["items"]:
+            current = session.exec(text("SELECT paused,cancel_requested FROM import_batches WHERE id=:id"), params={"id": batch_id}).first()
+            if not current or current[0] or current[1]:
+                return
+            if item["state"] not in {"queued", "failed"}:
+                continue
+            path = Path(item["canonical_path"])
+            try:
+                if not path.is_file() or not os.access(path, os.R_OK) or path.stat().st_size == 0:
+                    raise ValueError("音源を読み取れません")
+                identity = _sha(path)
+                session.exec(text("UPDATE import_items SET state='probing',sha256=:hash,attempts=attempts+1 WHERE id=:id"),
+                             params={"id": item["id"], "hash": identity})
+                session.commit()
+                track = session.exec(select(Track).where(Track.filepath == str(path))).first()
+                reused = bool(track)
+                if not track:
+                    matches = _rows(session.exec(text("""
+                        SELECT t.* FROM track_media m JOIN tracks t ON t.id=m.track_id
+                        WHERE m.sha256=:hash
+                    """), params={"hash": identity}))
+                    if len(matches) == 1 and Path(matches[0]["filepath"]).is_file():
+                        track = session.get(Track, matches[0]["id"])
+                        reused = True
+                    elif len(matches) > 1:
+                        raise ValueError("同じ内容の既存曲が複数あり、選択が必要です")
+                if not track:
+                    session.exec(text("UPDATE import_items SET state='analyzing' WHERE id=:id"), params={"id": item["id"]})
+                    session.commit()
+                    domain = IngestionDomainService()
+
+                    async def analyze():
+                        loop = asyncio.get_running_loop()
+                        return await domain.process_track_ingestion(
+                            str(path), False, loop, executor=None, timeout=600,
+                            save_to_db=False, write_source_metadata=False,
+                        )
+
+                    result = asyncio.run(analyze())
+                    if not result or not result.get("duration"):
+                        raise ValueError("音源の基本解析に失敗しました")
+                    if not isinstance(result.get("bpm"), (int, float)) or result.get("bpm", 0) <= 0:
+                        result["bpm"] = None
+                    saved = IngestionRepository().save_track_result(session, result, True)
+                    track = session.get(Track, saved["track_id"])
+                if not track:
+                    raise ValueError("曲を保存できませんでした")
+                stat = path.stat()
+                session.exec(text("""
+                    INSERT INTO track_media (track_id,sha256,size_bytes,mtime_ns,status,last_verified_at)
+                    VALUES (:track,:hash,:size,:mtime,'available',now())
+                    ON CONFLICT(track_id) DO UPDATE SET sha256=excluded.sha256,size_bytes=excluded.size_bytes,
+                      mtime_ns=excluded.mtime_ns,status='available',last_verified_at=now()
+                """), params={"track": track.id, "hash": identity, "size": stat.st_size, "mtime": stat.st_mtime_ns})
+                intent = session.exec(text("SELECT * FROM import_target_intents WHERE item_id=:id"), params={"id": item["id"]}).first()
+                membership = "not_required"
+                entry_id = None
+                if intent and intent._mapping["target_kind"] == "local_playlist":
+                    target_id = intent._mapping["target_id"]
+                    target = session.exec(text("SELECT id FROM setlists WHERE id=:id"), params={"id": target_id}).first()
+                    if not target:
+                        membership = "target_missing"
+                    else:
+                        previous = session.exec(text("""
+                            SELECT intent.setlist_track_id FROM import_target_intents intent
+                            JOIN import_items old_item ON old_item.id=intent.item_id
+                            JOIN import_batches old_batch ON old_batch.id=intent.batch_id
+                            WHERE intent.target_id=:target AND old_item.canonical_path=:path
+                              AND intent.state='applied' AND intent.setlist_track_id IS NOT NULL
+                              AND old_batch.id<>:batch ORDER BY old_batch.created_at DESC LIMIT 1
+                        """), params={"target": target_id, "path": str(path), "batch": batch_id}).first()
+                        if previous:
+                            entry_id, membership = int(previous[0]), "applied_existing"
+                        else:
+                            entry_id = SetlistRepository(session).insert_track(int(target_id), int(track.id), None)
+                            membership = "applied"
+                session.exec(text("""
+                    UPDATE import_items SET track_id=:track,state=:state,load_ready=true,error_code=NULL,error_message=NULL WHERE id=:id
+                """), params={"track": track.id, "state": "existing" if reused else "completed", "id": item["id"]})
+                session.exec(text("UPDATE import_target_intents SET state=:state,setlist_track_id=:entry WHERE item_id=:id"),
+                             params={"state": membership, "entry": entry_id, "id": item["id"]})
+                session.commit()
+            except Exception as exc:
+                session.rollback()
+                session.exec(text("UPDATE import_items SET state='failed',error_code='processing_failed',error_message=:error WHERE id=:id"),
+                             params={"id": item["id"], "error": str(exc)[:1000]})
+                session.commit()
+        failed = int(session.exec(text("SELECT count(*) FROM import_items WHERE batch_id=:id AND state='failed'"), params={"id": batch_id}).one()[0])
+        state = "completed_with_errors" if failed else "completed"
+        session.exec(text("UPDATE import_batches SET state=:state,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND NOT cancel_requested"),
+                     params={"id": batch_id, "state": state})
+        session.commit()

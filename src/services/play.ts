@@ -93,5 +93,5 @@ export const playService = {
   upsertHistory: (entry: Record<string, unknown>) => apiClient.put("/play/history", entry),
   history: () => apiClient.get<HistoryTrack[]>("/play/history", { limit: 200 }),
   recordings: () => apiClient.get<RecordingEntry[]>("/play/recordings", { limit: 200 }),
-  upsertRecording: (entry: Record<string, unknown>) => apiClient.put("/play/recordings", entry),
+  upsertRecording: (entry: Record<string, unknown>) => apiClient.put<{ recording_key: string; id: number }>("/play/recordings", entry),
 };

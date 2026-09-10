@@ -42,6 +42,10 @@ def create_library_engine(database_url):
 engine = create_library_engine(DATABASE_URL)
 
 db_lock = threading.RLock()
+# All request-scoped database access and long-running workflow workers share
+# this gate. Snapshot/restore can therefore establish a quiescent generation
+# instead of copying while another API request is committing.
+database_activity = threading.RLock()
 
 def init_db():
     """
@@ -94,6 +98,19 @@ def close_db():
     main.py の lifespan イベントから呼び出されます。
     """
     engine.dispose()
+
+
+def reopen_db(db_path: str | None = None):
+    """Recreate the pooled engine after an atomic restore replaces the DB file."""
+    global engine, DB_PATH, DATABASE_URL
+    with db_lock:
+        engine.dispose()
+        if db_path is not None:
+            DB_PATH = db_path
+        DATABASE_URL = f"duckdb:///{DB_PATH}"
+        engine = create_library_engine(DATABASE_URL)
+        init_raw_db(engine)
+    return engine
 
 def get_session():
     with Session(engine) as session:

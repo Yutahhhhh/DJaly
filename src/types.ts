@@ -4,7 +4,7 @@ export interface Track {
   title: string;
   artist: string;
   album: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   genre: string;
   subgenre?: string;

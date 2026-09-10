@@ -102,6 +102,8 @@ pub fn run() {
             dj_engine::midi::dj_midi_status,
             dj_engine::midi::dj_midi_send,
             dj_engine::midi::dj_midi_read,
+            dj_engine::midi::dj_midi_devices,
+            dj_engine::midi::dj_midi_select_device,
             dj_engine::midi::dj_midi_performance_config,
             dj_engine::midi::dj_jog_display_update,
             dj_engine::commands::dj_engine_status,

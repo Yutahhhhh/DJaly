@@ -3,6 +3,9 @@ import { ChevronDown, ChevronRight, Copy, Disc3, Folder, History, Library, ListM
 import { playService, type HistoryTrack, type LocalPlaylist, type LocalPlaylistTrack, type MirrorPlaylist, type MirrorSource, type RecordingEntry } from "@/services/play";
 import type { Track } from "@/types";
 import type { DeckId } from "@/types/dj-engine";
+import { DECK_IDS } from "@/types/dj-engine";
+import { djEngineClient } from "@/services/dj-engine/client";
+import { usePlayerStore } from "@/stores/playerStore";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { artworkUrl, useTrackVisuals } from "./useTrackVisuals";
@@ -11,6 +14,8 @@ import { usePagedResource } from "./usePagedResource";
 import { VirtualTrackList, type BrowserTrack } from "./VirtualTrackList";
 import { nextSort, sortTracks, type SortState } from "./track-sort";
 import { ResizeHandle } from "./ResizeHandle";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { workflowsService } from "@/services/workflows";
 import "./play-library.css";
 
 type Source = "collection" | "local" | "mirror" | "history" | "recordings";
@@ -38,6 +43,7 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const [dialogPending, setDialogPending] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const mirrorGeneration = useRef(0);
+  const importTargetRef = useRef<{ kind: "collection" | "local_playlist"; id?: number } | null>({ kind: "collection" });
 
   const collection = usePagedResource({ key: `collection:${debouncedQuery}:${sort?.field ?? ""}:${sort?.direction ?? ""}`, enabled: source === "collection", fetchPage: (offset, limit) => playService.tracksPage({ q: debouncedQuery || undefined, offset, limit, sort: sort?.field, order: sort?.direction }), itemKey: (track: Track) => track.id });
   const playlists = usePagedResource({ key: "local-playlists", fetchPage: (offset, limit) => playService.localPlaylists(limit, offset), itemKey: (item: LocalPlaylist) => item.id });
@@ -48,6 +54,54 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
 
   useEffect(() => { let live = true; void playService.sources().then((rows) => { if (live) { setSources(rows); setMirrorSource((old) => old ?? rows[0]?.id ?? null); } }).catch(() => undefined); return () => { live = false; }; }, []);
   useEffect(() => { let live = true; if (source === "history") void playService.history().then((rows) => { if (live) setHistory(rows); }); if (source === "recordings") void playService.recordings().then((rows) => { if (live) setRecordings(rows); }); return () => { live = false; }; }, [source]);
+  useEffect(() => {
+    importTargetRef.current = source === "collection" ? { kind: "collection" }
+      : source === "local" && localPlaylistId ? { kind: "local_playlist", id: localPlaylistId }
+      : null;
+  }, [source, localPlaylistId]);
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    const nodeAt = (x: number, y: number) => {
+      const scale = window.devicePixelRatio || 1;
+      return document.elementFromPoint(x / scale, y / scale) ?? document.elementFromPoint(x, y);
+    };
+    void getCurrentWebview().onDragDropEvent((event) => {
+      const payload = event.payload;
+      document.querySelectorAll("[data-native-drop-active]").forEach((node) => node.removeAttribute("data-native-drop-active"));
+      if (payload.type === "leave") return;
+      const target = nodeAt(payload.position.x, payload.position.y)?.closest<HTMLElement>("[data-import-target-kind],[data-import-reject],.dj-library-center,.dj-local-playlist");
+      if (payload.type === "enter" || payload.type === "over") {
+        target?.setAttribute("data-native-drop-active", "true");
+        return;
+      }
+      if (payload.type !== "drop") return;
+      if (!target || target.dataset.importReject || target.classList.contains("dj-library-center") && !importTargetRef.current) {
+        setNotice("この場所には取り込めません。Collectionまたはplumdeckプレイリストへドロップしてください。");
+        return;
+      }
+      const captured = target.dataset.importTargetKind === "local_playlist"
+        ? { kind: "local_playlist" as const, id: Number(target.dataset.importTargetId) }
+        : target.classList.contains("dj-local-playlist")
+          ? { kind: "local_playlist" as const, id: Number(target.dataset.importTargetId) }
+          : importTargetRef.current ?? { kind: "collection" as const };
+      if (captured.kind === "local_playlist" && !Number.isInteger(captured.id)) {
+        setNotice("追加先プレイリストを特定できませんでした");
+        return;
+      }
+      setNotice(`${payload.paths.length}件を受け付けました。バックグラウンドで解析します…`);
+      void workflowsService.createImport(payload.paths, captured, "native_file_drop").then((batch) => {
+        setNotice(`取込ジョブを開始しました（追加先: ${captured.kind === "collection" ? "Collection" : `Playlist #${captured.id}`}）`);
+        const poll = window.setInterval(() => { void workflowsService.importStatus(batch.id).then((latest) => {
+          if (!["completed", "completed_with_errors", "canceled"].includes(latest.state)) return;
+          window.clearInterval(poll);
+          collection.reload(); localTracks.reload(); playlists.reload();
+          setNotice(latest.state === "completed" ? "音源の取り込みと解析が完了しました" : `取り込み完了: ${latest.state}`);
+        }).catch(() => window.clearInterval(poll)); }, 1200);
+      }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    }).then((unlisten) => { if (disposed) unlisten(); else cleanup = unlisten; }).catch(() => undefined);
+    return () => { disposed = true; cleanup?.(); };
+  }, []);
 
   const mirrorKey = (parent: string | null, sourceId = mirrorSource) => `${sourceId ?? "none"}:${parent ?? "__root__"}`;
   const loadMirror = async (parent: string | null, append = false) => {
@@ -124,12 +178,12 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const rightPage = rightMode === "recommend" ? rightRecommend : rightSearch;
   return <section className="dj-browser" aria-label="Play library">
     <aside className="dj-library-tree"><div className="dj-tree-heading"><Library /><strong>ブラウザ</strong></div><div className="dj-tree-scroll">
-      <button className={cn("dj-tree-row", source === "collection" && "is-selected")} onClick={() => switchSource("collection")}><Library /><span>Collection</span><small>{collection.total || ""}</small></button>
+      <button data-import-target-kind="collection" className={cn("dj-tree-row", source === "collection" && "is-selected")} onClick={() => switchSource("collection")}><Library /><span>Collection</span><small>{collection.total || ""}</small></button>
       <div className="dj-tree-row dj-tree-section"><span>plumdeck PLAYLISTS · {playlists.total.toLocaleString()}</span><button title="新規プレイリスト" onClick={() => openPlaylistDialog({ kind: "create" })}><Plus /></button></div>
       <LocalPlaylistRows items={playlists.items} selectedId={source === "local" ? localPlaylistId : null} hasMore={playlists.hasMore} loading={playlists.loading} error={playlists.error} onLoadMore={playlists.loadMore} onRetry={playlists.retry} onSelect={(item) => { setLocalPlaylistId(item.id); switchSource("local"); }} onRename={(item) => openPlaylistDialog({ kind: "rename", item })} onDelete={(item) => openPlaylistDialog({ kind: "delete", item })} onDrop={addTrack} />
-      <div className="dj-tree-row dj-tree-section"><span>REKORDBOX MIRROR · READ ONLY</span></div>
+      <div data-import-reject="mirror" className="dj-tree-row dj-tree-section"><span>REKORDBOX MIRROR · READ ONLY</span></div>
       {sources.map((item) => <div key={item.id}><button className="dj-tree-row" onClick={() => { setMirrorSource(item.id); switchSource("mirror"); }}><Folder /><span>{item.name}</span><small>{item.playlist_count}</small></button>{mirrorSource === item.id && <MirrorTreeRows rows={flattenMirror(null)} expanded={expanded} selectedId={source === "mirror" ? mirrorPlaylist?.external_id : undefined} onChoose={chooseMirror} onLoad={(parent, append) => void loadMirror(parent, append)} />}</div>)}
-      <div className="dj-tree-divider" /><button className={cn("dj-tree-row", source === "history" && "is-selected")} onClick={() => switchSource("history")}><History /><span>プレイ履歴</span></button><button className={cn("dj-tree-row", source === "recordings" && "is-selected")} onClick={() => switchSource("recordings")}><Radio /><span>録音</span></button>
+      <div className="dj-tree-divider" /><button data-import-reject="history" className={cn("dj-tree-row", source === "history" && "is-selected")} onClick={() => switchSource("history")}><History /><span>プレイ履歴</span></button><button data-import-reject="recordings" className={cn("dj-tree-row", source === "recordings" && "is-selected")} onClick={() => switchSource("recordings")}><Radio /><span>録音</span></button>
     </div><div className="dj-tree-footer"><Disc3 /><strong>plumdeck</strong><span>PLAY</span></div></aside>
     <ResizeHandle variable="--d-tree" storageKey="plumdeck.width.tree" label="ブラウザ幅" min={140} max={420} />
     <div className="dj-library-center"><div className="dj-library-toolbar">{cueImportControl}<strong>{title}</strong><span className="dj-track-count">{centerTotal.toLocaleString()} 曲</span>{source === "collection" && <div className="dj-search"><Search /><input aria-label="Collectionを検索" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tracks…" /></div>}{source === "mirror" && mirrorPlaylist && <button className="dj-button" onClick={() => void copyMirror()}><Copy />plumdeckへコピー</button>}<button className={cn("dj-button", rightOpen && "is-on")} onClick={() => setRightOpen((value) => !value)}><Sparkles /></button></div>
@@ -144,11 +198,27 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
 
 function RecommendationList({ resourceKey, tracks, loading, error, hasMore, empty, onLoadMore, onRetry, onLoad }: { resourceKey: string; tracks: Track[]; loading: boolean; error: string | null; hasMore: boolean; empty: string; onLoadMore: () => void; onRetry: () => void; onLoad: (track: Track) => void }) { const ref = useRef<HTMLDivElement>(null); const [view, setView] = useState({ top: 0, height: 300 }); const row = 44; const start = Math.max(0, Math.floor(view.top / row) - 5); const end = Math.min(tracks.length, Math.ceil((view.top + view.height) / row) + 5); useEffect(() => { if (ref.current) ref.current.scrollTop = 0; setView((old) => ({ ...old, top: 0 })); }, [resourceKey]); useEffect(() => { const node = ref.current; if (!node) return; const observer = new ResizeObserver(() => setView((old) => ({ ...old, height: node.clientHeight }))); observer.observe(node); return () => observer.disconnect(); }, []); useEffect(() => { const node = ref.current; if (hasMore && !loading && node && node.scrollHeight <= node.clientHeight + row) onLoadMore(); }, [tracks.length, hasMore, loading, onLoadMore]); return <div ref={ref} className="dj-recommend-scroll" onScroll={(event) => { const node = event.currentTarget; setView({ top: node.scrollTop, height: node.clientHeight }); if (node.scrollHeight - node.scrollTop - node.clientHeight < 160) onLoadMore(); }}><div className="dj-recommend-virtual" style={{ height: tracks.length * row }}>{tracks.slice(start, end).map((track, index) => <RecommendationRow key={track.id} track={track} top={(start + index) * row} onLoad={() => onLoad(track)} />)}</div>{!tracks.length && !loading && !error && <div className="dj-library-message">{empty}</div>}<div className="dj-page-state">{loading ? <Loader2 className="animate-spin" /> : error ? <button onClick={onRetry}>再試行: {error}</button> : hasMore ? <button onClick={onLoadMore}>さらに表示</button> : null}</div></div>; }
 function RecommendationRow({ track, top, onLoad }: { track: Track; top: number; onLoad: () => void }) { const { data } = useTrackVisuals(track.id); return <div className="dj-recommend-row" style={{ transform: `translateY(${top}px)` }} draggable={Boolean(track.filepath)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-plumdeck-track", JSON.stringify(track)); }} onDoubleClick={() => track.filepath && onLoad()}><div className="dj-recommend-cover">{data?.artwork ? <img src={artworkUrl(data.artwork)} alt="" /> : <Disc3 />}</div><div className="dj-recommend-track"><strong>{track.title || "—"}</strong><span>{track.artist || "—"}</span><small>{track.bpm?.toFixed(2) || "—"} BPM <b>{track.key || "—"}</b></small></div><button disabled={!track.filepath} onClick={onLoad}>↗</button></div>; }
-function RecordingRows({ rows }: { rows: RecordingEntry[] }) { return <div className="dj-recordings">{rows.map((row) => <div key={row.id}><span title={row.filepath}>{row.filepath.split("/").pop() || row.filepath}</span><time>{formatTime(row.duration_ms)}</time><b>{row.status.toUpperCase()}</b></div>)}{!rows.length && <div className="dj-library-message">録音はまだありません</div>}</div>; }
+function RecordingRows({ rows }: { rows: RecordingEntry[] }) {
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [timeline, setTimeline] = useState<import("@/services/workflows").TimelineSegment[]>([]);
+  const audio = useRef<HTMLAudioElement>(null);
+  const open = (id: number) => { setOpenId(id); setTimeline([]); void workflowsService.timeline(id).then(setTimeline); };
+  const isolatePreview = async (element: HTMLAudioElement) => {
+    if (element.dataset.previewIsolated === "true") { delete element.dataset.previewIsolated; return; }
+    element.pause();
+    usePlayerStore.getState().pause();
+    const decks = djEngineClient.getState().snapshot?.decks;
+    await Promise.allSettled(DECK_IDS.filter((id) => decks?.[id].status === "playing").map((id) => djEngineClient.pause(id)));
+    element.dataset.previewIsolated = "true";
+    await element.play();
+  };
+  return <div className="dj-recordings">{rows.map((row) => <div key={row.id} className="!block !h-auto !min-h-9 py-1"><button className="flex w-full items-center gap-2 text-left" onClick={() => openId === row.id ? setOpenId(null) : open(row.id)}><span className="flex-1" title={row.filepath}>{row.title || row.filepath.split("/").pop() || row.filepath}</span><time>{formatTime(row.duration_ms)}</time><b>{row.status.toUpperCase()}</b></button>{openId === row.id && <div className="mt-2 space-y-2 border-t border-white/10 pt-2"><audio ref={audio} controls preload="metadata" className="h-8 w-full" src={playService.recordingAudioUrl(row.id)} onPlay={(event) => void isolatePreview(event.currentTarget)} /><div className="max-h-36 overflow-auto">{timeline.map((segment, index) => <button key={segment.id ?? index} className="flex w-full gap-2 rounded px-2 py-1 text-left hover:bg-white/10" onClick={() => { if (audio.current) { audio.current.currentTime = segment.start_ms / 1000; void isolatePreview(audio.current); } }}><time>{formatTime(segment.start_ms)}</time><span>{segment.artist_snapshot} — {segment.title_snapshot}</span><small>{segment.source}</small></button>)}{!timeline.length && <span className="text-xs text-slate-500">曲目未登録</span>}</div></div>}</div>)}{!rows.length && <div className="dj-library-message">録音はまだありません</div>}</div>;
+}
 
 function LocalPlaylistRows({ items, selectedId, hasMore, loading, error, onLoadMore, onRetry, onSelect, onRename, onDelete, onDrop }: { items: LocalPlaylist[]; selectedId: number | null; hasMore: boolean; loading: boolean; error: string | null; onLoadMore: () => void; onRetry: () => void; onSelect: (item: LocalPlaylist) => void; onRename: (item: LocalPlaylist) => void; onDelete: (item: LocalPlaylist) => void; onDrop: (track: Track, playlistId: number) => void }) {
   const ref = useRef<HTMLDivElement>(null); const [top, setTop] = useState(0); const height = 21; const viewport = 150; const start = Math.max(0, Math.floor(top / height) - 3); const end = Math.min(items.length, Math.ceil((top + viewport) / height) + 3);
   useEffect(() => { const node = ref.current; if (hasMore && !loading && node && node.scrollHeight <= node.clientHeight + height) onLoadMore(); }, [items.length, hasMore, loading, onLoadMore]);
+  useEffect(() => { ref.current?.querySelectorAll<HTMLElement>(".dj-local-playlist").forEach((node, index) => { const item = items.slice(start, end)[index]; if (item) { node.dataset.importTargetKind = "local_playlist"; node.dataset.importTargetId = String(item.id); } }); }, [items, start, end]);
   return <div ref={ref} className="dj-local-playlists-viewport" onScroll={(event) => { const node = event.currentTarget; setTop(node.scrollTop); if (node.scrollHeight - node.scrollTop - node.clientHeight < height * 5) onLoadMore(); }}><div style={{ height: items.length * height, position: "relative" }}>{items.slice(start, end).map((item, index) => <div key={item.id} className="dj-local-playlist" style={{ position: "absolute", insetInline: 0, top: (start + index) * height }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); try { onDrop(JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track, item.id); } catch { /* foreign drag */ } }}><button className={cn("dj-tree-row", selectedId === item.id && "is-selected")} onClick={() => onSelect(item)}><ListMusic /><span>{item.name}</span><small>{item.track_count}</small></button><span className="dj-playlist-actions"><button title="名前変更" onClick={() => onRename(item)}><Pencil /></button><button title="削除" onClick={() => onDelete(item)}><Trash2 /></button></span></div>)}</div>{loading && <div className="dj-tree-loading"><Loader2 className="animate-spin" /></div>}{error && <button className="dj-tree-more" onClick={onRetry}>再試行</button>}</div>;
 }
 

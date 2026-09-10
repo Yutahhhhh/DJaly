@@ -12,7 +12,7 @@ class TrackRead(SQLModel):
     subgenre: str = ""
     year: Optional[int] = None
     duration: float
-    bpm: float
+    bpm: Optional[float] = None
     
     key: str
     scale: str

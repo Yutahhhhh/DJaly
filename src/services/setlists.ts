@@ -6,6 +6,7 @@ export interface Setlist {
   name: string;
   description?: string;
   display_order: number;
+  target_duration?: number | null;
   updated_at: string;
 }
 
@@ -13,12 +14,26 @@ export interface SetlistTrack extends Track {
   setlist_track_id: number;
   position: number;
   wordplay_json?: string;
+  in_ms: number;
+  out_ms: number | null;
+  playback_rate: number;
+  extra_duration_ms: number;
+  overlap_next_ms: number;
+  revision: number;
 }
 
 // 保存用の型定義
 export interface SetlistTrackUpdateItem {
   id: number;
+  setlist_track_id?: number;
+  track_id?: number;
   wordplay_json?: string | null;
+  in_ms?: number;
+  out_ms?: number | null;
+  playback_rate?: number;
+  extra_duration_ms?: number;
+  overlap_next_ms?: number;
+  revision?: number;
 }
 
 export const setlistsService = {
@@ -69,6 +84,7 @@ export const setlistsService = {
       missing: { id: number; title?: string; artist?: string; filepath?: string }[];
     }>(`/setlists/${id}/export/validate`);
   },
+  duration: (id: number) => apiClient.get<{ planned_duration_ms: number; full_duration_ms: number; unknown_entries: number; track_count: number }>(`/setlists/${id}/duration`),
 
   // --- Deterministic recommendation ---
 

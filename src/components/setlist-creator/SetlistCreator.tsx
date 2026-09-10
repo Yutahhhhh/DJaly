@@ -147,7 +147,15 @@ export function SetlistCreator() {
         try {
           const updatePayload = validatedTracks.map((t) => ({
             id: t.id,
+            track_id: t.id,
+            setlist_track_id: t.setlist_track_id > 0 ? t.setlist_track_id : undefined,
             wordplay_json: t.wordplay_json || null,
+            in_ms: t.in_ms ?? 0,
+            out_ms: t.out_ms ?? null,
+            playback_rate: t.playback_rate ?? 1,
+            extra_duration_ms: t.extra_duration_ms ?? 0,
+            overlap_next_ms: t.overlap_next_ms ?? 0,
+            revision: t.setlist_track_id > 0 ? t.revision : undefined,
           }));
 
           // 保存実行
@@ -202,15 +210,21 @@ export function SetlistCreator() {
         over.id === "setlist-editor-droppable"
       ) {
         const track = activeData.track as Track;
-        const isAlreadyInList = tracks.some((t) => t.id === track.id);
+        const isAlreadyInList = tracks.some((t) => t.id === track.id && t.setlist_track_id < 0);
 
         if (!isAlreadyInList) {
           setTracks([
             ...tracks,
             {
               ...track,
-              setlist_track_id: 0,
+              setlist_track_id: -Date.now(),
               position: tracks.length,
+              in_ms: 0,
+              out_ms: null,
+              playback_rate: 1,
+              extra_duration_ms: 0,
+              overlap_next_ms: 0,
+              revision: 0,
             } as SetlistTrack,
           ]);
         }
@@ -223,15 +237,21 @@ export function SetlistCreator() {
         const track = activeData.track as Track;
         const overId = over.id as string;
 
-        const isAlreadyInList = tracks.some((t) => t.id === track.id);
-        const overIndex = tracks.findIndex((t) => `setlist-${t.id}` === overId);
+        const isAlreadyInList = tracks.some((t) => t.id === track.id && t.setlist_track_id < 0);
+        const overIndex = tracks.findIndex((t) => `setlist-entry-${t.setlist_track_id}` === overId);
 
         if (!isAlreadyInList) {
           const newTracks = [...tracks];
           newTracks.splice(overIndex, 0, {
             ...track,
-            setlist_track_id: 0,
+            setlist_track_id: -Date.now(),
             position: overIndex,
+            in_ms: 0,
+            out_ms: null,
+            playback_rate: 1,
+            extra_duration_ms: 0,
+            overlap_next_ms: 0,
+            revision: 0,
           } as SetlistTrack);
           setTracks(newTracks);
         } else {
@@ -248,10 +268,10 @@ export function SetlistCreator() {
       ) {
         if (active.id !== over.id) {
           const oldIndex = tracks.findIndex(
-            (t) => `setlist-${t.id}` === active.id
+            (t) => `setlist-entry-${t.setlist_track_id}` === active.id
           );
           const newIndex = tracks.findIndex(
-            (t) => `setlist-${t.id}` === over.id
+            (t) => `setlist-entry-${t.setlist_track_id}` === over.id
           );
           setTracks(arrayMove(tracks, oldIndex, newIndex));
         }
@@ -337,6 +357,11 @@ export function SetlistCreator() {
               onTrackSelect={setSelectedTrack}
               selectedTrackId={selectedTrack?.id || null}
               onDeleteWordplay={handleDeleteWordplay}
+              targetDurationSeconds={activeSetlist.target_duration}
+              onTimingChange={(index, change) => {
+                const next = tracks.map((track, trackIndex) => trackIndex === index ? { ...track, ...change } : track);
+                void commitTracksToDB(next);
+              }}
             />
             <TrackSelector
               referenceTrack={selectedTrack}
@@ -355,8 +380,14 @@ export function SetlistCreator() {
 
                   const newTrackObj = {
                     ...t,
-                    setlist_track_id: 0,
+                    setlist_track_id: -Date.now(),
                     position: insertIndex,
+                    in_ms: 0,
+                    out_ms: null,
+                    playback_rate: 1,
+                    extra_duration_ms: 0,
+                    overlap_next_ms: 0,
+                    revision: 0,
                     wordplay_json: wordplayWithContext
                       ? JSON.stringify(wordplayWithContext)
                       : null,
@@ -377,7 +408,7 @@ export function SetlistCreator() {
                 const idx = nt.findIndex((t) => t.id === startId);
                 const tsWithMeta = ts.map(
                   (t) =>
-                    ({ ...t, setlist_track_id: 0, position: 0 } as SetlistTrack)
+                    ({ ...t, setlist_track_id: -(Date.now() + t.id), position: 0, in_ms: 0, out_ms: null, playback_rate: 1, extra_duration_ms: 0, overlap_next_ms: 0, revision: 0 } as SetlistTrack)
                 );
                 nt.splice(idx !== -1 ? idx + 1 : nt.length, 0, ...tsWithMeta);
                 commitTracksToDB(nt);

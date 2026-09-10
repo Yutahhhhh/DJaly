@@ -42,6 +42,16 @@ def get_setlist_tracks(setlist_id: int, session: Session = Depends(get_session))
     service = SetlistAppService(session)
     return service.get_setlist_tracks(setlist_id)
 
+@router.get("/api/setlists/{setlist_id}/duration")
+def get_setlist_duration(setlist_id: int, session: Session = Depends(get_session)):
+    service = SetlistAppService(session)
+    if not service.repository.get_by_id(setlist_id):
+        raise HTTPException(status_code=404, detail="Setlist not found")
+    try:
+        return service.set_duration(setlist_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 @router.post("/api/setlists/{setlist_id}/tracks")
 def update_setlist_tracks(
     setlist_id: int, 
@@ -49,7 +59,10 @@ def update_setlist_tracks(
     session: Session = Depends(get_session)
 ):
     service = SetlistAppService(session)
-    success = service.update_setlist_tracks(setlist_id, track_data)
+    try:
+        success = service.update_setlist_tracks(setlist_id, track_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=404, detail="Setlist not found")
     return {"status": "success"}

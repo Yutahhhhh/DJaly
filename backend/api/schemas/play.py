@@ -85,3 +85,7 @@ class RecordingUpsert(BaseModel):
     duration_ms: int = Field(default=0, ge=0)
     status: Literal["recording", "completed", "failed"] = "recording"
     error: Optional[str] = None
+    sample_rate_hz: Optional[int] = Field(default=None, gt=0)
+    frame_count: Optional[int] = Field(default=None, ge=0)
+    timeline_quality: str = "not_recorded"
+    timeline_dropped_events: int = Field(default=0, ge=0)

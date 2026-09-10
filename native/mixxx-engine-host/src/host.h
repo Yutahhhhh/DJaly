@@ -5,6 +5,7 @@
 #include "junction/runtime.h"
 #include <QElapsedTimer>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QObject>
 #include <QTimer>
 #include <array>
@@ -30,6 +31,8 @@ private:
     static QJsonObject emptyDeck();
     void sample();
     QJsonObject sampleDeck(int index);
+    QJsonObject recordingState();
+    void sampleRecordingTimeline();
     void completed(int index, quint64 generation, QJsonObject metadata, QString error);
     std::unique_ptr<PlaybackBackend> backend_;
     std::unique_ptr<junction::Runtime> junction_;
@@ -49,4 +52,8 @@ private:
         double scratchLastPositionMs = 0;
     };
     std::array<DeckSlot, 4> slots_;
+    QJsonArray recordingTimeline_;
+    QString recordingTimelineKey_;
+    std::array<int, 4> recordingOpenSegments_{{-1, -1, -1, -1}};
+    unsigned recordingTimelineDropped_ = 0;
 };

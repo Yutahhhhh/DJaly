@@ -13,6 +13,7 @@ import { useDjEngine } from "@/hooks/useDjEngine";
 import { playService , type RecordingEntry } from "@/services/play";
 import { settingsService } from "@/services/settings";
 import { performanceMetadataService } from "@/services/performance-metadata";
+import { workflowsService } from "@/services/workflows";
 import { cuePositions, persistCue, persistLoop } from "@/services/performance-cue-metadata";
 import type { Track } from "@/types";
 import { DECK_IDS, type DeckId, type MicrophoneSettings, type RecordingState, type TrackDescriptor } from "@/types/dj-engine";
@@ -202,7 +203,12 @@ export function PlayWorkspace() {
     if (!recording?.active || !recording.path || !recording.startedAt) return;
     const key = recordingKey.current ?? `${playSession.current}:${recording.startedAt}`;
     const stopped = await client.stopRecording() as RecordingState;
-    await persist(() => playService.upsertRecording({ recording_key: key, session_id: playSession.current, filepath: stopped.path ?? recording.path!, started_at: stopped.startedAt ?? recording.startedAt!, ended_at: new Date().toISOString(), duration_ms: Math.max(recording.elapsedMs, stopped.elapsedMs), status: stopped.error ? "failed" : "completed", error: stopped.error }));
+    await persist(async () => {
+      const saved = await playService.upsertRecording({ recording_key: key, session_id: playSession.current, filepath: stopped.path ?? recording.path!, started_at: stopped.startedAt ?? recording.startedAt!, ended_at: new Date().toISOString(), duration_ms: stopped.sampleRateHz && stopped.frameCount !== undefined ? Math.floor(stopped.frameCount * 1000 / stopped.sampleRateHz) : Math.max(recording.elapsedMs, stopped.elapsedMs), status: stopped.error ? "failed" : "completed", error: stopped.error, sample_rate_hz: stopped.sampleRateHz || null, frame_count: stopped.frameCount ?? null, timeline_quality: stopped.timelineQuality ?? "not_recorded", timeline_dropped_events: stopped.timelineDroppedEvents ?? 0 });
+      if (stopped.sampleRateHz && stopped.frameCount !== undefined && stopped.timeline) {
+        await workflowsService.saveEngineTimeline(saved.id, { sample_rate_hz: stopped.sampleRateHz, frame_count: stopped.frameCount, dropped_events: stopped.timelineDroppedEvents ?? 0, segments: stopped.timeline });
+      }
+    });
     recordingKey.current = null;
     saveRuntime();
   }, [client, persist, saveRuntime]);
@@ -234,7 +240,7 @@ export function PlayWorkspace() {
     if (track.key) setTrackKeys(old => old[track.id] === track.key ? old : { ...old, [track.id]: track.key });
     cuePoints.current[deck] = 0;
     manualLoopIn.current[deck] = null;
-    const descriptor: TrackDescriptor = { musicalKey: track.key || undefined, trackId: String(track.id), path: track.filepath, durationMs: track.duration * 1000, title: track.title || undefined, artist: track.artist || undefined, bpm: track.bpm || undefined };
+    const descriptor: TrackDescriptor = { musicalKey: track.key || undefined, localTrackId: track.id, trackId: String(track.id), path: track.filepath, durationMs: track.duration * 1000, title: track.title || undefined, artist: track.artist || undefined, bpm: track.bpm || undefined };
     void run(() => deckLoadOperations.current.run(DECK_IDS.indexOf(deck), () => gridOperations.current.run(track.id, async () => {
       if (loadRequest !== deckLoadRequests.current[deck]) return;
       if (!client.getSessionId()) {

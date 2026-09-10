@@ -75,7 +75,8 @@ class SetlistRepository:
         ), params={"id": setlist_id}).one()[0])
         rows = self.session.exec(text("""
             SELECT t.*, st.id AS setlist_track_id, st.position, st.transition_note,
-                   st.wordplay_json,
+                   st.wordplay_json,st.in_ms,st.out_ms,st.playback_rate,
+                   st.extra_duration_ms,st.overlap_next_ms,st.revision,
                    (l.content IS NOT NULL AND length(trim(l.content)) > 0) AS has_lyrics
             FROM setlist_tracks st JOIN tracks t ON t.id=st.track_id
             LEFT JOIN lyrics l ON l.track_id=t.id
@@ -91,6 +92,11 @@ class SetlistRepository:
             "SELECT count(*) FROM setlist_tracks WHERE setlist_id=:id"
         ), params={"id": setlist_id}).one()[0])
         target = count if position is None else min(position, count)
+        if target > 0:
+            self.session.exec(text("""
+                UPDATE setlist_tracks SET overlap_next_ms=0,revision=revision+1
+                WHERE setlist_id=:id AND position=:previous
+            """), params={"id": setlist_id, "previous": target - 1})
         self.session.exec(text("""
             UPDATE setlist_tracks SET position=position+1
             WHERE setlist_id=:id AND position>=:position
@@ -104,6 +110,14 @@ class SetlistRepository:
         return int(row[0])
 
     def remove_track_entry(self, setlist_id: int, entry_id: int) -> bool:
+        current = self.session.exec(text("""
+            SELECT position FROM setlist_tracks WHERE setlist_id=:setlist_id AND id=:entry_id
+        """), params={"setlist_id": setlist_id, "entry_id": entry_id}).first()
+        if current is not None and int(current[0]) > 0:
+            self.session.exec(text("""
+                UPDATE setlist_tracks SET overlap_next_ms=0,revision=revision+1
+                WHERE setlist_id=:id AND position=:previous
+            """), params={"id": setlist_id, "previous": int(current[0]) - 1})
         row = self.session.exec(text("""
             DELETE FROM setlist_tracks WHERE setlist_id=:setlist_id AND id=:entry_id
             RETURNING position

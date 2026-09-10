@@ -11,7 +11,8 @@ output_dir="${1:-$repo_root/src-tauri/target/release/bundle/dmg}"
 output="$output_dir/plumdeck_${version}_Mixxx_corresponding_source.tar.gz"
 
 [[ "$(git -C "$host_root/upstream" rev-parse HEAD)" == "$mixxx_commit" ]]
-[[ -z "$(git -C "$host_root/upstream" status --porcelain)" ]]
+cmp <(git -C "$host_root/upstream" diff --binary) "$host_root/patches/recording-frame-clock.patch"
+[[ -z "$(git -C "$host_root/upstream" status --porcelain | grep '^??' || true)" ]]
 [[ "$(git -C "$host_root/build-deps/gsl" rev-parse HEAD)" == "$gsl_commit" ]]
 [[ -z "$(git -C "$host_root/build-deps/gsl" status --porcelain)" ]]
 
@@ -61,6 +62,7 @@ tar -xJf "$samplerate_archive" -C "$root"
 /usr/bin/ditto "$host_root/src" "$root/plumdeck-adapter/src"
 /usr/bin/ditto "$host_root/cmake" "$root/plumdeck-adapter/cmake"
 /usr/bin/ditto "$host_root/scripts" "$root/plumdeck-adapter/scripts"
+/usr/bin/ditto "$host_root/patches" "$root/plumdeck-adapter/patches"
 cp "$host_root/CMakeLists.txt" "$root/plumdeck-adapter/CMakeLists.txt"
 cp "$repo_root/README.md" "$root/README.md"
 cp "$host_root/dependency-versions.json" "$root/dependency-versions.json"

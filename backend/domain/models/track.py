@@ -24,7 +24,7 @@ class Track(SQLModel, table=True):
     year: Optional[int] = Field(default=None, index=True)
     
     # 解析データ
-    bpm: float
+    bpm: Optional[float] = None
     key: str = Field(default="")
     scale: str = Field(default="")
     duration: float

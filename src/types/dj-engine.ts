@@ -324,6 +324,12 @@ export interface RecordingState {
   path: string | null;
   startedAt: string | null;
   elapsedMs: number;
+  /** Authoritative count from Mixxx EngineRecord's record-tap clock. */
+  frameCount?: number;
+  sampleRateHz?: number;
+  timelineQuality?: "recording_frame_clock" | "incomplete";
+  timelineDroppedEvents?: number;
+  timeline?: Array<{ eventKey: string; deck: DeckId; loadGeneration: number; trackId: number | string; title?: string; artist?: string; startFrame: number; endFrame: number | null; source: "engine_observed" }>;
   error: string | null;
   /** このホストが実際に書き出せる形式。ビルド構成で決まる。 */
   formats?: { name: string; label: string; lossless: boolean; extension: string }[];

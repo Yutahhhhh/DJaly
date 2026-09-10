@@ -25,4 +25,10 @@ class SetlistTrack(SQLModel, table=True):
     position: int
     transition_note: Optional[str] = None
     wordplay_json: Optional[str] = None
+    in_ms: float = 0
+    out_ms: Optional[float] = None
+    playback_rate: float = 1
+    extra_duration_ms: float = 0
+    overlap_next_ms: float = 0
+    revision: int = 1
     created_at: datetime = Field(default_factory=datetime.now)

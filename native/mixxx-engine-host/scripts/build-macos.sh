@@ -16,8 +16,13 @@ fetch_pinned() {
   [[ "$(git -C "$destination" rev-parse HEAD)" == "$revision" ]] || { echo "Wrong revision: $destination" >&2; exit 1; }
   [[ -z "$(git -C "$destination" status --porcelain)" ]] || { echo "Modified dependency: $destination" >&2; exit 1; }
 }
+if [[ -d "$host_root/upstream/.git" ]] && git -C "$host_root/upstream" apply --reverse --check "$host_root/patches/recording-frame-clock.patch" 2>/dev/null; then
+  git -C "$host_root/upstream" apply --reverse "$host_root/patches/recording-frame-clock.patch" || true
+fi
 fetch_pinned https://github.com/mixxxdj/mixxx.git "$mixxx_commit" "$host_root/upstream"
 fetch_pinned https://github.com/microsoft/GSL.git "$gsl_commit" "$host_root/build-deps/gsl"
+git -C "$host_root/upstream" apply --check "$host_root/patches/recording-frame-clock.patch"
+git -C "$host_root/upstream" apply "$host_root/patches/recording-frame-clock.patch"
 bash "$host_root/scripts/build-junction-deps.sh"
 brew_prefix="$(brew --prefix)"
 protobuf_prefix="$(brew --prefix protobuf)"

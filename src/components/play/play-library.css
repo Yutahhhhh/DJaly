@@ -71,3 +71,4 @@
 /* レコメンド／検索からプレイリストへドロップできることを示す。 */
 .dj-virtual-tracks.is-drop { outline: 1px solid var(--dj-blue); outline-offset: -1px; background: #16202e; }
 .dj-vtrack-scroll:focus-visible { outline: 1px solid var(--dj-blue); outline-offset: -1px; }
+[data-native-drop-active="true"] { outline: 2px solid #4ea1ff !important; outline-offset: -2px; background-color: #173456 !important; }

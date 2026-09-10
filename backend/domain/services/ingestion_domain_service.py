@@ -60,7 +60,8 @@ class IngestionDomainService:
         executor: Optional[Executor] = None,
         timeout: float = 300.0,
         db_lock: Optional[asyncio.Lock] = None,
-        save_to_db: bool = True
+        save_to_db: bool = True,
+        write_source_metadata: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """1曲のインポート処理のメインロジック。"""
         filename = os.path.basename(filepath)
@@ -72,7 +73,7 @@ class IngestionDomainService:
                 with open(lrc_path, 'r', encoding='utf-8') as f:
                     lyrics_content = f.read()
                 print(f"DEBUG: Found .lrc file for {filename}, content length: {len(lyrics_content) if lyrics_content else 0}", flush=True)
-                if lyrics_content:
+                if lyrics_content and write_source_metadata:
                     await loop.run_in_executor(None, update_file_metadata, filepath, lyrics_content)
             except Exception as e:
                 print(f"WARNING: Failed to import .lrc file for {filename}: {e}", flush=True)

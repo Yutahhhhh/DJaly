@@ -139,13 +139,17 @@ test('the first FX command after startup is already audible', { timeout: 90000 }
     const state = await until(s => s.recording.active);
     await delay(1500);
     await command('recording.stop');
-    await until(s => !s.recording.active && !s.recording.stopping);
+    const finished = await until(s => !s.recording.active && !s.recording.stopping);
+    const observed = finished.recording.timeline.find(segment => segment.deck === 'A');
+    assert(observed, `audible deck must be present in recording timeline: ${JSON.stringify(finished.recording)}`);
+    assert.equal(observed.trackId, 42);
+    assert(observed.startFrame >= 0 && observed.endFrame > observed.startFrame && observed.endFrame <= finished.recording.frameCount);
     return readFile(state.recording.path);
   }
 
     hello = await command('session.hello');
     await until(s => s.audio.applied);
-    await command('deck.load', { deck: 'A', track: { trackId: 'A', path: audioPath, beatTimesMs: [125, 625, 1125, 1675, 2225, 2825, 3425, 4025, 4675, 5325, 6000, 6675] } });
+    await command('deck.load', { deck: 'A', track: { trackId: 'A', localTrackId: 42, title: 'Timeline fixture', artist: 'plumdeck', path: audioPath, beatTimesMs: [125, 625, 1125, 1675, 2225, 2825, 3425, 4025, 4675, 5325, 6000, 6675] } });
     await until(s => s.decks.A.track && s.decks.A.status !== 'loading');
     await command('deck.seek', { deck: 'A', positionMs: 0 });
     await command('deck.loop.set', { deck: 'A', startMs: 0, endMs: 16000 });

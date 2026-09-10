@@ -410,8 +410,10 @@ def history(limit: int = Query(100, ge=1, le=500), session: Session = Depends(ge
 @_serialize_recording_mutation
 def upsert_recording(payload: RecordingUpsert, session: Session = Depends(get_session)):
     session.exec(text("""
-        INSERT INTO recordings (recording_key,session_id,filepath,started_at,ended_at,duration_ms,status,error)
-        VALUES (:recording_key,:session_id,:filepath,:started_at,:ended_at,:duration_ms,:status,:error)
+        INSERT INTO recordings (recording_key,session_id,filepath,started_at,ended_at,duration_ms,status,error,
+          sample_rate_hz,frame_count,timeline_quality,timeline_dropped_events)
+        VALUES (:recording_key,:session_id,:filepath,:started_at,:ended_at,:duration_ms,:status,:error,
+          :sample_rate_hz,:frame_count,:timeline_quality,:timeline_dropped_events)
         ON CONFLICT (recording_key) DO UPDATE SET
           session_id=coalesce(recordings.session_id,excluded.session_id),
           filepath=CASE WHEN recordings.status IN ('completed','failed') THEN recordings.filepath
@@ -423,10 +425,15 @@ def upsert_recording(payload: RecordingUpsert, session: Session = Depends(get_se
           status=CASE WHEN recordings.status IN ('completed','failed') THEN recordings.status
                       ELSE excluded.status END,
           error=CASE WHEN recordings.status IN ('completed','failed') THEN recordings.error
-                     ELSE excluded.error END
+                     ELSE excluded.error END,
+          sample_rate_hz=coalesce(excluded.sample_rate_hz,recordings.sample_rate_hz),
+          frame_count=greatest(coalesce(recordings.frame_count,0),coalesce(excluded.frame_count,0)),
+          timeline_quality=excluded.timeline_quality,
+          timeline_dropped_events=greatest(recordings.timeline_dropped_events,excluded.timeline_dropped_events)
     """), params=payload.model_dump())
     session.commit()
-    return {"recording_key": payload.recording_key}
+    row = session.exec(text("SELECT id FROM recordings WHERE recording_key=:key"), params={"key": payload.recording_key}).one()
+    return {"recording_key": payload.recording_key, "id": int(row[0])}
 
 
 def _recording_file(session: Session, recording_id: int) -> tuple[dict, Path]:

@@ -1,4 +1,4 @@
-//! DDJ-1000 MIDI transport. All device I/O lives on one worker, never the UI
+//! Supported Pioneer MIDI transport. All device I/O lives on one worker, never the UI
 //! or CoreMIDI callback. A renewable lease releases the device after webview loss.
 use midir::{MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use serde::Serialize;
@@ -51,6 +51,7 @@ pub struct MidiEvent {
 struct CapturedPacket {generation:u64,captured_us:u64,driver_us:u64,sequence:u64,length:usize,at:Instant,bytes:[u8;1024]}
 enum Request {
     Performance(super::performance_transport::Config),
+    Device(Option<String>),
     Lease(bool),
     Send(u64, Vec<Vec<u8>>),
 }
@@ -74,9 +75,11 @@ impl MidiInbox {
     }
 }
 fn supported(name: &str) -> bool {
-    // Never open an SRT or another Pioneer device with this model's mapping.
+    // DDJ-400 uses the same documented core channel/note layout as the decoder.
+    // Never open an SRT or an unrelated Pioneer endpoint with this mapping.
     let name = name.trim().to_ascii_uppercase();
-    name == "DDJ-1000" || name.starts_with("DDJ-1000 ") && !name.contains("SRT")
+    (name == "DDJ-400" || name.starts_with("DDJ-400 ") ||
+        name == "DDJ-1000" || name.starts_with("DDJ-1000 ")) && !name.contains("SRT")
 }
 fn clear_feedback(port: &mut MidiOutputConnection) {
     for channel in 0..4 {
@@ -92,6 +95,16 @@ fn clear_feedback(port: &mut MidiOutputConnection) {
             }
         }
         let _ = port.send(&[0xb0 + channel, 2, 0]);
+    }
+}
+fn clear_supported_feedback(
+    port: &mut MidiOutputConnection,
+    device: Option<&str>,
+) {
+    // Generic MIDI profiles may point at synths or other controllers where
+    // Pioneer LED messages are real notes. Never transmit those on teardown.
+    if device.is_some_and(supported) {
+        clear_feedback(port);
     }
 }
 impl MidiController {
@@ -116,6 +129,7 @@ impl MidiController {
             let mut enabled = false;
             let mut generation = 0;
             let mut performance_config:Option<super::performance_transport::Config>=None;
+            let mut selected_device:Option<String>=None;
             let mut native:Option<super::performance_transport::Transport>=None;
             let mut next_native_attempt=Instant::now();
             loop {
@@ -125,7 +139,8 @@ impl MidiController {
                     Err(mpsc::RecvTimeoutError::Timeout) => None,
                     Err(_) => {
                         if let Some(mut port) = output.take() {
-                            clear_feedback(&mut port);
+                            let device = state.lock().unwrap().device.clone();
+                            clear_supported_feedback(&mut port, device.as_deref());
                         }
                         break;
                     }
@@ -133,6 +148,7 @@ impl MidiController {
                 if let Some(request) = request {
                     match request {
                         Request::Performance(config)=>{if performance_config.as_ref()!=Some(&config){native=None;performance_config=Some(config);next_native_attempt=Instant::now();}},
+                        Request::Device(device)=>{if selected_device!=device{selected_device=device;input.take();output.take();opened_ports=None;scan=Instant::now()-Duration::from_secs(2);}},
                         Request::Lease(value) => {
                             enabled = value;
                             lease = Instant::now();
@@ -166,7 +182,8 @@ impl MidiController {
                 if !enabled {
                     input.take();
                     if let Some(mut port) = output.take() {
-                        clear_feedback(&mut port);
+                        let device = state.lock().unwrap().device.clone();
+                        clear_supported_feedback(&mut port, device.as_deref());
                     }
                 }
                 if enabled && scan.elapsed() >= Duration::from_secs(1) {
@@ -179,27 +196,28 @@ impl MidiController {
                         let ins: Vec<_> = midi_in
                             .ports()
                             .into_iter()
-                            .filter(|p| midi_in.port_name(p).is_ok_and(|n| matches(&n)))
+                            .filter(|p| midi_in.port_name(p).is_ok_and(|n| selected_device.as_ref().map_or_else(|| matches(&n), |wanted| &n == wanted)))
                             .collect();
                         let outs: Vec<_> = midi_out
                             .ports()
                             .into_iter()
-                            .filter(|p| midi_out.port_name(p).is_ok_and(|n| matches(&n)))
+                            .filter(|p| midi_out.port_name(p).is_ok_and(|n| selected_device.as_ref().map_or_else(|| matches(&n), |wanted| &n == wanted)))
                             .collect();
-                        if ins.len() != 1 || outs.len() != 1 {
+                        if ins.len() != 1 || outs.len() > 1 {
                             input.take();
                             output.take();
                             if ins.len() > 1 || outs.len() > 1 {
                                 return Err(
-                                    "DDJ-1000が複数あります。1台だけ接続してください".into()
+                                    "対応DJコントローラーが複数あります。1台だけ接続してください".into()
                                 );
                             }
                             return Err(format!(
-                                "DDJ-1000のMIDIポート待ち（入力 {} / 出力 {}）。USB接続を再検出しています",
+                                "DDJ-1000 / DDJ-400のMIDIポート待ち（入力 {} / 出力 {}）。USB接続を再検出しています",
                                 ins.len(), outs.len()
                             ));
                         }
-                        let ports = (ins[0].clone(), outs[0].clone());
+                        let device_name = midi_in.port_name(&ins[0]).map_err(|e| e.to_string())?;
+                        let ports = (ins[0].clone(), outs.first().cloned());
                         // A quick unplug/replug may occur between scans. Names
                         // remain identical, but endpoint identities change.
                         if input.is_none() || output.is_none() || opened_ports.as_ref() != Some(&ports) {
@@ -231,24 +249,23 @@ impl MidiController {
                                     )
                                     .map_err(|e| e.to_string())?,
                             );
-                            output = Some(
-                                midi_out
-                                    .connect(&outs[0], "DDJ-1000 output")
-                                    .map_err(|e| e.to_string())?,
-                            );
+                            output = if let Some(port) = &outs.first() {
+                                Some(midi_out.connect(port, "plumdeck MIDI output").map_err(|e| e.to_string())?)
+                            } else { None };
                             opened_ports = Some(ports);
+                            state.lock().unwrap().device = Some(device_name);
                         }
                         Ok(())
                     })();
                     state.lock().unwrap().error = result.err();
                 }
-                let connected = input.is_some() && output.is_some();
+                let connected = input.is_some();
                 {
                     let mut s = state.lock().unwrap();
                     s.enabled = enabled;
                     s.connected = connected;
                     s.generation = generation;
-                    s.device = connected.then(|| "DDJ-1000".into());
+                    if !connected { s.device = None; }
                 }
                 if !connected || !enabled {native=None;}
                 else {
@@ -284,6 +301,7 @@ impl MidiController {
         Self { tx, status, inbox: None }
     }
     pub fn performance(&self,config:super::performance_transport::Config)->Result<(),String>{self.tx.try_send(Request::Performance(config)).map_err(|e|e.to_string())}
+    pub fn select_device(&self,device:Option<String>)->Result<(),String>{self.tx.try_send(Request::Device(device)).map_err(|e|e.to_string())}
     pub fn lease(&self, enabled: bool) -> Result<MidiStatus, String> {
         self.tx
             .try_send(Request::Lease(enabled))
@@ -341,6 +359,26 @@ pub fn dj_midi_read(state: State<'_, MidiController>) -> Result<Vec<MidiEvent>, 
     let result = state.inbox.as_ref().map_or_else(|| Ok(Vec::new()), MidiInbox::read);
     if result.is_err() { let _ = state.lease(false); }
     result
+}
+
+#[derive(Serialize)]
+pub struct MidiDevices { inputs: Vec<String>, outputs: Vec<String> }
+
+#[tauri::command]
+pub fn dj_midi_devices() -> Result<MidiDevices, String> {
+    let input = MidiInput::new("plumdeck MIDI inventory").map_err(|e| e.to_string())?;
+    let output = MidiOutput::new("plumdeck MIDI output inventory").map_err(|e| e.to_string())?;
+    let inputs = input.ports().iter().filter_map(|port| input.port_name(port).ok()).collect();
+    let outputs = output.ports().iter().filter_map(|port| output.port_name(port).ok()).collect();
+    Ok(MidiDevices { inputs, outputs })
+}
+
+#[tauri::command]
+pub fn dj_midi_select_device(state: State<'_, MidiController>, device: Option<String>) -> Result<(), String> {
+    if device.as_ref().is_some_and(|value| value.len() > 300 || value.trim().is_empty()) {
+        return Err("Invalid MIDI device name".into());
+    }
+    state.select_device(device)
 }
 pub fn controller(_app: AppHandle) -> MidiController {
     // Never emit from this worker: AppHandle.emit holds the webview manager
@@ -475,11 +513,12 @@ MIDIClientDispose(client)
         assert!(!state.enabled && !state.connected);
     }
     #[test]
-    fn exact_model_only() {
+    fn supported_pioneer_models_only() {
         assert!(supported("DDJ-1000"));
+        assert!(supported("DDJ-400"));
+        assert!(supported("DDJ-400 MIDI"));
         assert!(!supported("DDJ-1000SRT"));
         assert!(!supported("DDJ-1000 SRT"));
-        assert!(!supported("DDJ-400"));
     }
     #[test]
     fn feedback_is_bounded_channel_data() {

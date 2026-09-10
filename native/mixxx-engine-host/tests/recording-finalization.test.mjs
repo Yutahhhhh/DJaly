@@ -65,6 +65,11 @@ test('recording completion finalizes WAV and rapid start/stop cannot stick', { t
     const finished = await until(state => !state.recording.active && !state.recording.stopping);
     assert.equal(finished.recording.path, stopping.path);
     assert.equal(finished.recording.elapsedMs, stopping.elapsedMs, 'Elapsed freezes at stop request');
+    assert.equal(finished.recording.sampleRateHz, 44100, 'Recorder exposes its real sample rate');
+    assert(finished.recording.frameCount > 0, 'Recorder exposes frames written by the recording callback');
+    assert.equal(finished.recording.elapsedMs, Math.floor(finished.recording.frameCount * 1000 / finished.recording.sampleRateHz), 'Elapsed is derived from recorder frames');
+    assert.equal(finished.recording.timelineQuality, 'recording_frame_clock');
+    assert(Array.isArray(finished.recording.timeline), 'Recording timeline is part of the final state');
     await assertReadable(finished.recording);
     await delay(1150); // Existing filename collision cooldown, after readability check.
     const starting = command('recording.start');

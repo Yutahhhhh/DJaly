@@ -18,6 +18,7 @@ from api.routers import (
     performance_metadata,
     play,
     waveform_detail,
+    workflows,
 )
 from mcp_server.server import mcp_app_holder
 from mcp_server.instance import mcp as mcp_server
@@ -82,6 +83,7 @@ app.include_router(performance_metadata.router)
 app.include_router(play.router)
 app.include_router(waveform_detail.router)
 app.include_router(assist.router)
+app.include_router(workflows.router)
 
 # MCP サーバーを /mcp にマウント (外部の MCP クライアントが Streamable HTTP で接続する)
 app.mount("/", mcp_app_holder)

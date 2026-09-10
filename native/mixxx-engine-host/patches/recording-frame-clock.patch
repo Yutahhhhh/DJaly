@@ -1,0 +1,107 @@
+diff --git a/src/engine/sidechain/enginerecord.cpp b/src/engine/sidechain/enginerecord.cpp
+index 585a31e..43ea212 100644
+--- a/src/engine/sidechain/enginerecord.cpp
++++ b/src/engine/sidechain/enginerecord.cpp
+@@ -146,6 +146,7 @@ void EngineRecord::process(const CSAMPLE* pBuffer, const int iBufferSize) {
+             // clean frames counting and get current sample rate.
+             m_frames = 0;
+             m_sampleRate = mixxx::audio::SampleRate::fromDouble(m_sampleRateControl.get());
++            m_recordingSampleRateHz.store(static_cast<quint32>(m_sampleRate), std::memory_order_relaxed);
+             m_recordedDuration = 0;
+ 
+             if (m_bCueIsEnabled) {
+@@ -213,7 +214,7 @@ void EngineRecord::process(const CSAMPLE* pBuffer, const int iBufferSize) {
+         // update frames counting and recorded duration (seconds)
+         m_frames += iBufferSize / 2;
+         unsigned long lastDuration = m_recordedDuration;
+-        m_recordedDuration = m_frames / m_sampleRate;
++        m_recordedDuration = m_frames.load(std::memory_order_relaxed) / m_sampleRate;
+ 
+         // gets recorded duration and emit signal that will be used
+         // by RecordingManager to update the label besides start/stop button
+diff --git a/src/engine/sidechain/enginerecord.h b/src/engine/sidechain/enginerecord.h
+index 662a7b2..aff2dee 100644
+--- a/src/engine/sidechain/enginerecord.h
++++ b/src/engine/sidechain/enginerecord.h
+@@ -2,6 +2,7 @@
+ 
+ #include <QDataStream>
+ #include <QFile>
++#include <atomic>
+ 
+ #include "audio/types.h"
+ #include "control/pollingcontrolproxy.h"
+@@ -30,6 +31,8 @@ class EngineRecord : public QObject, public EncoderCallback, public SideChainWor
+     void seek(int pos) override;
+     // gets stream length
+     int filelen()  override;
++    quint64 framesRecorded() const { return m_frames.load(std::memory_order_relaxed); }
++    quint32 recordingSampleRateHz() const { return m_recordingSampleRateHz.load(std::memory_order_relaxed); }
+ 
+     // creates or opens an audio file
+     bool openFile();
+@@ -74,7 +77,8 @@ class EngineRecord : public QObject, public EncoderCallback, public SideChainWor
+ 
+     PollingControlProxy m_sampleRateControl;
+     ControlProxy* m_pRecReady;
+-    quint64 m_frames;
++    std::atomic<quint64> m_frames{0};
++    std::atomic<quint32> m_recordingSampleRateHz{0};
+     mixxx::audio::SampleRate m_sampleRate;
+     quint64 m_recordedDuration;
+     QString getRecordedDurationStr();
+diff --git a/src/recording/recordingmanager.cpp b/src/recording/recordingmanager.cpp
+index 1483ace..9b54ac6 100644
+--- a/src/recording/recordingmanager.cpp
++++ b/src/recording/recordingmanager.cpp
+@@ -45,6 +45,7 @@ RecordingManager::RecordingManager(UserSettingsPointer pConfig, EngineMixer* pEn
+     EngineSideChain* pSidechain = pEngine->getSideChain();
+     if (pSidechain) {
+         EngineRecord* pEngineRecord = new EngineRecord(m_pConfig);
++        m_pEngineRecord = pEngineRecord;
+         connect(pEngineRecord,
+                 &EngineRecord::isRecording,
+                 this,
+@@ -61,6 +62,14 @@ RecordingManager::RecordingManager(UserSettingsPointer pConfig, EngineMixer* pEn
+     }
+ }
+ 
++quint64 RecordingManager::recordingFrames() const {
++    return m_pEngineRecord ? m_pEngineRecord->framesRecorded() : 0;
++}
++
++quint32 RecordingManager::recordingSampleRateHz() const {
++    return m_pEngineRecord ? m_pEngineRecord->recordingSampleRateHz() : 0;
++}
++
+ QString RecordingManager::formatDateTimeForFilename(const QDateTime& dateTime) const {
+     // Use a format based on ISO 8601. Windows does not support colons in
+     // filenames so we can't use them anywhere.
+diff --git a/src/recording/recordingmanager.h b/src/recording/recordingmanager.h
+index 918396e..73a8558 100644
+--- a/src/recording/recordingmanager.h
++++ b/src/recording/recordingmanager.h
+@@ -11,6 +11,7 @@ class EngineMixer;
+ class ControlPushButton;
+ class ControlProxy;
+ class QDateTime;
++class EngineRecord;
+ 
+ /// The RecordingManager is a central class and manages
+ /// the recording feature of Mixxx.
+@@ -37,6 +38,8 @@ class RecordingManager : public QObject {
+     // Returns the currently recording file
+     const QString& getRecordingFile() const;
+     const QString& getRecordingLocation() const;
++    quint64 recordingFrames() const;
++    quint32 recordingSampleRateHz() const;
+ 
+   signals:
+     // Emits the cumulative number of bytes currently recorded.
+@@ -86,5 +89,6 @@ class RecordingManager : public QObject {
+     int m_iNumberSplits;
+     unsigned int m_secondsRecorded;
+     unsigned int m_secondsRecordedSplit;
++    EngineRecord* m_pEngineRecord{nullptr};
+     QString getRecordedDurationStr(unsigned int duration);
+ };

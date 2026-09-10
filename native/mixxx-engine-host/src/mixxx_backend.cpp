@@ -826,13 +826,19 @@ public:
     }
 
     QJsonObject recording() const override {
+        const quint64 frames = recorder_ ? recorder_->recordingFrames() : 0;
+        const quint32 sampleRate = recorder_ ? recorder_->recordingSampleRateHz() : 0;
+        const qint64 frameElapsedMs = sampleRate ? static_cast<qint64>((frames * 1000ULL) / sampleRate) : 0;
         return {{"active", recordingActive_},
                 {"stopping", recordingStopping_},
                 {"format", settings_->getValueString(ConfigKey(RECORDING_PREF_KEY, "Encoding"))},
                 {"formats", recordingFormats()},
                 {"path", recordingPath_.isEmpty() ? QJsonValue::Null : QJsonValue(recordingPath_)},
                 {"startedAt", recordingStartedAt_.isEmpty() ? QJsonValue::Null : QJsonValue(recordingStartedAt_)},
-                {"elapsedMs", recordingActive_ && !recordingStopping_ && recordingTimer_.isValid() ? recordingTimer_.elapsed() : recordedElapsedMs_},
+                {"elapsedMs", frameElapsedMs > 0 ? frameElapsedMs : recordedElapsedMs_},
+                {"sampleRateHz", static_cast<qint64>(sampleRate)},
+                {"frameCount", static_cast<qint64>(frames)},
+                {"timelineQuality", "recording_frame_clock"},
                 {"error", recordingError_.isEmpty() ? QJsonValue::Null : QJsonValue(recordingError_)}};
     }
     void startRecording() override {

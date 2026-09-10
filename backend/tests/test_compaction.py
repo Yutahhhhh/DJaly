@@ -75,7 +75,7 @@ def test_migrates_v3_to_v4_and_preserves_data(tmp_path):
 
     con = duckdb.connect(db)
     try:
-        assert con.execute("SELECT value FROM schema_info WHERE key='version'").fetchone()[0] == "4"
+        assert con.execute("SELECT value FROM schema_info WHERE key='version'").fetchone()[0] == "5"
         cols = {
             r[0]
             for r in con.execute(
@@ -104,7 +104,7 @@ def test_migrates_v3_to_v4_and_preserves_data(tmp_path):
         con.close()
 
     # 旧ファイルは .bak として残る
-    assert len(glob.glob(db + ".bak-v4-*")) == 1
+    assert len(glob.glob(db + ".bak-v5-*")) == 1
 
 
 def test_second_run_is_noop(tmp_path):
@@ -113,13 +113,13 @@ def test_second_run_is_noop(tmp_path):
 
     ensure_healthy_db(db)
     size_after_migrate = os.path.getsize(db)
-    bak_count = len(glob.glob(db + ".bak-v4-*"))
+    bak_count = len(glob.glob(db + ".bak-v5-*"))
 
     ensure_healthy_db(db)  # 2 回目
 
     assert os.path.getsize(db) == size_after_migrate
     assert not os.path.exists(db + ".rebuild")
-    assert len(glob.glob(db + ".bak-v4-*")) == bak_count
+    assert len(glob.glob(db + ".bak-v5-*")) == bak_count
 
 
 def test_missing_file_is_noop(tmp_path):
@@ -154,11 +154,11 @@ def test_compacts_bloated_v4_file(tmp_path, monkeypatch):
 
     con = duckdb.connect(db)
     try:
-        assert con.execute("SELECT value FROM schema_info WHERE key='version'").fetchone()[0] == "4"
+        assert con.execute("SELECT value FROM schema_info WHERE key='version'").fetchone()[0] == "5"
         assert con.execute("SELECT count(*) FROM tracks").fetchone()[0] == 3
         assert con.execute(
             "SELECT octet_length(waveform_u8) FROM track_analyses WHERE track_id=1"
         ).fetchone()[0] == 256
     finally:
         con.close()
-    assert len(glob.glob(db + ".bak-v4-*")) == 1
+    assert len(glob.glob(db + ".bak-v5-*")) == 1
