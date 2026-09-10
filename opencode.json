@@ -5,6 +5,14 @@
       "type": "remote",
       "url": "http://127.0.0.1:48123/mcp",
       "enabled": true
+    },
+    "rekordbox": {
+      "type": "local",
+      "command": ["{env:REKORDBOX_MCP_COMMAND}", "--mode", "readonly"],
+      "enabled": true,
+      "environment": {
+        "REKORDBOX_DB_PATH": "{env:REKORDBOX_DB_PATH}"
+      }
     }
   }
 }
