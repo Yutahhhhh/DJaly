@@ -4,9 +4,13 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-distribution.yml'
-      - 'native/mixxx-engine-host/scripts/build-windows.py'
-      - 'backend/domain/services/analysis/portable.py'
-      - 'src-tauri/tauri.windows.conf.json'
+      - 'native/**'
+      - 'backend/**'
+      - 'src-tauri/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
   workflow_call:
 
@@ -38,7 +42,7 @@ jobs:
             native/mixxx-engine-host/build-deps
             native/mixxx-engine-host/upstream
             native/mixxx-engine-host/build-upstream
-          key: windows-native-${{ hashFiles('native/mixxx-engine-host/scripts/build-windows.py', 'native/mixxx-engine-host/cmake/**') }}
+          key: windows-native-${{ hashFiles('native/mixxx-engine-host/scripts/*.py', 'native/mixxx-engine-host/cmake/**', 'native/mixxx-engine-host/src/**') }}
           restore-keys: windows-native-
       - run: python -m pip install cmake ninja
       - name: Build and test real native engine
@@ -60,7 +64,7 @@ jobs:
   backend:
     concurrency:
       group: windows-backend-build-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -101,7 +105,7 @@ jobs:
   installer:
     concurrency:
       group: windows-installer-build-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     needs: [native, backend]
     runs-on: windows-2022
     timeout-minutes: 45

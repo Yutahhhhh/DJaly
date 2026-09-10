@@ -215,3 +215,7 @@ JCTではSoundTouch 2.4.1、RubberBand 4.0.0、libdatachannel、libnice、Opus�
 - [Mixxxのソース](https://github.com/mixxxdj/mixxx/tree/2.5.6)
 
 RustのシミュレーターはMixxxコードを含まず、依存バージョンは `native/dj-engine-host/Cargo.lock` で固定しています。
+
+Release workflowはmacOS／Windowsのビルドと検証が両方成功した後に、インストーラーと署名付き `latest.json` を公開します。更新用のGitHub Actions Secretsには `TAURI_SIGNING_PRIVATE_KEY` と、鍵にパスワードがある場合は `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` を登録します。秘密鍵は既存の `tauri.conf.json` の公開鍵と対になるものを使い、利用者の環境へ配りません。不一致・未設定・タグとアプリバージョンの不一致は公開前にエラーにします。macOSの更新アーカイブはネストした音声エンジンの最終署名処理後に作ります。
+
+自動更新のURLは一般利用者が認証なしで取得できるHTTPS配布先である必要があります。非公開リポジトリのまま配布する場合は、公開の配布先を用意して `plugins.updater.endpoints` と Actions Variable `PLUMDECK_RELEASE_DOWNLOAD_BASE`（末尾は `/releases/download` 相当）を設定し、生成された配布物を同じURLへ配置してください。AppleのDeveloper ID署名・公証、およびWindowsの発行元署名に使う証明書は、更新ファイルの署名鍵とは別の発行者設定です。

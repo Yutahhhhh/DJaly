@@ -148,6 +148,19 @@ def main():
     shutil.copytree(extra / "share", stage / "licenses/junction", dirs_exist_ok=True)
     shutil.copytree(prefix / "share", stage / "licenses/mixxx-dependencies", dirs_exist_ok=True)
     shutil.copy2(upstream / "LICENSE", stage / "LICENSE-Mixxx")
+    # These libraries are built outside the Mixxx/vcpkg prefixes. Retain their
+    # notices as well, including libdatachannel's bundled dependencies.
+    for name, source in (("SoundTouch", st / "source"), ("RubberBand", rb / "source"),
+                         ("libdatachannel", ldc)):
+        for notice in source.rglob("*"):
+            relative = notice.relative_to(source)
+            if any(part.startswith(("build", "install", ".git")) for part in relative.parts):
+                continue
+            if notice.is_file() and notice.name.lower().startswith(("license", "copying", "copyright", "notice")):
+                destination = stage / "licenses" / name / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(notice, destination)
+    shutil.copy2(ROOT / "dependency-versions.json", stage / "dependency-versions.json")
     os.environ["PATH"] = str(stage) + os.pathsep + os.environ["PATH"]
     run("ctest", "--test-dir", ROOT / "build-seam", "--output-on-failure")
     run("node", ROOT / "scripts/smoke-bundle.mjs", stage / "plumdeck-mixxx-engine-host.exe")

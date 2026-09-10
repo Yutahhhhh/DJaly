@@ -459,6 +459,7 @@ def _probe_recording_formats(executable: str) -> tuple[str, ...]:
     # Cache successful probes only, allowing a failed first launch to retry.
     probe = subprocess.run(
         [executable, "-hide_banner", "-encoders"], capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
         timeout=180, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     words = set(probe.stdout.split())
@@ -511,7 +512,7 @@ def _converted_recording(path: Path, target: Path, export_format: str) -> Path:
         "-c:a", str(details["encoder"]), str(temporary),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
             message = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "変換結果が空です"
             raise HTTPException(422, f"録音を {export_format.upper()} に変換できません: {message}")

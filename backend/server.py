@@ -13,6 +13,12 @@ for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMU
 # PyInstaller for multiprocessing support (Windows/macOS)
 multiprocessing.freeze_support()
 
+# The desktop reads UTF-8 from redirected pipes. Windows' legacy ANSI code
+# page cannot encode Japanese profile/music paths in startup messages.
+for stream in (sys.stdout, sys.stderr):
+    if stream is not None and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--diagnose-analysis"]:
         from analysis_diagnostic import run

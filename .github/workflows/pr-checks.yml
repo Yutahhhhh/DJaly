@@ -39,6 +39,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Verify signed release artifacts and incomplete-release rejection
+        run: python scripts/test-release-artifacts.py
       - name: MIDI and audio recovery regression tests
         run: node --experimental-strip-types --test src/services/midi/generic-midi.test.mjs src/services/dj-engine/audio-ready.test.mjs src/lib/path-breadcrumbs.test.mjs
 
