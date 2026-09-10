@@ -1,16 +1,8 @@
 name: Windows distribution validation
 
+# Heavy Windows packaging validation. Not a per-PR gate (pr-checks.yml covers
+# that); run it on demand or from the release workflow.
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/windows-distribution.yml'
-      - 'native/**'
-      - 'backend/**'
-      - 'src-tauri/**'
-      - 'scripts/**'
-      - 'src/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
   workflow_dispatch:
   workflow_call:
 
