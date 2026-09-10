@@ -1,5 +1,6 @@
 name: Release
 
+# Smoke-test change: this PR intentionally exercises the complete release build without publishing.
 on:
   push:
     tags:
