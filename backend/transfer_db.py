@@ -21,8 +21,7 @@ def migrate_data(from_db_path: str, to_db_path: str):
     旧DB (from_db_path) から新DB (to_db_path) へデータを移行する。
     """
     if not os.path.exists(from_db_path):
-        print(f"Error: Source database not found at {from_db_path}")
-        return
+        raise FileNotFoundError(from_db_path)
 
     print(f"Starting migration...")
     print(f"Source: {from_db_path}")
@@ -33,7 +32,9 @@ def migrate_data(from_db_path: str, to_db_path: str):
 
     try:
         # 1. 旧DBをマウント（読み取り専用）
-        conn.execute(f"ATTACH '{from_db_path}' AS source_db (READ_ONLY);")
+        quoted_source = from_db_path.replace("'", "''")
+        conn.execute(f"ATTACH '{quoted_source}' AS source_db (READ_ONLY);")
+        conn.execute("BEGIN TRANSACTION")
 
         # 2. 移行対象のテーブルリスト
         tables = [
@@ -99,11 +100,15 @@ def migrate_data(from_db_path: str, to_db_path: str):
             except Exception as seq_e:
                 print(f"    Warning: Could not sync sequence {seq}: {seq_e}")
 
+        conn.execute("COMMIT")
         print("\nMigration completed successfully!")
         print("You can now swap the database files.")
 
     except Exception as e:
         print(f"\nMigration failed: {e}")
+        # Closing the connection rolls back the transaction; callers must see
+        # the failure instead of reporting a partially restored library as done.
+        raise
     finally:
         conn.close()
 

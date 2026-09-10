@@ -82,7 +82,7 @@ pub struct AssistState;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl AssistState {
     pub fn snapshot(&self) -> AssistSnapshot {
-        AssistSnapshot::unsupported("デッキ読み取りは macOS のみ対応しています")
+        AssistSnapshot::unsupported("デッキ読み取りは macOS と Windows に対応しています")
     }
 
     pub fn request_permission(&self) -> bool {

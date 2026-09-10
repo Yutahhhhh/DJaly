@@ -59,6 +59,20 @@ try {
         case 'engine-build': await engineBuild(); break;
         case 'engine-stage': await engineStage(); break;
         case 'app-build': await appBuild(); break;
+        case 'backend-tool':
+            requireVenv();
+            await run(venv, [join(root, 'scripts/maintenance.py'), ...process.argv.slice(3)]);
+            break;
+        case 'backend-test':
+            requireVenv();
+            await run(venv, ['-m', 'pytest', 'backend/tests', ...process.argv.slice(3)]);
+            break;
+        case 'junction-test': {
+            const executable = join(host, win ? 'build-seam/junction-core-tests.exe' : 'build-junction/junction-core-tests');
+            await run(executable, process.argv.slice(3), { env: { ...process.env, JUNCTION_AUDIO_DEVICE_TEST: '1' } });
+            break;
+        }
+        case 'pre-release':
         case 'package': {
             requireVenv();
             await run(venv, ['-m', 'PyInstaller', '--clean', '--noconfirm', 'plumdeck-server.spec'], { cwd: join(root, 'backend') });
@@ -66,6 +80,9 @@ try {
             mkdirSync(join(root, 'src-tauri/bin'), { recursive: true });
             copyFileSync(join(root, `backend/dist/plumdeck-server${win ? '.exe' : ''}`), join(root, `src-tauri/bin/plumdeck-server-${triple}${win ? '.exe' : ''}`));
             await engineBuild(); await engineStage(); await appBuild();
+            if (process.argv[2] === 'pre-release') {
+                await run(venv, [join(root, 'scripts/smoke-backend.py'), join(root, `src-tauri/bin/plumdeck-server-${triple}${win ? '.exe' : ''}`)]);
+            }
             break;
         }
         case 'release': {
