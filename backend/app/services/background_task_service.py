@@ -1,5 +1,6 @@
 import asyncio
 import time
+import infra.database.connection as db_connection
 from typing import List, Dict, Any, Optional, Callable
 from fastapi import WebSocket
 
@@ -49,12 +50,13 @@ class BackgroundTaskService:
         Starts a background task.
         :param task_coroutine: A coroutine object (e.g. self._run_something())
         """
-        if self.is_running:
-            return False
-
-        self.is_running = True
-        self.current_task = asyncio.create_task(self._task_wrapper(task_coroutine))
-        return True
+        with db_connection._lease_lock:
+            if self.is_running or db_connection._maintenance_owner is not None:
+                task_coroutine.close()
+                return False
+            self.is_running = True
+            self.current_task = asyncio.create_task(self._task_wrapper(task_coroutine))
+            return True
 
     async def cancel_task(self):
         if self.current_task:

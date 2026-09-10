@@ -237,10 +237,16 @@ void Host::sampleRecordingTimeline() {
                 channel["gain"].toDouble() * channel["trim"].toDouble(1.0) * crossGain > 0.0001 &&
                 slots_[index].state["track"].isObject();
         int& open = recordingOpenSegments_[index];
+        if (open >= 0 && (!contributing || recordingTimeline_[open].toObject()["loadGeneration"].toDouble() != static_cast<double>(slots_[index].generation))) {
+            auto segment = recordingTimeline_[open].toObject();
+            segment["endFrame"] = frame;
+            recordingTimeline_[open] = segment;
+            open = -1;
+        }
         if (contributing && open < 0) {
             if (recordingTimeline_.size() >= 10000) { ++recordingTimelineDropped_; continue; }
             const auto track = slots_[index].state["track"].toObject();
-            QJsonObject segment{{"eventKey", QString("%1:%2:%3").arg(key, deckNames[index]).arg(slots_[index].generation)},
+            QJsonObject segment{{"eventKey", QString("%1:%2:%3:%4").arg(key, deckNames[index]).arg(slots_[index].generation).arg(recordingTimeline_.size())},
                     {"deck", deckNames[index]}, {"loadGeneration", static_cast<qint64>(slots_[index].generation)},
                     {"trackId", track["localTrackId"].isDouble() ? track["localTrackId"] : track["trackId"]},
                     {"title", track["title"]}, {"artist", track["artist"]},
@@ -261,7 +267,8 @@ QJsonObject Host::recordingState() {
     auto state = backend_->recording();
     state["timeline"] = recordingTimeline_;
     state["timelineDroppedEvents"] = static_cast<int>(recordingTimelineDropped_);
-    if (recordingTimelineDropped_) state["timelineQuality"] = "incomplete";
+    // The recorder frame count is exact; contribution edges are sampled.
+    state["timelineQuality"] = recordingTimelineDropped_ ? "incomplete" : "engine_sampled";
     return state;
 }
 void Host::line(const QByteArray& bytes) {
@@ -352,6 +359,15 @@ void Host::line(const QByteArray& bytes) {
     if (op == "audio.config.set") {
         if (!backend_->available()) { error(cmd, "unsupported_operation", backend_->problem()); return; }
         const auto params = cmd["params"].toObject();
+        if (params.size() == 1 && params["outputRouting"].isObject()) {
+            const auto route = params["outputRouting"].toObject();
+            if (route.size() != 2 || !route.contains("masterChannels") || !route.contains("pflChannels")) {
+                error(cmd, "invalid_params", "Expected masterChannels and pflChannels"); return;
+            }
+            const auto failure = backend_->configureOutputRouting(route);
+            if (!failure.isEmpty()) { error(cmd, "invalid_params", failure); return; }
+            ++rev_; result(cmd, backend_->audio()); event("audio.config", backend_->audio()); return;
+        }
         if (params.size() != 1 || !params["microphone"].isObject()) { error(cmd, "invalid_params", "Expected {microphone:{...}}; apply output changes by restarting from Audio Settings"); return; }
         const auto mic = params["microphone"].toObject();
         const QSet<QString> fields = {"deviceId", "channel", "enabled", "gain", "duckingEnabled", "duckingStrength"};

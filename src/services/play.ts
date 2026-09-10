@@ -46,6 +46,7 @@ export interface HistoryTrack extends Partial<Track> {
 }
 
 export interface RecordingEntry {
+  revision: number;
   id: number;
   recording_key: string;
   session_id: string | null;

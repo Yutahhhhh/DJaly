@@ -148,7 +148,7 @@ impl MidiController {
                 if let Some(request) = request {
                     match request {
                         Request::Performance(config)=>{if performance_config.as_ref()!=Some(&config){native=None;performance_config=Some(config);next_native_attempt=Instant::now();}},
-                        Request::Device(device)=>{if selected_device!=device{selected_device=device;input.take();output.take();opened_ports=None;scan=Instant::now()-Duration::from_secs(2);}},
+                        Request::Device(device)=>{native=None;performance_config=None;if selected_device!=device{selected_device=device;input.take();output.take();opened_ports=None;scan=Instant::now()-Duration::from_secs(2);}},
                         Request::Lease(value) => {
                             enabled = value;
                             lease = Instant::now();
@@ -220,7 +220,7 @@ impl MidiController {
                         let ports = (ins[0].clone(), outs.first().cloned());
                         // A quick unplug/replug may occur between scans. Names
                         // remain identical, but endpoint identities change.
-                        if input.is_none() || output.is_none() || opened_ports.as_ref() != Some(&ports) {
+                        if input.is_none() || (!outs.is_empty() && output.is_none()) || opened_ports.as_ref() != Some(&ports) {
                             input.take();
                             output.take();
                             generation += 1;
@@ -267,7 +267,7 @@ impl MidiController {
                     s.generation = generation;
                     if !connected { s.device = None; }
                 }
-                if !connected || !enabled {native=None;}
+                if !connected || !enabled || !state.lock().unwrap().device.as_ref().is_some_and(|name| name.to_uppercase().starts_with("DDJ-1000")) {native=None;}
                 else {
                     if let Some(transport)=native.as_mut(){if transport.poll().is_err(){native=None;next_native_attempt=Instant::now()+Duration::from_secs(1);}}
                     if native.is_none()&&Instant::now()>=next_native_attempt {

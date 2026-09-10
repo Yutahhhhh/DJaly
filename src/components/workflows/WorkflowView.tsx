@@ -1,13 +1,17 @@
+import { VersionEditor, RecordingEditor, AudioPresetSummary, PlaylistSelect } from "./WorkflowEditors";
+import { djEngineClient } from "@/services/dj-engine/client";
+import { junctionState } from "@/services/junction/state";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { ArchiveRestore, Cable, CopyCheck, FileAudio, FolderSync, HardDrive, Layers3, Upload } from "lucide-react";
+import { ArchiveRestore, Cable, CopyCheck, FolderSync, HardDrive, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getErrorDetail } from "@/services/api-client";
-import { workflowsService, type AudioPreset, type ControllerProfile, type ImportBatch, type RepairPlan, type UsbDevice, type UsbExport, type VersionGroup } from "@/services/workflows";
+import { workflowsService, type ControllerProfile, type ImportBatch, type RepairPlan, type UsbDevice, type UsbExport } from "@/services/workflows";
 import { invoke } from "@tauri-apps/api/core";
 
 const parseIds = (value: string) => value.split(/[\s,]+/).map(Number).filter((id) => Number.isInteger(id) && id > 0);
@@ -65,15 +69,7 @@ function MediaPanel({ run }: { run: Runner }) {
   </Shell>;
 }
 
-function VersionPanel({ run }: { run: Runner }) {
-  const [ids, setIds] = useState(""); const [name, setName] = useState(""); const [lookup, setLookup] = useState(""); const [group, setGroup] = useState<VersionGroup | null>(null); const [entry, setEntry] = useState(""); const [replacement, setReplacement] = useState(""); const [entryRevision, setEntryRevision] = useState("1");
-  return <Shell icon={<Layers3 />} title="同じ曲の別バージョン" description="Original / Clean / Intro / Extendedなどを1グループにまとめます。音源ファイル自体は変更しません。">
-    <div className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="グループ名（任意）"/><Input value={ids} onChange={(e) => setIds(e.target.value)} placeholder="曲IDを2件以上: 12, 34"/><Button onClick={() => void run(() => workflowsService.createVersionGroup(parseIds(ids), name || undefined), setGroup)}>作成</Button></div>
-    <div className="flex gap-2"><Input value={lookup} onChange={(e) => setLookup(e.target.value)} placeholder="曲IDからグループを表示"/><Button variant="outline" onClick={() => void run(() => workflowsService.versionsForTrack(Number(lookup)), (value) => setGroup(value))}>検索</Button></div>
-    {group && <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs">{pretty(group)}</pre>}
-    <div className="border-t pt-3"><p className="mb-2 text-xs text-muted-foreground">セット内の指定した登場だけを別版へ差し替えます。</p><div className="grid gap-2 md:grid-cols-4"><Input value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="setlist entry ID"/><Input value={replacement} onChange={(e) => setReplacement(e.target.value)} placeholder="差替先の曲ID"/><Input value={entryRevision} onChange={(e) => setEntryRevision(e.target.value)} placeholder="entry revision"/><Button onClick={() => void run(() => workflowsService.swapSetlistVersion(Number(entry), Number(replacement), Number(entryRevision)))}>この登場だけ差替</Button></div></div>
-  </Shell>;
-}
+function VersionPanel({ run }: { run: Runner }) { return <VersionEditor run={run}/>; }
 
 function BackupPanel({ run }: { run: Runner }) {
   const [media, setMedia] = useState(false); const [recordings, setRecordings] = useState(false); const [restorePath, setRestorePath] = useState(""); const [inspection, setInspection] = useState<Record<string, unknown> | null>(null);
@@ -82,18 +78,21 @@ function BackupPanel({ run }: { run: Runner }) {
   return <Shell icon={<ArchiveRestore />} title="完全バックアップと復元" description="DB、解析ジョブ、UI設定をmanifestとSHA-256付きで保存します。必要に応じて音源・録音も含められます。">
     <label className="flex items-center gap-2"><Checkbox checked={media} onCheckedChange={(v) => setMedia(v === true)}/>音源を含める</label><label className="flex items-center gap-2"><Checkbox checked={recordings} onCheckedChange={(v) => setRecordings(v === true)}/>録音を含める</label>
     <div className="flex gap-2"><Button onClick={() => void create()}>バックアップを作成</Button><Button variant="outline" onClick={() => void choose()}>復元ファイルを検査</Button></div>
-    {inspection && <><pre className="max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{pretty(inspection)}</pre><Button variant="destructive" onClick={() => { if (confirm("現在のplumdeckデータを置き換えます。続けますか？")) void run(() => workflowsService.restoreBackup(restorePath), (result) => { Object.keys(localStorage).filter((key) => key === "vite-ui-theme" || key.startsWith("plumdeck.")).forEach((key) => localStorage.removeItem(key)); Object.entries(result.ui_settings).forEach(([key,value]) => localStorage.setItem(key,value)); window.location.reload(); }); }}>検査済みバックアップへ復元</Button></>}
+    {inspection && <><pre className="max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{pretty(inspection)}</pre><Button variant="destructive" onClick={() => { if (confirm("現在のplumdeckデータを置き換えます。続けますか？")) void run(async () => {
+      if (junctionState.active()) throw new Error("Junctionを終了してから復元してください");
+      const status = await djEngineClient.status();
+      if (status.running) {
+        if (!djEngineClient.getSessionId()) await djEngineClient.connect();
+        const snapshot = await djEngineClient.refreshSnapshot();
+        if (snapshot.recording?.active || snapshot.recording?.stopping) throw new Error("録音を停止して保存が完了してから復元してください");
+        await djEngineClient.stop();
+      }
+      return workflowsService.restoreBackup(restorePath);
+    }, (result) => { Object.keys(localStorage).filter((key) => key === "vite-ui-theme" || key.startsWith("plumdeck.")).forEach((key) => localStorage.removeItem(key)); Object.entries(result.ui_settings).forEach(([key,value]) => localStorage.setItem(key,value)); window.location.reload(); }); }}>検査済みバックアップへ復元</Button></>}
   </Shell>;
 }
 
-function AudioPresetPanel({ run }: { run: Runner }) {
-  const [rows, setRows] = useState<AudioPreset[]>([]); const [name, setName] = useState(""); const [config, setConfig] = useState('{"output_device":"","master":{"device_id":"default","channels":[0,1]},"cue":null,"buffer_size":256,"sample_rate":44100}');
-  const load = () => void workflowsService.audioPresets().then(setRows); useEffect(load, []);
-  return <Shell icon={<FileAudio />} title="音声ルーティングプリセット" description="Master/CueのデバイスIDとチャンネル、サンプルレート、バッファーを名前付きで保存します。適用前の再確認にも使えます。">
-    <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="プリセット名"/><textarea className="min-h-32 w-full rounded border bg-background p-2 font-mono text-xs" value={config} onChange={(e) => setConfig(e.target.value)}/><Button onClick={() => void run(() => workflowsService.saveAudioPreset(name, JSON.parse(config)), load)}>保存</Button>
-    {rows.map((row) => <div key={row.id} className="flex items-center gap-2 rounded border p-2 text-sm"><b className="flex-1">{row.name}</b><Button size="sm" variant="outline" onClick={() => setConfig(JSON.stringify(row.config, null, 2))}>読み込む</Button><Button size="sm" variant="destructive" onClick={() => void run(() => workflowsService.deleteAudioPreset(row.id), load)}>削除</Button></div>)}
-  </Shell>;
-}
+function AudioPresetPanel({ run }: { run: Runner }) { return <AudioPresetSummary run={run}/>; }
 
 function ControllerPanel({ run }: { run: Runner }) {
   const [rows, setRows] = useState<ControllerProfile[]>([]); const [json, setJson] = useState(""); const [devices, setDevices] = useState<string[]>([]); const [device, setDevice] = useState(() => localStorage.getItem("plumdeck.midi.device") ?? ""); const [learnAction, setLearnAction] = useState("deck.play"); const [learnDeck, setLearnDeck] = useState("A"); const load = () => void workflowsService.controllerProfiles().then(setRows); useEffect(() => { load(); void invoke<{inputs:string[]}>("dj_midi_devices").then((value) => setDevices(value.inputs)).catch(() => undefined); }, []);
@@ -115,7 +114,7 @@ function ControllerPanel({ run }: { run: Runner }) {
           if (!kind) continue;
           const profile = (() => { try { return JSON.parse(json); } catch { return {schemaVersion:1,adapterId:"generic-midi",name:`${device} mapping`,bindings:[]}; } })();
           profile.schemaVersion = 1; profile.adapterId = "generic-midi"; profile.name ||= `${device} mapping`; profile.bindings ||= [];
-          profile.bindings.push({id:crypto.randomUUID(),input:{kind,channel,number:kind === "pitchbend" ? 0 : message[1]},encoding:kind === "note" ? "button" : "absolute",actionId:learnAction,deck:learnAction === "mixer.crossfader" || learnAction.startsWith("library.") ? undefined : learnDeck,trigger:kind === "note" ? "hold" : undefined});
+          profile.bindings.push({id:crypto.randomUUID(),input:{kind,channel,number:kind === "pitchbend" ? 0 : message[1]},encoding:kind === "note" ? "button" : "absolute",actionId:learnAction,deck:learnAction === "mixer.crossfader" || learnAction === "library.browse" ? undefined : learnDeck,trigger:kind === "note" ? "hold" : undefined});
           setJson(pretty(profile)); return profile;
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -132,20 +131,20 @@ function ControllerPanel({ run }: { run: Runner }) {
 }
 
 function UsbPanel({ run }: { run: Runner }) {
-  const [setlistId, setSetlistId] = useState(""); const [rows, setRows] = useState<UsbExport[]>([]); const [devices, setDevices] = useState<UsbDevice[]>([]); const load = () => { void workflowsService.usbHandoffs().then(setRows); void workflowsService.usbDevices().then(setDevices); }; useEffect(load, []);
+  const [setlistId, setSetlistId] = useState(""); const [deviceId, setDeviceId] = useState(""); const [rows, setRows] = useState<UsbExport[]>([]); const [devices, setDevices] = useState<UsbDevice[]>([]); const load = () => { void workflowsService.usbHandoffs().then(setRows); void workflowsService.usbDevices().then(setDevices); }; useEffect(load, []);
   return <Shell icon={<HardDrive />} title="Rekordbox経由USB引き渡し" description="セットリストを固定スナップショット化し、Rekordbox XMLとmanifestを生成します。plumdeckが直接Pioneer USBデータベースを書くことはありません。">
-    <div className="flex gap-2"><Input value={setlistId} onChange={(e) => setSetlistId(e.target.value)} placeholder="セットリストID"/><Button onClick={() => void run(() => workflowsService.createUsbHandoff(Number(setlistId)), load)}>引き渡しを作成</Button></div>
+    <div className="flex gap-2"><PlaylistSelect value={setlistId} onChange={setSetlistId}/><Button onClick={() => void run(() => workflowsService.createUsbHandoff(Number(setlistId), deviceId || undefined), load)}>引き渡しを作成</Button></div>
+    <select aria-label="対象USB" className="h-9 w-full rounded border bg-background px-2 text-sm" value={deviceId} onChange={e => setDeviceId(e.target.value)}><option value="">対象USBを選択（後で指定する場合は空欄）</option>{devices.map(device => <option key={device.id} value={device.id}>{device.label}</option>)}</select>
     <div className="space-y-2">{devices.map((device) => <div key={device.id} className="flex items-center gap-2 rounded border p-2 text-sm"><HardDrive className="size-4"/><b className="flex-1">{device.label}</b><span>{device.filesystem} · {device.read_only ? "読取専用" : "書込可"}</span><Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.ejectUsb(device.id), load)}>安全に取り外す</Button></div>)}<Button size="sm" variant="ghost" onClick={load}>USBを再検出</Button></div>
-    {rows.map((row) => <div key={row.id} className="rounded border p-3 text-sm"><div className="flex gap-2"><b className="flex-1">Setlist #{row.setlist_id}</b><span>{row.state}</span></div>{row.stale && <p className="text-destructive">作成後にセットまたは音源が変わりました。更新版を新規作成してください。</p>}<div className="select-text break-all text-xs text-muted-foreground">{row.handoff_path}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.verifyUsbHandoff(row.id, { level: "user_rekordbox_check", checked_at: new Date().toISOString(), checks: ["rekordboxでプレイリスト・曲順・CUE・gridを確認"] }), load)}>Rekordbox確認を記録</Button><Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.duplicateUsbHandoff(row.id), load)}>同じsnapshotを予備USBへ</Button></div></div>)}
+    {rows.map((row) => <div key={row.id} className="rounded border p-3 text-sm"><div className="flex gap-2"><b className="flex-1">Setlist #{row.setlist_id}</b><span>{row.state}</span></div>{row.stale && <p className="text-destructive">作成後にセットまたは音源が変わりました。更新版を新規作成してください。</p>}<Button size="sm" variant="outline" onClick={() => void run(() => openPath(row.handoff_path))}>XMLのあるフォルダを開く</Button><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.verifyUsbHandoff(row.id, { level: "user_rekordbox_check", checked_at: new Date().toISOString(), checks: ["rekordboxでプレイリスト・曲順・CUE・gridを確認"] }), load)}>Rekordbox確認を記録</Button><Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.duplicateUsbHandoff(row.id, deviceId || undefined), load)}>同じsnapshotを予備USBへ</Button></div></div>)}
   </Shell>;
 }
 
 function RecordingPanel({ run }: { run: Runner }) {
-  const [id, setId] = useState(""); const [revision, setRevision] = useState("1"); const [segments, setSegments] = useState("[]"); const [path, setPath] = useState(""); const [title, setTitle] = useState("");
+  const [path, setPath] = useState(""); const [title, setTitle] = useState("");
   const choose = async () => { const selected = await open({multiple:false, filters:[{name:"Audio",extensions:["wav","wave","flac","aif","aiff","mp3","ogg","oga"]}]}); if(typeof selected === "string") setPath(selected); };
   return <Shell icon={<CopyCheck />} title="録音タイムライン" description="録音に曲目、版、開始・終了時刻を付け、テキスト曲目表にできます。外部録音も登録できます。">
-    <div className="flex gap-2"><Input value={id} onChange={(e) => setId(e.target.value)} placeholder="録音ID"/><Input value={revision} onChange={(e) => setRevision(e.target.value)} placeholder="revision"/><Button variant="outline" onClick={() => void run(() => workflowsService.timeline(Number(id)), (value) => setSegments(pretty(value)))}>読込</Button><a className="inline-flex items-center rounded border px-3 text-sm" href={workflowsService.tracklistTextUrl(Number(id))} target="_blank">曲目表</a></div>
-    <textarea className="min-h-48 w-full rounded border bg-background p-2 font-mono text-xs" value={segments} onChange={(e) => setSegments(e.target.value)}/><Button onClick={() => void run(() => workflowsService.replaceTimeline(Number(id), Number(revision), JSON.parse(segments)))}>手動タイムラインを保存</Button>
+    <RecordingEditor run={run}/>
     <div className="border-t pt-3"><div className="grid gap-2 md:grid-cols-2"><Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="外部録音ファイル"/><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="タイトル"/></div><p className="mt-2 text-xs text-muted-foreground">長さは音声ファイルから検証して登録します。</p><div className="mt-2 flex gap-2"><Button variant="outline" onClick={() => void choose()}>ファイルを選択</Button><Button onClick={() => void run(() => workflowsService.registerExternalRecording({filepath:path,title,artist:""}))}>外部録音を登録</Button></div></div>
   </Shell>;
 }
@@ -154,7 +153,7 @@ function ImportPanel({ run }: { run: Runner }) {
   const [paths, setPaths] = useState<string[]>([]); const [playlist, setPlaylist] = useState(""); const [rows, setRows] = useState<ImportBatch[]>([]); const load = () => void workflowsService.imports().then(setRows); useEffect(load, []);
   const choose = async () => { const selected = await open({multiple:true, directory:false, filters:[{name:"Audio",extensions:["mp3","wav","flac","aiff","m4a","ogg"]}]}); setPaths(typeof selected === "string" ? [selected] : selected ?? []); };
   return <Shell icon={<Upload />} title="Play中の安全な音源取り込み" description="音源またはフォルダをCollection / plumdeckプレイリストへ取り込みます。元ファイルは変更せず、重複はパスとSHA-256で判定します。">
-    <div className="flex gap-2"><Button variant="outline" onClick={() => void choose()}>音源を選択</Button><Input value={playlist} onChange={(e) => setPlaylist(e.target.value)} placeholder="追加先プレイリストID（空欄=Collection）"/><Button disabled={!paths.length} onClick={() => void run(() => workflowsService.createImport(paths, playlist ? {kind:"local_playlist",id:Number(playlist)} : {kind:"collection"}), load)}>取り込み開始</Button></div><div className="text-xs text-muted-foreground">{paths.length ? `${paths.length}件を選択` : "未選択"}</div>
+    <div className="flex gap-2"><Button variant="outline" onClick={() => void choose()}>音源を選択</Button><PlaylistSelect value={playlist} onChange={setPlaylist} empty="Collection"/><Button disabled={!paths.length} onClick={() => void run(() => workflowsService.createImport(paths, playlist ? {kind:"local_playlist",id:Number(playlist)} : {kind:"collection"}), load)}>取り込み開始</Button></div><div className="text-xs text-muted-foreground">{paths.length ? `${paths.length}件を選択` : "未選択"}</div>
     {rows.map((row) => <div key={row.id} className="rounded border p-2 text-sm"><div className="flex gap-2"><b className="flex-1">{row.id}</b><span>{row.state}</span></div><div>{row.succeeded_items}/{row.total_items} 成功 · {row.failed_items} 失敗 · {row.skipped_items} スキップ</div>{["failed","completed_with_errors","canceled","paused"].includes(row.state) && <Button size="sm" variant="outline" onClick={() => void run(() => workflowsService.controlImport(row.id, row.state === "paused" ? "resume" : "retry"), load)}>再開/再試行</Button>}</div>)}
   </Shell>;
 }

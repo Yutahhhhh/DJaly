@@ -428,7 +428,7 @@ def upsert_recording(payload: RecordingUpsert, session: Session = Depends(get_se
                      ELSE excluded.error END,
           sample_rate_hz=coalesce(excluded.sample_rate_hz,recordings.sample_rate_hz),
           frame_count=greatest(coalesce(recordings.frame_count,0),coalesce(excluded.frame_count,0)),
-          timeline_quality=excluded.timeline_quality,
+          timeline_quality=CASE WHEN excluded.timeline_quality='not_recorded' THEN recordings.timeline_quality ELSE excluded.timeline_quality END,
           timeline_dropped_events=greatest(recordings.timeline_dropped_events,excluded.timeline_dropped_events)
     """), params=payload.model_dump())
     session.commit()

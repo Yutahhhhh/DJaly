@@ -85,7 +85,7 @@ class UsbDuplicateRequest(BaseModel):
 
 
 class UsbVerifyRequest(BaseModel):
-    level: Literal["automated_file_check", "automated_library_check", "user_rekordbox_check", "user_hardware_check"]
+    level: Literal["user_rekordbox_check", "user_hardware_check"]
     model: str | None = None
     firmware: str | None = None
     checked_at: str | None = None

@@ -87,7 +87,7 @@ class SetlistRepository:
         return {"items": items, "total": total, "limit": limit, "offset": offset,
                 "has_more": offset + len(items) < total}
 
-    def insert_track(self, setlist_id: int, track_id: int, position: Optional[int]) -> int:
+    def insert_track(self, setlist_id: int, track_id: int, position: Optional[int], *, commit: bool = True) -> int:
         count = int(self.session.exec(text(
             "SELECT count(*) FROM setlist_tracks WHERE setlist_id=:id"
         ), params={"id": setlist_id}).one()[0])
@@ -106,7 +106,8 @@ class SetlistRepository:
             VALUES (:setlist_id,:track_id,:position) RETURNING id
         """), params={"setlist_id": setlist_id, "track_id": track_id, "position": target}).one()
         self.session.exec(text("UPDATE setlists SET updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": setlist_id})
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return int(row[0])
 
     def remove_track_entry(self, setlist_id: int, entry_id: int) -> bool:

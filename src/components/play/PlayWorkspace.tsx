@@ -1,3 +1,4 @@
+import { ensureAudioReady, OUTPUT_ROUTING_KEY, parseOutputRouting, type OutputRouting } from "@/services/dj-engine/audio-ready";
 import { localTrackId } from '@/services/junction/asset-resolver';
 import { deckRealtimeStore } from '@/services/dj-engine/deck-realtime-store';
 import { junctionLeaseKey } from '@/services/junction/state';
@@ -247,16 +248,15 @@ export function PlayWorkspace() {
         if (!status?.running) await start(outputDevice || undefined, recordingDir || undefined);
         if (!client.getSessionId()) await connect();
       }
-      if (!client.getState().snapshot?.audio.applied) {
-        for (let attempt = 0; attempt < 30; attempt++) {
-          const current = await client.refreshSnapshot();
-          if (current.audio.applied) break;
-          await new Promise((resolve) => window.setTimeout(resolve, 100));
+      try {
+        const audio = await ensureAudioReady(client, outputDevice || undefined, recordingDir || undefined);
+        const saved = parseOutputRouting(localStorage.getItem(OUTPUT_ROUTING_KEY));
+        if (saved && saved.deviceId === audio.deviceId && (JSON.stringify(saved.routing.masterChannels) !== JSON.stringify(audio.masterChannels) || JSON.stringify(saved.routing.pflChannels) !== JSON.stringify(audio.pflChannels))) {
+          await client.setOutputRouting(saved.routing);
         }
-        if (!client.getState().snapshot?.audio.applied) {
-          setAudioSettingsOpen(true);
-          throw new Error("音声出力を開けません。オーディオ設定でスピーカーまたは出力デバイスを選んでください。");
-        }
+      } catch (cause) {
+        setAudioSettingsOpen(true);
+        throw cause;
       }
       try {
         const metadata = await performanceMetadataService.get(track.id);
@@ -456,7 +456,10 @@ export function PlayWorkspace() {
     if (!recording.active && previous?.active && recording.path && previous.startedAt) {
       const key = recordingKey.current ?? `${playSession.current}:${previous.startedAt}`;
       const failed = Boolean(recording.error);
-      void persist(() => playService.upsertRecording({ recording_key: key, session_id: playSession.current, filepath: recording.path!, started_at: previous.startedAt!, ended_at: new Date().toISOString(), duration_ms: recording.elapsedMs, status: failed ? "failed" : "completed", error: recording.error }))
+      void persist(async () => {
+        const saved = await playService.upsertRecording({ recording_key: key, session_id: playSession.current, filepath: recording.path!, started_at: previous.startedAt!, ended_at: new Date().toISOString(), duration_ms: recording.elapsedMs, status: failed ? "failed" : "completed", error: recording.error, sample_rate_hz: recording.sampleRateHz, frame_count: recording.frameCount, timeline_quality: recording.timelineQuality ?? "not_recorded", timeline_dropped_events: recording.timelineDroppedEvents ?? 0 });
+        if (recording.sampleRateHz && recording.frameCount !== undefined && recording.timeline) await workflowsService.saveEngineTimeline(saved.id, { sample_rate_hz: recording.sampleRateHz, frame_count: recording.frameCount, dropped_events: recording.timelineDroppedEvents ?? 0, segments: recording.timeline });
+      })
         .then(async () => {
           // 保存した行を引き当ててから、聴いて名前を付けてもらう。
           if (failed || exiting.current) return;
@@ -524,11 +527,11 @@ export function PlayWorkspace() {
     return () => window.removeEventListener("keydown", onKey);
   }, [activeDeck, seekRelative, togglePlay, visibleDecks]);
 
-  const applyAudioOutput = async (device: string, microphone?: MicrophoneSettings) => {
+  const applyAudioOutput = async (device: string, microphone?: MicrophoneSettings, routing?: OutputRouting) => {
     if (junctionState.active()) throw new Error("Junction中の配信先はセッション設定から変更してください。");
     applyingAudio.current = true;
     try {
-      if (device !== outputDevice || !client.getState().snapshot?.audio.applied) {
+      if (device !== outputDevice || !client.getState().snapshot?.audio.applied || (routing && (JSON.stringify(routing.masterChannels) !== JSON.stringify(client.getState().snapshot?.audio.masterChannels) || JSON.stringify(routing.pflChannels) !== JSON.stringify(client.getState().snapshot?.audio.pflChannels)))) {
         if (snapshotRef.current?.recording?.active) await finalizeRecording();
         await client.stop();
         await Promise.allSettled(DECK_IDS.map(deck => finalizeHistory(deck, "audio_output_changed")));
@@ -544,6 +547,10 @@ export function PlayWorkspace() {
         setOutputDevice(device);
         localStorage.setItem("plumdeck.djOutputDevice", device);
         if (recordingFormat.trim()) await client.setRecordingFormat(recordingFormat.trim());
+      }
+      if (routing) {
+        const applied = await client.setOutputRouting(routing);
+        localStorage.setItem(OUTPUT_ROUTING_KEY, JSON.stringify({ deviceId: applied.deviceId, routing }));
       }
       microphoneRestoredSession.current = client.getSessionId();
       if (microphone) {

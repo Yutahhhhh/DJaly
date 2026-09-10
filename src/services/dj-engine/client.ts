@@ -570,6 +570,12 @@ export class DjEngineClient {
     return this.send(DJ_ENGINE_OPS.audioDevicesList, {});
   }
 
+  async setOutputRouting(outputRouting: import("./audio-ready").OutputRouting): Promise<AudioConfig> {
+    const config = await this.send(DJ_ENGINE_OPS.audioConfigSet, { outputRouting }) as AudioConfig;
+    await this.refreshSnapshot();
+    return config;
+  }
+
   async setMicrophone(microphone: Partial<MicrophoneSettings>): Promise<AudioConfig> {
     const config = await this.send(DJ_ENGINE_OPS.audioConfigSet, microphoneCommandParams(microphone)) as AudioConfig;
     await this.refreshSnapshot();

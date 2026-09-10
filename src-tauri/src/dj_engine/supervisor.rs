@@ -190,6 +190,7 @@ impl EngineSupervisor {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        command.env_remove("PLUMDECK_MIXXX_OUTPUT_DEVICE");
         if let Some(output_device) = output_device {
             command.env("PLUMDECK_MIXXX_OUTPUT_DEVICE", output_device);
         }

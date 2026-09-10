@@ -3,6 +3,8 @@ from sqlalchemy.pool import QueuePool
 from sqlalchemy import event
 import os
 import threading
+import sys
+from contextlib import contextmanager
 from config import settings
 from infra.database.schema import init_raw_db
 from infra.database.compaction import ensure_healthy_db
@@ -12,6 +14,34 @@ DB_PATH = settings.DB_PATH
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 DATABASE_URL = f"duckdb:///{DB_PATH}"
+
+# Track actual pooled leases: FastAPI dependency enter/exit can run on
+# different threads, so a thread-owned RLock around yield is not safe.
+_lease_lock = threading.RLock()
+_lease_count = 0
+_maintenance_owner = None
+
+
+@contextmanager
+def exclusive_database():
+    global _maintenance_owner
+    with _lease_lock:
+        if _maintenance_owner is not None or _lease_count:
+            raise ValueError("データベースを使用中です。処理の完了後に再試行してください")
+        for module_name, instance_name in (
+            ("app.services.analysis_job_service", "analysis_job_service"),
+            ("app.services.ingestion_app_service", "ingestion_app_service"),
+        ):
+            service = getattr(sys.modules.get(module_name), instance_name, None)
+            if service is not None and service.is_running:
+                raise ValueError("解析・取り込みを停止してからバックアップ／復元してください")
+        _maintenance_owner = threading.get_ident()
+    try:
+        yield
+    finally:
+        with _lease_lock:
+            _maintenance_owner = None
+
 
 # エンジン初期化 (設定を固定)
 connect_args = {'config': {'worker_threads': 4, 'access_mode': 'READ_WRITE'}}
@@ -33,8 +63,32 @@ def create_library_engine(database_url):
     def serialized_connect(dialect, record, args, kwargs):
         # QueuePool can create its initial connections from several threads.
         # Serialize that lifecycle step, not SQL execution or audio inference.
-        with open_lock:
-            return dialect.connect(*args, **kwargs)
+        global _lease_count
+        with _lease_lock, open_lock:
+            if _maintenance_owner is not None and _maintenance_owner != threading.get_ident():
+                raise ValueError("バックアップ／復元中です。完了後に再試行してください")
+            connection = dialect.connect(*args, **kwargs)
+            # Count creation too: a newly opened handle exists before checkout.
+            _lease_count += 1
+            record.info["library_lease"] = True
+            return connection
+
+    @event.listens_for(db_engine, "checkout")
+    def checkout(connection, record, proxy):
+        global _lease_count
+        with _lease_lock:
+            if _maintenance_owner is not None and _maintenance_owner != threading.get_ident():
+                raise ValueError("バックアップ／復元中です。完了後に再試行してください")
+            if not record.info.get("library_lease"):
+                _lease_count += 1
+                record.info["library_lease"] = True
+
+    @event.listens_for(db_engine, "checkin")
+    def checkin(connection, record):
+        global _lease_count
+        with _lease_lock:
+            if record.info.pop("library_lease", False):
+                _lease_count -= 1
 
     return db_engine
 
@@ -42,9 +96,8 @@ def create_library_engine(database_url):
 engine = create_library_engine(DATABASE_URL)
 
 db_lock = threading.RLock()
-# All request-scoped database access and long-running workflow workers share
-# this gate. Snapshot/restore can therefore establish a quiescent generation
-# instead of copying while another API request is committing.
+# Workflow workers and SQLite queue operations share this gate. Pooled
+# request connections are tracked separately by exclusive_database().
 database_activity = threading.RLock()
 
 def init_db():
@@ -58,6 +111,9 @@ def init_db():
         try:
             # 0. SQLAlchemy エンジンが接続する前に、スキーマ移行(v4: BLOB化)や
             #    肥大ファイルのコンパクションが必要ならファイルを再構築する。
+            from pathlib import Path
+            from infra.database.restore_recovery import recover_pending_restore
+            recover_pending_restore(Path(DB_PATH))
             ensure_healthy_db(DB_PATH)
 
             # 1. Raw SQL によるテーブル作成 + マイグレーション実行
@@ -108,7 +164,10 @@ def reopen_db(db_path: str | None = None):
         if db_path is not None:
             DB_PATH = db_path
         DATABASE_URL = f"duckdb:///{DB_PATH}"
-        engine = create_library_engine(DATABASE_URL)
+        # Keep the engine object used by already imported repositories. dispose()
+        # replaces its pool; replacing the object leaves stale engine references.
+        if str(engine.url) != DATABASE_URL:
+            engine = create_library_engine(DATABASE_URL)
         init_raw_db(engine)
     return engine
 
