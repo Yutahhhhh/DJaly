@@ -674,6 +674,7 @@ export function PlayWorkspace() {
   // Lanes accept the same drag payload as the decks, so a row can be dropped on
   // whichever waveform the eye is already on.
   const lane = (id: DeckId, layout: WaveformLayout) => <div key={id}
+    data-deck={id}
     className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"), laneDrop === id && "dj-lane--drop")}
     style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}
     onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setLaneDrop(id); } }}
