@@ -21,7 +21,7 @@ jobs:
   native:
     concurrency:
       group: windows-packages-${{ github.ref }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -43,8 +43,10 @@ jobs:
             native/mixxx-engine-host/upstream
             native/mixxx-engine-host/build-upstream
             native/mixxx-engine-host/stage/PlumdeckMixxxHost
-          key: windows-native-${{ hashFiles('native/mixxx-engine-host/scripts/*.py', 'native/mixxx-engine-host/cmake/**', 'native/mixxx-engine-host/src/**') }}
-          restore-keys: windows-native-
+          key: windows-native-stage-v2-${{ hashFiles('native/mixxx-engine-host/scripts/*.py', 'native/mixxx-engine-host/cmake/**', 'native/mixxx-engine-host/src/**') }}
+          restore-keys: |
+            windows-native-stage-v2-
+            windows-native-
       - run: python -m pip install cmake ninja
         if: steps.native-cache.outputs.cache-hit != 'true'
       - name: Build and test real native engine
@@ -79,7 +81,7 @@ jobs:
   backend:
     concurrency:
       group: windows-backend-build-${{ github.ref }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -145,7 +147,7 @@ jobs:
   installer:
     concurrency:
       group: windows-installer-build-${{ github.ref }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     needs: [native, backend]
     runs-on: windows-2022
     timeout-minutes: 60
