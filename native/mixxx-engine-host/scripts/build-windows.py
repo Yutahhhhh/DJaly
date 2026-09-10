@@ -42,7 +42,7 @@ def download(url, destination, digest=None):
 
 def configure(source, build, *options):
     run("cmake", "-S", source, "-B", build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_CXX_FLAGS=/utf-8 /DNOMINMAX", *options)
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_CXX_FLAGS=/utf-8 /DNOMINMAX /EHsc", *options)
 
 
 def build(directory, *targets):

@@ -19,7 +19,7 @@ with tarfile.open(archive) as source:
   if not item.isfile():continue
   assert '..' not in relative.parts
   data=source.extractfile(item).read()
-  key=str(relative)
+  key=relative.as_posix()
   names=hooks.get(key,[])
   if key=='src/RubberBandStretcher.cpp':names=['RubberBandStretcher::Impl']
   if key=='src/common/Resampler.cpp':names=['D_SRC']

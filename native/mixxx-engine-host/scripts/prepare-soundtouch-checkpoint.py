@@ -17,10 +17,10 @@ with tarfile.open(archive) as source:
             continue
         assert '..' not in relative.parts
         data = source.extractfile(item).read()
-        if str(relative) in hooks:
+        if relative.as_posix() in hooks:
             import re
             text = data.decode()
-            name = hooks[str(relative)]
+            name = hooks[relative.as_posix()]
             pattern = rf'(class {name}\s*:[^{{]+\{{)'
             text, count = re.subn(pattern, r'\1\n    friend class ::junction::st::Access;', text, count=1)
             assert count == 1, name
