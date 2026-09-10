@@ -1,4 +1,4 @@
-"""Native Windows analysis: packaged FFmpeg, librosa and the same MusiCNN graph.
+"""Native Windows analysis: packaged FFmpeg, librosa and MusiCNN via ONNX Runtime.
 
 No WSL, Python installation or model download is required on the user's PC.
 """
@@ -30,8 +30,8 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         self.librosa = librosa
         self.rhythm_extractor = self._rhythm
         self.key_extractor = self._key
-        self.embedding_algo = True  # Graph is loaded only when embedding is requested.
-        self._tf_session = None
+        self.embedding_algo = True  # The model is loaded only when embedding is requested.
+        self._embedding_session = None
 
     def _load_audio(self, filepath):
         converter = find_ffmpeg()
@@ -83,27 +83,24 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         return audio[start:start+count]
 
     def _extract_embedding(self, audio):
-        if self._tf_session is None:
-            import tensorflow as tf
+        if self._embedding_session is None:
+            import onnxruntime as ort
             root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
-            model = root / "models" / "msd-musicnn-1.pb"
-            graph_def = tf.compat.v1.GraphDef()
-            graph_def.ParseFromString(model.read_bytes())
-            graph = tf.Graph()
-            with graph.as_default():
-                tf.import_graph_def(graph_def, name="")
-            self._tf_session = tf.compat.v1.Session(graph=graph, config=tf.compat.v1.ConfigProto(
-                intra_op_parallelism_threads=1, inter_op_parallelism_threads=1, device_count={"GPU":0}))
-            self._tf_input = graph.get_tensor_by_name("model/Placeholder:0")
-            self._tf_output = graph.get_tensor_by_name("model/dense/BiasAdd:0")
-            self._tf_training = graph.get_tensor_by_name("model/Placeholder_1:0")
+            model = root / "models" / "msd-musicnn-1.onnx"
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = 1
+            options.inter_op_num_threads = 1
+            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            self._embedding_session = ort.InferenceSession(
+                str(model), sess_options=options, providers=["CPUExecutionProvider"])
         section = self._extract_loudest_section(audio, 60)
         section = self.librosa.resample(section, orig_sr=constants.SAMPLE_RATE, target_sr=16000)
         bands = musicnn_bands(section)
         if len(bands) < 187:
             bands = np.pad(bands, ((0,187-len(bands)),(0,0)), mode="wrap")
         patches = np.stack([bands[i:i+187] for i in range(0,len(bands)-186,93)])
-        predictions = self._tf_session.run(self._tf_output, {self._tf_input:patches, self._tf_training:False})
+        predictions = self._embedding_session.run(
+            ["embeddings"], {"melspectrogram": patches})[0]
         vector = np.mean(predictions, axis=0)
         if vector.shape != (200,) or not np.isfinite(vector).all() or not np.linalg.norm(vector):
             raise ValueError("MusiCNN produced an invalid embedding")

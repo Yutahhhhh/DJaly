@@ -4,7 +4,10 @@ from pathlib import Path
 import runpy
 import sys
 
-datas = [('models/msd-musicnn-1.pb', 'models')]
+datas = [(
+    'models/msd-musicnn-1.onnx' if sys.platform == 'win32' else 'models/msd-musicnn-1.pb',
+    'models',
+)]
 binaries = []
 
 # Package the converter and its linked libraries; installed apps must not rely
@@ -51,8 +54,8 @@ for package in [
 if sys.platform != 'win32':
     binaries += collect_dynamic_libs('essentia')
 else:
-    # Include librosa's lazy-loaded module map and TensorFlow's native CPU runtime.
-    for package in ['librosa', 'lazy_loader', 'pyloudnorm', 'tensorflow']:
+    # Include librosa's lazy-loaded module map and ONNX Runtime's native CPU runtime.
+    for package in ['librosa', 'lazy_loader', 'pyloudnorm', 'onnxruntime']:
         package_datas, package_binaries, package_imports = collect_all(package)
         datas += package_datas
         binaries += package_binaries

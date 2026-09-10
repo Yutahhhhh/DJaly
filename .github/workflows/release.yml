@@ -85,6 +85,10 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
 
+      - name: fetch verified Windows inference model
+        if: matrix.platform == 'windows-2022'
+        run: python backend/fetch_musicnn_onnx.py
+
       - name: verify FFmpeg packaging requirements
         shell: bash
         run: |

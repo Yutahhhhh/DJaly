@@ -21,12 +21,12 @@ def test_silent_audio_has_finite_timbre_and_no_rhythm():
     assert np.isfinite(list(analyzer._extract_timbre_features(audio).values())).all()
 
 
-def test_selective_waveform_does_not_load_tensorflow():
+def test_selective_waveform_does_not_load_embedding_model():
     analyzer = PortableAudioAnalyzer()
     analyzer._load_audio = lambda _: np.ones(44100, dtype=np.float32) * .5
     result = analyzer.analyze_selected("fixture", ["waveform"])
     assert result["features_extra"]["waveform_peaks"] == [.5] * 500
-    assert analyzer._tf_session is None
+    assert analyzer._embedding_session is None
 
 
 def test_malformed_audio_does_not_become_success(tmp_path):
