@@ -61,13 +61,34 @@ def main():
                 payload = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
                     "protocolVersion": "2025-03-26", "capabilities": {},
                     "clientInfo": {"name": "distribution-smoke", "version": "1"}}}
-                request = Request(f"http://127.0.0.1:{port}/mcp", data=json.dumps(payload).encode(), headers={
-                    "Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
-                with urlopen(request, timeout=15) as response:
-                    body = response.read(65536).decode()
-                    messages = [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")] if body.startswith("event:") else [json.loads(body)]
-                    assert any(item.get("result", {}).get("serverInfo") for item in messages), body
-                print("Packaged API and MCP initialization passed")
+                headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+                def rpc(payload):
+                    request = Request(f"http://127.0.0.1:{port}/mcp", data=json.dumps(payload).encode(), headers=headers)
+                    with urlopen(request, timeout=15) as response:
+                        if response.headers.get("Mcp-Session-Id"):
+                            headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
+                        body = response.read(2*1024*1024+1).decode()
+                        assert len(body) <= 2*1024*1024
+                        if not body.strip():
+                            return None
+                        events = [json.loads(line[5:].strip()) for line in body.splitlines() if line.startswith("data:")]
+                        messages = events or [json.loads(body)]
+                        result = next(item for item in messages if item.get("id") == payload.get("id"))
+                        assert "error" not in result, result
+                        return result["result"]
+                initialized = rpc(payload)
+                assert initialized.get("serverInfo"), initialized
+                headers["MCP-Protocol-Version"] = initialized["protocolVersion"]
+                rpc({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                listed = rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+                assert any(tool["name"] == "search_tracks" for tool in listed["tools"])
+                searched = rpc({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+                    "name": "search_tracks", "arguments": {"limit": 1}}})
+                assert not searched.get("isError"), searched
+                data = searched.get("structuredContent") or json.loads(next(item["text"] for item in searched["content"] if item["type"] == "text"))
+                data = data.get("result", data)  # MCP wraps generic dictionary return annotations.
+                assert data.get("count") == 0 and data.get("tracks") == [], data
+                print("Packaged API, MCP initialization, tool discovery and library search passed")
                 if desktop:
                     close_desktop(child.pid)
                 else:

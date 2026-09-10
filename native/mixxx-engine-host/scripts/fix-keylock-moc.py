@@ -10,7 +10,8 @@ headers = {'effectslot':'effects/effectslot.h','enginebuffer': 'engine/enginebuf
 for name, relative in headers.items():
     for file in (build / 'mixxx-lib_autogen').rglob(f'moc_{name}.cpp'):
         original = file.read_text()
-        updated = re.sub(r'#include "[^"\n]*/' + name + r'\.h"',
-                         '#include "' + str(build / 'junction-headers' / relative) + '"', original)
+        include = '#include "' + (build / 'junction-headers' / relative).resolve().as_posix() + '"'
+        updated = re.sub(r'#include "[^"\n]*[\\/]' + name + r'\.h"',
+                         lambda match: include, original)
         if updated != original:
             file.write_text(updated)
