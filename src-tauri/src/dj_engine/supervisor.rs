@@ -184,6 +184,11 @@ impl EngineSupervisor {
 
         let output_device = normalize_output_device(output_device)?;
         let mut command = Command::new(&binary_path);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
         command.env("PLUMDECK_WAVEFORM_CACHE", crate::waveform::cache_root()?);
         command
             .arg(format!("--tick-ms={TICK_MS}"))

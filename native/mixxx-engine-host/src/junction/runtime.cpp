@@ -207,6 +207,8 @@ struct Runtime::Impl {
         hosting=host;QString error;
 #ifdef __APPLE__
         if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 #endif
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);if(!identity)return error;
 #if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
@@ -228,6 +230,8 @@ struct Runtime::Impl {
         manual=true;hosting=host;QString error;
 #ifdef __APPLE__
         if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 #endif
         if(!MediaTransport::available())return "このビルドにはWebRTCが含まれていません";
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);
@@ -974,6 +978,8 @@ struct Runtime::Impl {
         ++signalGeneration;
 #ifdef __APPLE__
         if(sleepLease!=kIOPMNullAssertionID){IOPMAssertionRelease(sleepLease);sleepLease=kIOPMNullAssertionID;}
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS);
 #endif
         captureEnabled.store(false);tap.enable(false,false);audible.store(true);separateLocalMaster.store(true);
         peers.clear();program.close();programOpened=false;programState="stopped";

@@ -179,6 +179,10 @@ jobs:
           CI: true
           TAURI_SKIP_SIDECAR: true
 
+      - name: Preserve and verify nested macOS frameworks
+        if: matrix.platform == 'macos-latest'
+        run: bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh "$GITHUB_WORKSPACE/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/plumdeck.app"
+
       - name: verify macOS bundles
         if: matrix.platform == 'macos-latest'
         shell: bash

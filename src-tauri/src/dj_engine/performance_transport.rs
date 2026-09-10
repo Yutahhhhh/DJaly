@@ -311,3 +311,40 @@ mod tests {
         assert_eq!(u64::from_le_bytes(record[..8].try_into().unwrap()), 2);
     }
 }
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::{fs::File, os::windows::io::{FromRawHandle, AsRawHandle}};
+    #[link(name="kernel32")]
+    extern "system" {
+        fn CreateNamedPipeW(name:*const u16, access:u32, mode:u32, instances:u32,
+            output:u32, input:u32, timeout:u32, security:*const std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn ConnectNamedPipe(handle:*mut std::ffi::c_void, overlapped:*mut std::ffi::c_void) -> i32;
+    }
+    #[test]
+    fn windows_pipe_handshake_and_timestamped_midi() {
+        let path=format!(r"\\.\pipe\plumdeck-test-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        let name=path.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+        let handle=unsafe { CreateNamedPipeW(name.as_ptr(),3,0,1,65536,65536,0,std::ptr::null()) };
+        assert_ne!(handle as isize,-1);
+        let mut file=unsafe { File::from_raw_handle(handle) };
+        let server=std::thread::spawn(move || {
+            let result=unsafe { ConnectNamedPipe(file.as_raw_handle(),std::ptr::null_mut()) };
+            if result==0 { assert_eq!(std::io::Error::last_os_error().raw_os_error(),Some(535)); }
+            let mut hello=Vec::new(); let mut byte=[0];
+            loop { file.read_exact(&mut byte).unwrap(); if byte[0]==b'\n' {break} hello.push(byte[0]); }
+            assert_eq!(serde_json::from_slice::<Value>(&hello).unwrap()["token"],"test-token");
+            file.write_all(b"{\"nativeUs\":1000,\"decks\":[{\"generation\":1}]}\n").unwrap();
+            let mut packet=[0u8;48]; file.read_exact(&mut packet).unwrap();
+            assert_eq!(&packet[33..36],&[0x90,0x36,127]);
+            assert_eq!(u32::from_le_bytes(packet[16..20].try_into().unwrap()),1);
+        });
+        let mut transport=Transport::connect(&Config { path,token:"test-token".into(),
+            sensitivity:0.1,ranges:[16.0;4],cues:[0.0;4] }).unwrap();
+        transport.poll().unwrap(); // Empty pipe must return immediately.
+        transport.send(&[0x90,0x36,127],Instant::now()).unwrap();
+        server.join().unwrap();
+    }
+}

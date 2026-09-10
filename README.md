@@ -63,17 +63,17 @@ DBは実行ユーザーのmacOS／Windows標準保存先から自動検出しま
 
 起動時にポートが競合しても、別アプリのプロセスを終了しません。競合するアプリを確認して終了してから再起動してください。Plumdeck自身が起動したバックエンドはアプリ終了時に停止します。
 
-対応範囲にはまだ差があります。Mixxx音声ホストを含むPerformance版とJCTの実音声経路はmacOS／Apple Silicon向けです。通常のRelease workflowはそのホストを同梱しません。WindowsではEssentia解析も依存パッケージの対象外です。Windows版をmacOS版と同等のDJ／解析機能として配布するには、それらの実装・同梱と実機検証が別途必要です。また、現在リポジトリが非公開のため、GitHub Releasesを参照する自動更新は一般利用者への配信先として利用できません。公開時には更新ファイルと署名を含む配信設定も確認してください。
+WindowsではFFmpeg・librosa・TensorFlow CPUでBPM／キー／音色／波形／MusiCNN埋め込みを解析します。macOSはEssentiaを使用します。MusiCNNのモデルと入力スペクトル仕様は共通です。BPM・キーの推定アルゴリズムにはOS差があるため、解析履歴には使用したコンポーネントのバージョンを記録します。
+
+Release workflowは両OSでネイティブ音声エンジンをビルドし、必要なDLL／Frameworkとバックエンドを同梱します。Windows distribution validationでは、通常のPATHを外して同梱exeから解析し、API・MCPの起動とインストーラーの生成を検証します。音声デバイス、DDJ本体、rekordboxのUIとの実機検証はこのCIとは別です。
 
 ## ローカル開発
 
-フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。MixxxホストとJCTの実音声経路はmacOS / Apple Silicon向けです。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
+フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。ネイティブ音声エンジンのビルド対象はmacOS / Apple SiliconとWindows x64です。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
 
 ```bash
 pnpm install
-cd backend
-./setup.sh
-cd ..
+pnpm backend:install
 pnpm tauri
 ```
 
@@ -95,9 +95,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 ```bash
 pnpm dj-engine:build
 pnpm dj-engine:stage
-pnpm exec tauri build --bundles app --no-sign --config src-tauri/tauri.mixxx.conf.json
-bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh
+pnpm tauri:build:performance
 ```
+
+WindowsではVisual Studioの「x64 Native Tools Command Prompt」でビルドします。Python 3.11、Git、Node 24、Rust、CMake、Ninjaが必要です（`python -m pip install cmake ninja`）。依存ソースとWindowsライブラリは固定リビジョン／ハッシュから取得し、DLL・Qtプラグイン・リソースをステージへまとめます。Windows利用者側にVisual Studio、Python、WSL、Homebrewは不要です。
 
 Apple Siliconでは `/opt/homebrew` のARM64ツールチェーンを使用します。依存バージョンは `native/mixxx-engine-host/dependency-versions.json`、固定リビジョンと取得処理はビルドスクリプトにあります。Mixxxホストを含む配布では、同梱ライブラリ・署名・対応ソースの確認も必要です。
 
@@ -129,7 +130,7 @@ JCTはホストとプレイ担当者を分けます。音声はWebRTC / Opusで�
 
 既定では公開STUNを接続先の探索に使います。直接接続できない場合は、ホストが「直接つながらないときの中継設定」に自分のTURNを設定できます。「運営サーバー不要」は「外部サーバーを一切使わない」という意味ではありません。今回は運営クラウドを配備していません。
 
-TURN RESTの共有シークレットはネイティブ内に保持し、保存を選ぶとmacOSキーチェーンに保管します。招待へ渡すのは参加者ごとに発行する30分有効の接続用資格情報だけです。発行済み一時資格情報も、期限を示すTURN REST形式のユーザー名と24時間以内の期限で利用できます。期限切れの資格情報を再使用しません。設定変更・更新後は同じDJの招待を作り直して再交換します。管理用APIキーや長期秘密鍵を招待・返答へ入れません。接続テストは実際の中継候補取得を確認しますが、相手との接続や全回線での成功を保証するものではありません。
+TURN RESTの共有シークレットはネイティブ内に保持し、保存を選ぶとmacOSキーチェーン、WindowsではログインユーザーのDPAPIで暗号化して保管します。招待へ渡すのは参加者ごとに発行する30分有効の接続用資格情報だけです。発行済み一時資格情報も、期限を示すTURN REST形式のユーザー名と24時間以内の期限で利用できます。期限切れの資格情報を再使用しません。設定変更・更新後は同じDJの招待を作り直して再交換します。管理用APIキーや長期秘密鍵を招待・返答へ入れません。接続テストは実際の中継候補取得を確認しますが、相手との接続や全回線での成功を保証するものではありません。
 
 短い通信断は同じ接続の復旧を待ち、戻らなければ同じ参加者カードで新しい招待・返答を交換します。他のDJの接続と演奏権は維持します。取り消し・拒否をオフラインの相手に知らせる場合は、署名付き通知をコピーして渡します。表示名だけでは本人確認できないため、招待と返答は相手を確認できる経路で受け渡してください。
 
@@ -175,7 +176,7 @@ pnpm junction:test:integration # 既存サーバー方式の回帰試験
 
 ## rekordboxアシスト
 
-macOSのアクセシビリティから、rekordboxが表示しているデッキの曲情報を読み取ります。初回の案内に従ってplumdeckのアクセシビリティを許可してください。OCRや画面録画は使用しません。
+macOSのアクセシビリティ、WindowsのUI Automationから、rekordboxが表示しているデッキの曲情報を読み取ります。macOSでは初回の案内に従ってplumdeckのアクセシビリティを許可してください。Windowsでは両アプリを同じユーザー・権限で起動し、rekordboxのPERFORMANCE画面を表示します。Windows標準のPowerShell／.NETを使う読み取り処理は、時間と出力量を制限した別プロセスで動きます。OCRや画面録画は使用しません。
 
 「グルーヴ」「展開」「ワードプレイ」、エネルギーの方向、ジャンル条件を選んで候補を探します。現在の基準デッキは手動で選択します。ロードを確認した曲は履歴へ保存し、候補から除外します。新しいセットでは履歴をリセットできます。
 
@@ -200,7 +201,7 @@ rekordbox MCPの起動・DBモード・操作手順は [rekordbox-mcp/README.md]
 
 `main` を配布の基点とし、変更は `feature/*`、`fix/*`、`refactor/*`、`chore/*` で進めます。ブランチのプッシュと製品リリースは別の操作です。
 
-`pnpm release vX.Y.Z` はバックエンドの梱包、Tauriビルド、GitHub Releasesへのアップロードを含みます。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/plumdeck/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
+`pnpm package` はこのOSのバックエンド・ネイティブ音声エンジン・Tauriインストーラーをローカルで作成します。公開操作は行いません。タグをGitHubへプッシュするとRelease workflowが両OSの配布物を作成します。`pnpm release vX.Y.Z` は既にプッシュしたタグのRelease workflowをGitHub CLIで再実行します。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/plumdeck/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
 
 ## ライセンスと対応ソース
 

@@ -34,7 +34,7 @@ def download(url, destination, digest=None):
     destination.parent.mkdir(parents=True, exist_ok=True)
     if not destination.exists():
         temporary = destination.with_suffix(destination.suffix + ".download")
-        run("curl.exe", "--fail", "--location", "--retry", "3", "--connect-timeout", "30", "--output", temporary, url)
+        run("curl.exe", "--fail", "--location", "--retry", "3", "--connect-timeout", "30", "--max-time", "1800", "--speed-time", "120", "--speed-limit", "1024", "--output", temporary, url)
         temporary.replace(destination)
     if digest and hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
         raise RuntimeError(f"Checksum mismatch: {destination}")

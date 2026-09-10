@@ -81,4 +81,7 @@ jobs:
           New-Item -ItemType File -Force src-tauri/bin/plumdeck-server-x86_64-pc-windows-msvc.exe | Out-Null
       - name: Compile and test native Windows shell
         working-directory: src-tauri
+        env:
+          # Unit tests compile the shell independently; packaging validates real resources.
+          TAURI_CONFIG: '{"bundle":{"resources":[]}}'
         run: cargo test --lib

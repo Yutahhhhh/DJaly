@@ -42,3 +42,19 @@ def test_user_data_override_is_preserved(tmp_path):
     settings = Settings(_env_file=None, USER_DATA_DIR=str(tmp_path), DB_PATH=None)
     assert settings.DB_PATH == str(tmp_path / "plumdeck.duckdb")
     assert settings.PLUMDECK_LOG_DIR == str(tmp_path / "logs")
+
+
+def test_packaging_resolves_chocolatey_launcher(tmp_path, monkeypatch):
+    import packaging_ffmpeg
+    root = tmp_path / "Chocolatey install"
+    shim = root / "bin" / "ffmpeg.exe"
+    real = root / "lib" / "ffmpeg" / "tools" / "ffmpeg-version" / "bin" / "ffmpeg.exe"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"actual converter")
+    monkeypatch.setenv("ChocolateyInstall", str(root))
+    monkeypatch.delenv("PLUMDECK_FFMPEG", raising=False)
+    monkeypatch.setattr(packaging_ffmpeg.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(packaging_ffmpeg.shutil, "which", lambda _: str(shim))
+    candidates = packaging_ffmpeg.build_candidates()
+    assert str(real) in candidates
+    assert str(shim) not in candidates

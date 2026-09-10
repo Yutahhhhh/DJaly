@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
 bundle="${1:-$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app}"
 case "$bundle" in
-  "$repo_root"/src-tauri/target/debug/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/"plumdeck Preview.app") ;;
+  "$repo_root"/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/debug/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/plumdeck.app|"$repo_root"/src-tauri/target/release/bundle/macos/"plumdeck Preview.app") ;;
   *) echo "Refusing to sign an unexpected bundle path: $bundle" >&2; exit 2 ;;
 esac
 
@@ -33,6 +33,6 @@ codesign --verify --deep --strict "$nested"
 codesign --verify --deep --strict "$bundle"
 echo "Verified Performance bundle: $bundle"
 
-if [[ "$bundle" == "$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app" ]]; then
-  "$repo_root/native/mixxx-engine-host/scripts/repack-performance-dmg-macos.sh"
+if [[ "$bundle" == */release/bundle/macos/plumdeck.app ]]; then
+  "$repo_root/native/mixxx-engine-host/scripts/repack-performance-dmg-macos.sh" "$bundle"
 fi

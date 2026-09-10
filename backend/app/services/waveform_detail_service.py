@@ -53,7 +53,7 @@ def _decode(filepath: Path) -> tuple[np.ndarray, int]:
     # A temporary stderr file avoids subprocess pipe deadlocks and unbounded RAM.
     with tempfile.TemporaryFile() as errors:
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors)
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
             raise WaveformDetailError("波形デコーダーを起動できませんでした。", 503) from exc
         timed_out = threading.Event()
