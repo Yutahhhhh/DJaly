@@ -74,6 +74,15 @@ pub async fn dj_engine_send(
 
 #[derive(serde::Deserialize)]
 pub enum JunctionOperation {
+    #[serde(rename = "exchange.inspect")] ExchangeInspect,
+    #[serde(rename = "exchange.import")] ExchangeImport,
+    #[serde(rename = "invite.create")] InviteCreate,
+    #[serde(rename = "invite.cancel")] InviteCancel,
+    #[serde(rename = "peer.retry")] PeerRetry,
+    #[serde(rename = "network.get")] NetworkGet,
+    #[serde(rename = "network.configure")] NetworkConfigure,
+    #[serde(rename = "network.clear")] NetworkClear,
+    #[serde(rename = "network.test")] NetworkTest,
     #[serde(rename = "snapshot")] Snapshot,
     #[serde(rename = "create")] Create,
     #[serde(rename = "join")] Join,
@@ -96,6 +105,10 @@ pub enum JunctionOperation {
 impl JunctionOperation {
     fn wire(&self) -> &'static str {
         match self {
+            Self::ExchangeInspect => "exchange.inspect", Self::ExchangeImport => "exchange.import",
+            Self::InviteCreate => "invite.create", Self::InviteCancel => "invite.cancel", Self::PeerRetry => "peer.retry",
+            Self::NetworkGet => "network.get", Self::NetworkConfigure => "network.configure",
+            Self::NetworkClear => "network.clear", Self::NetworkTest => "network.test",
             Self::Snapshot => "snapshot", Self::Create => "create", Self::Join => "join",
             Self::Leave => "leave", Self::End => "end", Self::InviteRotate => "invite.rotate",
             Self::PeerApprove => "peer.approve", Self::HandoffRequest => "handoff.request",

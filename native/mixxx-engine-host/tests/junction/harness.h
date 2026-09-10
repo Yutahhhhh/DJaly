@@ -23,6 +23,7 @@ struct Case {
 std::vector<Case>& registry();
 int runAll(const char* filter);
 void fail(const char* file, int line, const std::string& message);
+[[noreturn]] void skip(const std::string& reason);
 
 struct Registrar {
     Registrar(const char* suite, const char* name, std::function<void()> body) {

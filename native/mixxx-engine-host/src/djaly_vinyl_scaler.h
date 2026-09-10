@@ -42,6 +42,9 @@ class DjalyVinylScaler : public EngineBufferScaleLinear  {
     bool m_bClear;
     double m_dRate;
     double m_dOldRate;
+    // Zero speed does not change the orientation of already buffered samples.
+    // Preserve it so + -> 0 -> - unwinds the forward read-ahead as + -> - does.
+    int m_bufferDirection = 1;
 
     double m_dCurrentFrame;
     double m_dNextFrame;

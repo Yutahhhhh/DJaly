@@ -42,7 +42,7 @@ JTEST("media-transport","guest sends after answer negotiation with authenticated
 
 JTEST("media-transport","automatic manifest ACK anchors arbitrary frames and changes epoch safely") {exerciseConnection(true,true);}
 
-JTEST("media-relay","forced TURN with expiring REST credentials carries real media and isolated channels"){if(!qEnvironmentVariableIsSet("JUNCTION_TURN_ADDRESS"))return;exerciseConnection(true,true,true);}
+JTEST("media-relay","forced TURN with expiring REST credentials carries real media and isolated channels"){if(!qEnvironmentVariableIsSet("JUNCTION_TURN_ADDRESS"))jtest::skip("JUNCTION_TURN_ADDRESS is not configured");exerciseConnection(true,true,true);}
 
 JTEST("ice-servers","TURN TLS stays encrypted and ephemeral credentials are escaped"){
  const auto urls=iceServerUrls(QJsonArray{QJsonObject{{"urls",QJsonArray{"turn:relay.example:3478?transport=udp","turns:relay.example:5349?transport=tcp"}},{"username","123:peer"},{"credential","a+b/c="}}});

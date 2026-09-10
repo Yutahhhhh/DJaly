@@ -10,6 +10,10 @@ struct StreamManifest {
     quint32 ssrc=0,rtpTimestampOrigin=0;
     quint32 codecLookaheadFrames=312;
 };
+/// Connectivity of one of the two peer connections, mapped from libdatachannel
+/// so callers never depend on the vendored enum.
+enum class LinkState { New, Connecting, Connected, Disconnected, Failed, Closed };
+
 class MediaTransport {
 public:
     struct Callbacks {
@@ -18,6 +22,12 @@ public:
         std::function<void(QByteArray)> control,bulk,validation;
         std::function<void(QString)> error;
         std::function<void(StreamManifest)> producerManifest;
+        /// ICE gathering finished on one connection. The aggregated local
+        /// description is then complete and safe to export as a manual packet.
+        /// Used only by the manual (signalling-free) exchange; the server mode
+        /// keeps trickling candidates as before.
+        std::function<void(bool)> gatheringComplete;
+        std::function<void(bool,LinkState)> linkState;
     };
     struct Identity { QString certificatePath,keyPath,fingerprint; };
     static std::shared_ptr<Identity> createIdentity(const QString& directory,QString* error=nullptr);
@@ -30,6 +40,7 @@ public:
     bool sendControl(const QByteArray&),sendBulk(const QByteArray&),sendValidation(const QByteArray&);
     bool setSendManifest(const StreamManifest&),setReceiveManifest(const StreamManifest&);
     void startProducer(PcmRing*);
+    void inheritProducerHistory(MediaTransport& previous);
     void enableAutomaticManifest(bool enabled);
     bool acknowledgeSendManifest(const QString& streamId);
     PcmRing& decodedRing();
@@ -37,6 +48,17 @@ public:
     struct Statistics { quint64 receivedPackets=0,senderReports=0,receivedReports=0,nacksSent=0,retransmittedPackets=0; };
     Statistics statistics() const;
     bool selectedRelay(bool bulk=false) const;
+    /// True once ICE gathering has completed on that connection.
+    bool gatheringComplete(bool bulk) const;
+    /// Both connections gathered: a non-trickle packet can now be exported.
+    bool readyForManualExport() const;
+    /// The aggregated local description, including every gathered candidate.
+    /// Empty until gathering completes, so a half-collected offer can never be
+    /// handed to the user. `type` and `fingerprint` are filled when given.
+    QString aggregatedDescription(bool bulk,QString* type=nullptr,QString* fingerprint=nullptr) const;
+    LinkState linkState(bool bulk=false) const;
+    /// Worst of the two connections: a session is only really up when both are.
+    LinkState aggregateLinkState() const;
     // Requests repair only while the packet is inside the decoder's deadline.
     bool requestRetransmission(quint64 mediaFrame);
     static bool available();

@@ -1,6 +1,7 @@
 #include <cstring>
 // Derived from Mixxx 3ebac449 EngineBufferScaleLinear (GPL-2.0-or-later).
 #include "djaly_vinyl_scaler.h"
+#include "vinyl_convolution.h"
 
 #include <QtDebug>
 
@@ -58,13 +59,14 @@ double DjalyVinylScaler::scaleBuffer(
 
     if (m_bClear) {
         m_dOldRate = m_dRate;  // If cleared, don't interpolate rate.
+        m_bufferDirection = m_dRate < 0 ? -1 : 1;
         m_bClear = false;
     }
     double rate_add_old = m_dOldRate; // Smoothly interpolate to new playback rate
     double rate_add_new = m_dRate;
     double frames_read = 0;
 
-    if (rate_add_new * rate_add_old < 0) {
+    if (rate_add_new * m_bufferDirection < 0) {
         // Direction has changed!
         // calculate half buffer going one way, and half buffer going
         // the other way.
@@ -119,6 +121,7 @@ double DjalyVinylScaler::scaleBuffer(
     } else {
         frames_read += do_scale(pOutputBuffer, iOutputBufferSize);
     }
+    if (rate_add_new != 0) m_bufferDirection = rate_add_new < 0 ? -1 : 1;
     return frames_read;
 }
 
@@ -159,25 +162,33 @@ double DjalyVinylScaler::do_scale(CSAMPLE* output,SINT samples) {
         const double phase=fraction*vinyl::Kernels::phases;
         const int first=std::clamp(int(phase),0,vinyl::Kernels::phases-1);
         const float blend=float(phase-first);
-        const float* a=bank.coefficients.data()+first*bank.taps;
-        const float* b=a+bank.taps;
-        float left=0,right=0;
-        if(speed!=1 || fraction!=0)for(int tap=0;tap<bank.taps;tap++) {
-            const auto frame=floor-bank.taps/2+1+tap;
-            const float coefficient=a[tap]+blend*(b[tap]-a[tap]);
-            if(frame>=0&&frame*2+1<m_bufferIntSize){left+=coefficient*m_bufferInt[frame*2];right+=coefficient*m_bufferInt[frame*2+1];}
-            else if(frame==-1){left+=coefficient*m_floorSampleOld[0];right+=coefficient*m_floorSampleOld[1];}
-        }
-        // Morph filter banks at the same source phase, without clearing history.
-        if(oldBank!=&bank && f<32 && !(speed==1 && fraction==0)){
-            float oldLeft=0,oldRight=0;
-            const float* a0=oldBank->coefficients.data()+first*oldBank->taps;const float* b0=a0+oldBank->taps;
-            for(int tap=0;tap<oldBank->taps;tap++){
-                const auto frame=floor-oldBank->taps/2+1+tap;const float weight=a0[tap]+blend*(b0[tap]-a0[tap]);
-                if(frame>=0&&frame*2+1<m_bufferIntSize){oldLeft+=weight*m_bufferInt[frame*2];oldRight+=weight*m_bufferInt[frame*2+1];}
-                else if(frame==-1){oldLeft+=weight*m_floorSampleOld[0];oldRight+=weight*m_floorSampleOld[1];}
+        const auto evaluate=[&](const vinyl::Bank& kernel){
+            const float* a=kernel.coefficients.data()+first*kernel.taps;
+            const float* b=a+kernel.taps;
+            const SINT startFrame=floor-kernel.taps/2+1;
+            if(startFrame>=0 && (startFrame+kernel.taps)*2<=m_bufferIntSize)
+                return vinyl::convolve(m_bufferInt+startFrame*2,a,b,kernel.taps,blend);
+            vinyl::Stereo result;
+            for(int tap=0;tap<kernel.taps;++tap){
+                const SINT frame=startFrame+tap;
+                const float weight=a[tap]+blend*(b[tap]-a[tap]);
+                if(frame>=0&&frame*2+1<m_bufferIntSize){
+                    result.left+=weight*m_bufferInt[frame*2];result.right+=weight*m_bufferInt[frame*2+1];
+                }else if(frame==-1){
+                    result.left+=weight*m_floorSampleOld[0];result.right+=weight*m_floorSampleOld[1];
+                }
             }
-            const float transition=float(f+1)/32;left=oldLeft+transition*(left-oldLeft);right=oldRight+transition*(right-oldRight);
+            return result;
+        };
+        float left=0,right=0;
+        if(speed!=1 || fraction!=0){
+            const auto value=evaluate(bank);left=value.left;right=value.right;
+            // Morph banks at the same source phase without clearing history.
+            if(oldBank!=&bank && f<32){
+                const auto previous=evaluate(*oldBank);const float transition=float(f+1)/32;
+                left=previous.left+transition*(left-previous.left);
+                right=previous.right+transition*(right-previous.right);
+            }
         }
         if(speed==1 && fraction==0 && floor>=0 && floor*2+1<m_bufferIntSize) {left=m_bufferInt[floor*2];right=m_bufferInt[floor*2+1];}
         output[f*2]=left;output[f*2+1]=right;

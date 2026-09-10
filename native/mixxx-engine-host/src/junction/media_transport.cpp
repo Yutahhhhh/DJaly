@@ -1,4 +1,5 @@
 #include "media_transport.h"
+#include <deque>
 #include "audio_clock.h"
 #include <QDir>
 #include <QDebug>
@@ -49,12 +50,16 @@ void ensureNetworkRuntime() {
 struct MediaTransport::Impl {
  bool forceRelay=false;QString peer;QStringList ice;Callbacks cb;std::shared_ptr<Identity> identity;
  PcmRing decoded{128,960,2},preCodec{64,960,2};PcmRing* source=nullptr;std::atomic<bool> running{false};std::thread worker;std::mutex mutex;
+ struct SourceBlock {PcmBlockInfo info;std::vector<float> samples;};
+ std::deque<SourceBlock> sourceHistory,replaySource;unsigned historyFrames=0;
  qint64 receiveWindow[3]={},bulkWindow=0,validationWindow=0;int receiveCount[3]={},bulkBytes=0,validationBytes=0;
  std::atomic<quint64> receivedPackets{0},senderReports{0},receivedReports{0},nacksSent{0},retransmittedPackets{0};
  quint64 minimumEpoch=0,minimumGeneration=0;StreamManifest tx,rx;bool hasTx=false,hasRx=false,automaticManifest=false,waitingManifestAck=false; qint64 manifestSentAt=0;quint16 sequence=0;quint64 decodedSeq=0,nextRx=0;bool rxStarted=false;
  struct Packet{QByteArray bytes;qint64 arrived;int retries=0;};std::map<quint64,Packet> packets;
 #ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::PeerConnection> pc[2];std::shared_ptr<rtc::DataChannel> channels[3];std::shared_ptr<rtc::Track> track;
+ // Written from libdatachannel's threads, read from the session thread.
+ std::atomic<bool> gathered[2]{{false},{false}};std::atomic<int> link[2]{{int(LinkState::New)},{int(LinkState::New)}};
  std::shared_ptr<rtc::RtpPacketizationConfig> reportConfig;std::shared_ptr<rtc::RtcpSrReporter> reporter;
  std::map<quint16,Packet> resend;quint16 lastReceivedSequence=0;quint64 lastReceivedFrame=0;bool receivedSequence=false;qint64 lastNack=0;
  void channel(std::shared_ptr<rtc::DataChannel> c,int kind){if(c->label()!=(kind==2?"validation":kind==1?"junction.bulk":"junction.control")){c->close();return;} {std::lock_guard lock(mutex);channels[kind]=c;}c->onMessage([this,kind](rtc::message_variant v){QByteArray b;if(auto p=std::get_if<rtc::binary>(&v))b=QByteArray(reinterpret_cast<const char*>(p->data()),p->size());else b=QByteArray::fromStdString(std::get<std::string>(v));if(b.size()>(kind?kMaxChunkBytes+72:kMaxControlMessageBytes))return;{std::lock_guard lock(mutex);auto now=monotonicNanos();if(now-receiveWindow[kind]>=1000000000){receiveWindow[kind]=now;receiveCount[kind]=0;}if(++receiveCount[kind]>(kind==2?32:256))return;}auto& f=kind==2?cb.validation:kind==1?cb.bulk:cb.control;if(f)f(b);});}
@@ -64,7 +69,13 @@ struct MediaTransport::Impl {
  std::array<float,8192> input{},converted{};std::array<float,1920> frame{},out{};std::array<unsigned char,1400> encoded{};int fill=0;quint64 anchor=0,sourceGeneration=~quint64(0),sourceEpoch=~quint64(0);quint32 rate=0;int conceal=0;PopResult held;bool holding=false;quint64 sourceEnd=0;
  while(running.load()){
   PcmRing* ring;{std::lock_guard lock(mutex);ring=source;}
-  if(ring){auto got=holding?held:ring->popBlock(input.data(),4096);if(got.frames){
+  if(ring){auto got=holding?held:[&]{
+      PopResult next;
+      {std::lock_guard lock(mutex);if(!replaySource.empty()){auto block=std::move(replaySource.front());replaySource.pop_front();next.info=block.info;next.frames=block.info.frameCount;std::copy(block.samples.begin(),block.samples.end(),input.begin());}}
+      if(!next.frames)next=ring->popBlock(input.data(),4096);
+      if(next.frames){std::lock_guard lock(mutex);sourceHistory.push_back({next.info,std::vector<float>(input.data(),input.data()+next.frames*2)});historyFrames+=next.frames;while(historyFrames>16384&&sourceHistory.size()>1){historyFrames-=sourceHistory.front().info.frameCount;sourceHistory.pop_front();}}
+      return next;
+   }();if(got.frames){
    bool automatic,stale;{std::lock_guard lock(mutex);automatic=automaticManifest;stale=automatic&&(got.info.epoch<minimumEpoch||(got.info.epoch==minimumEpoch&&got.info.generation<minimumGeneration));}
    if(stale){holding=false;held={};sourceGeneration=~quint64(0);continue;}
    if(!holding&&(got.info.generation!=sourceGeneration||got.info.epoch!=sourceEpoch||got.info.sampleRateHz!=rate||(automatic&&got.info.sourceFrame!=sourceEnd))){
@@ -126,7 +137,15 @@ bool MediaTransport::available(){
 bool MediaTransport::start(bool offerer,QString* error){
 #ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
  if(d->running)return fail(error,"Transport already started");try{rtc::Configuration cfg;if(d->forceRelay)cfg.iceTransportPolicy=rtc::TransportPolicy::Relay;cfg.disableAutoNegotiation=true;cfg.maxMessageSize=65536;for(const auto& s:d->ice)cfg.iceServers.emplace_back(s.toStdString());if(d->identity){cfg.certificatePemFile=d->identity->certificatePath.toStdString();cfg.keyPemFile=d->identity->keyPath.toStdString();}
- for(int i=0;i<2;i++){d->pc[i]=std::make_shared<rtc::PeerConnection>(cfg);if(qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE")){d->pc[i]->onStateChange([i](auto state){qInfo()<<"junction transport state"<<i<<int(state);});d->pc[i]->onIceStateChange([i](auto state){qInfo()<<"junction ice state"<<i<<int(state);});d->pc[i]->onGatheringStateChange([i](auto state){qInfo()<<"junction gathering state"<<i<<int(state);});}d->pc[i]->onLocalDescription([this,i](rtc::Description s){QString fp;auto f=s.fingerprint();if(f)fp=QString::fromStdString(f->value);if(d->cb.localDescription)d->cb.localDescription(i,QString::fromStdString(std::string(s)),QString::fromStdString(s.typeString()),normalize(fp));});d->pc[i]->onLocalCandidate([this,i](rtc::Candidate c){if(d->cb.localCandidate)d->cb.localCandidate(i,QString::fromStdString(std::string(c)),QString::fromStdString(c.mid()));});d->pc[i]->onDataChannel([this,i](auto c){d->channel(c,i==0&&c->label()=="validation"?2:i);});if(i==0)d->pc[i]->onTrack([this](auto t){d->attach(t);});if(offerer)d->channel(d->pc[i]->createDataChannel(i?"junction.bulk":"junction.control"),i);}
+ for(int i=0;i<2;i++){d->pc[i]=std::make_shared<rtc::PeerConnection>(cfg);const bool trace=qEnvironmentVariableIsSet("DJALY_JUNCTION_TRACE");if(trace)d->pc[i]->onIceStateChange([i](auto state){qInfo()<<"junction ice state"<<i<<int(state);});
+  d->pc[i]->onStateChange([this,i,trace](rtc::PeerConnection::State state){if(trace)qInfo()<<"junction transport state"<<i<<int(state);
+   const auto mapped=state==rtc::PeerConnection::State::Connecting?LinkState::Connecting:state==rtc::PeerConnection::State::Connected?LinkState::Connected:state==rtc::PeerConnection::State::Disconnected?LinkState::Disconnected:state==rtc::PeerConnection::State::Failed?LinkState::Failed:state==rtc::PeerConnection::State::Closed?LinkState::Closed:LinkState::New;
+   d->link[i].store(int(mapped),std::memory_order_release);if(d->cb.linkState)d->cb.linkState(i!=0,mapped);});
+  // Non-trickle: the aggregated local description is only complete here.
+  d->pc[i]->onGatheringStateChange([this,i,trace](rtc::PeerConnection::GatheringState state){if(trace)qInfo()<<"junction gathering state"<<i<<int(state);
+   if(state!=rtc::PeerConnection::GatheringState::Complete)return;
+   d->gathered[i].store(true,std::memory_order_release);if(d->cb.gatheringComplete)d->cb.gatheringComplete(i!=0);});
+  d->pc[i]->onLocalDescription([this,i](rtc::Description s){QString fp;auto f=s.fingerprint();if(f)fp=QString::fromStdString(f->value);if(d->cb.localDescription)d->cb.localDescription(i,QString::fromStdString(std::string(s)),QString::fromStdString(s.typeString()),normalize(fp));});d->pc[i]->onLocalCandidate([this,i](rtc::Candidate c){if(d->cb.localCandidate)d->cb.localCandidate(i,QString::fromStdString(std::string(c)),QString::fromStdString(c.mid()));});d->pc[i]->onDataChannel([this,i](auto c){d->channel(c,i==0&&c->label()=="validation"?2:i);});if(i==0)d->pc[i]->onTrack([this](auto t){d->attach(t);});if(offerer)d->channel(d->pc[i]->createDataChannel(i?"junction.bulk":"junction.control"),i);}
  if(offerer){d->channel(d->pc[0]->createDataChannel("validation"),2);rtc::Description::Audio audio("junction-audio",rtc::Description::Direction::SendRecv);audio.addOpusCodec(111,"minptime=20;maxptime=20;stereo=1;sprop-stereo=1;maxaveragebitrate=320000");if(d->hasTx)audio.addSSRC(d->tx.ssrc,"junction");d->attach(d->pc[0]->addTrack(audio));for(auto& pc:d->pc)pc->setLocalDescription();}d->running=true;d->worker=std::thread([this]{d->run();});return true;
  }catch(const std::exception&){close();return fail(error,"WebRTC initialization failed");}
 #else
@@ -188,6 +207,39 @@ bool MediaTransport::selectedRelay(bool bulk)const{
  return false;
 #endif
 }
+bool MediaTransport::gatheringComplete(bool bulk)const{
+#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+ return d->pc[bulk]&&d->gathered[bulk].load(std::memory_order_acquire);
+#else
+ Q_UNUSED(bulk);return false;
+#endif
+}
+bool MediaTransport::readyForManualExport()const{return gatheringComplete(false)&&gatheringComplete(true);}
+QString MediaTransport::aggregatedDescription(bool bulk,QString*type,QString*fingerprint)const{
+#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+ // Only after GatheringState::Complete does the local description carry every
+ // candidate. Returning it earlier would export an unusable half-offer.
+ if(!gatheringComplete(bulk))return {};
+ auto description=d->pc[bulk]->localDescription();if(!description)return {};
+ if(type)*type=QString::fromStdString(description->typeString());
+ if(fingerprint){auto value=description->fingerprint();*fingerprint=value?normalize(QString::fromStdString(value->value)):QString{};}
+ return QString::fromStdString(std::string(*description));
+#else
+ Q_UNUSED(bulk);Q_UNUSED(type);Q_UNUSED(fingerprint);return {};
+#endif
+}
+LinkState MediaTransport::linkState(bool bulk)const{
+#ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
+ return d->pc[bulk]?LinkState(d->link[bulk].load(std::memory_order_acquire)):LinkState::Closed;
+#else
+ Q_UNUSED(bulk);return LinkState::Closed;
+#endif
+}
+LinkState MediaTransport::aggregateLinkState()const{
+ const auto control=linkState(false),bulk=linkState(true);
+ const auto rank=[](LinkState s){switch(s){case LinkState::Failed:return 0;case LinkState::Closed:return 1;case LinkState::Disconnected:return 2;case LinkState::New:return 3;case LinkState::Connecting:return 4;case LinkState::Connected:return 5;}return 3;};
+ return rank(control)<=rank(bulk)?control:bulk;
+}
 bool MediaTransport::requestRetransmission(quint64 frame){
 #ifdef DJALY_JUNCTION_WITH_LIBDATACHANNEL
  std::lock_guard lock(d->mutex);if(!d->hasRx||!d->receivedSequence||frame<d->nextRx||frame>d->lastReceivedFrame||(d->lastReceivedFrame-frame)%960||!d->track||!d->track->isOpen()||monotonicNanos()-d->lastNack<20000000)return false;
@@ -195,6 +247,11 @@ bool MediaTransport::requestRetransmission(quint64 frame){
 #else
  return false;
 #endif
+}
+void MediaTransport::inheritProducerHistory(MediaTransport& previous){
+ if(&previous==this)return;
+ std::scoped_lock lock(d->mutex,previous.d->mutex);
+ d->replaySource=previous.d->sourceHistory;
 }
 void MediaTransport::enableAutomaticManifest(bool enabled){std::lock_guard lock(d->mutex);d->automaticManifest=enabled;if(!enabled)d->waitingManifestAck=false;}
 bool MediaTransport::acknowledgeSendManifest(const QString& id){std::lock_guard lock(d->mutex);if(!d->automaticManifest||!d->waitingManifestAck||!d->hasTx||id!=d->tx.streamId)return false;d->waitingManifestAck=false;return true;}

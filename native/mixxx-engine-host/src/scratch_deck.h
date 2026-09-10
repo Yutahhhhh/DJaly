@@ -1,5 +1,6 @@
 #pragma once
 #include "deck_telemetry.h"
+#include "scratch_prediction.h"
 
 #include <algorithm>
 #include <atomic>
@@ -236,11 +237,14 @@ public:
             // 埋めたはずの谷間に段差が残る。
             const double window = std::clamp(inputIntervalMs_, 8.0, 60.0);
             const double age = std::max(0.0, monotonicMs() - motionAtMs_);
-            const double coast = std::clamp(3.0 - age / window, 0.0, 1.0);
-            const bool stoppedInput = coast == 0;
+            const bool stoppedInput = age >= 3 * window;
             if (stoppedInput) velocityFrames_ = 0;
-            const double lead = velocityFrames_ * std::min(age, 3 * window) * coast;
-            const double feed = velocityFrames_ * coast * 1000.0 / sourceSampleRate_;
+            const auto prediction = scratch::predict(velocityFrames_, age, window);
+            const double lead = prediction.position;
+            // The scaler ramps to this command over the output block. Supply
+            // the trajectory's end velocity, not its already elapsed start
+            // velocity, or the return segment gains another buffer of lag.
+            const double feed = scratch::predict(velocityFrames_, age + callbackMs, window).velocity * 1000.0 / sourceSampleRate_;
             const double error = baselineFrames_ + samples_ / 2.0 + lead - frames;
             // Near-zero reversals in the resampler otherwise form an audible
             // ~1ms limit cycle (especially 48k sources on a 44.1k output).
@@ -257,7 +261,7 @@ public:
             // Feed-forward follows the hand; position feedback only removes
             // accumulated drift. A strong per-buffer correction amplifies
             // packet/OS timing jitter into audible pitch modulation.
-            const double positionGain = stoppedInput ? .35 : .08;
+            const double positionGain = 1 - std::pow(1 - (stoppedInput ? .35 : .08), callbackMs / (256000.0 / 44100));
             const double target = std::clamp(feed + positionGain * error / framesPerBuffer, -16.0, 16.0);
             const double previous = getEngineBuffer()->getSpeed();
             const double smoothingMs = stoppedInput || target * previous < 0 ? 2.0 : 10.0;

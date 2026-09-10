@@ -236,7 +236,7 @@ public:
                 deckReady_[index]=true;deckErrors_[index].clear();
                 tryFinalizeGraphRestore();
                 decks_[index]->setLoadGeneration(generations_[index]);
-                scratch(index, "abort", 0); // Publish the decoded source rate before accepting gestures.
+                releaseScratch(index); // Publish the decoded source rate before accepting gestures.
                 if (loaded) loaded(index, generations_[index], {{"junctionRestore",!restoreDecks_[index].isEmpty()},{"durationMs", track->getDuration() * 1000.0}, {"sampleRateHz", static_cast<int>(track->getSampleRate().value())}, {"channels", track->getChannels()}}, {});
             }, Qt::QueuedConnection);
             QObject::connect(buffer, &EngineBuffer::trackLoadFailed, this, [this, index](TrackPointer track, const QString& reason) {
@@ -331,7 +331,7 @@ public:
         auto* graphRestoreTimer=new QTimer(this);connect(graphRestoreTimer,&QTimer::timeout,this,[this]{tryCaptureGraph();tryFinalizeGraphRestore();});graphRestoreTimer->start(5);
     }
     ~MixxxBackend() override {
-        for (int index = 0; index < 4; ++index) if (decks_[index]) scratch(index, "abort", 0);
+        for (int index = 0; index < 4; ++index) if (decks_[index]) releaseScratch(index);
         if (recorder_ && (recordingActive_ || recordingPending_)) recorder_->stopRecording();
         sound_.reset(); // Stops callbacks before any engine-owned memory is freed.
         junction::audioBridge.store(nullptr,std::memory_order_release);
@@ -470,7 +470,7 @@ public:
     }
     void load(int index, const QString& path, quint64 generation) override {
         pitchbend(index, 0);
-        scratch(index, "abort", 0);
+        releaseScratch(index);
         disableFx(index);
         deckReady_[index]=false;deckErrors_[index].clear();
         generations_[index] = generation;
@@ -480,7 +480,7 @@ public:
     }
     void unload(int index) override {
         pitchbend(index, 0);
-        scratch(index, "abort", 0);
+        releaseScratch(index);
         disableFx(index);
         deckReady_[index]=false;deckErrors_[index].clear();
         ++generations_[index]; tracks_[index].reset();
@@ -515,13 +515,27 @@ public:
     void seek(int index, double ms) override {
         if (tracks_[index] && tracks_[index]->getDuration() > 0) ControlObject::set(ConfigKey(groups[index], "playposition"), ms / (1000.0 * tracks_[index]->getDuration()));
     }
+    // ネイティブ演奏入力 (inputSequence>0) と RPC のポインタ操作 (inputSequence==0) は
+    // 同じデッキを共有する。begin が所有権を取り、もう一方の遅れた move/end/abort は
+    // 新しいジェスチャーを止めない。ロード・アンロード等の生存管理は releaseScratch()
+    // から所有権に関係なく解放する。
     void scratch(int index, const QString& phase, double ms, double capturedNativeUs = 0, bool keepalive = false, quint64 inputSequence = 0) override {
         if (!decks_[index]) return;
+        const auto origin = inputSequence > 0 ? ScratchOrigin::Native : ScratchOrigin::Control;
+        const bool release = phase == "end" || phase == "abort";
+        if (phase == "begin") scratchOwner_[index] = origin;
+        else if (scratchOwner_[index] != origin) return;
+        else if (release) scratchOwner_[index] = ScratchOrigin::None;
         if (phase == "begin") pitchbend(index, 0);
         const double sampleRate = tracks_[index] ? tracks_[index]->getSampleRate().value() : 44100;
         // "abort" は曲の入れ替えなどでの強制解放。制動も着地もせず即座に離す。
-        const bool release = phase == "end" || phase == "abort";
         decks_[index]->requestScratch(!release, phase == "begin", ms * sampleRate * 2.0 / 1000.0, sampleRate, phase != "abort", capturedNativeUs, keepalive, inputSequence);
+    }
+    // ライフサイクル側の解放。所有者が誰であっても必ずジェスチャーを終わらせる。
+    void releaseScratch(int index) {
+        if (!decks_[index]) return;
+        scratchOwner_[index] = ScratchOrigin::Control;
+        scratch(index, "abort", 0);
     }
     bool scratching(int index) const override { return decks_[index] && decks_[index]->scratching(); }
     QJsonObject waveformCommand(const QString& op,const QJsonObject& p) override {
@@ -1045,6 +1059,8 @@ private:
     std::unique_ptr<EngineMixer> mixer_;
     std::unique_ptr<RecordingManager> recorder_;
     std::array<ScratchDeck*, 4> decks_{};
+    enum class ScratchOrigin { None, Control, Native };
+    std::array<ScratchOrigin, 4> scratchOwner_{};
     std::array<QString,4> colorNames_{"filter","filter","filter","filter"};
     std::array<double,4> colorAmounts_{};
     std::unique_ptr<BeatFx> beatFx_;

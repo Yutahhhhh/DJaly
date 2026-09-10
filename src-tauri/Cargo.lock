@@ -956,6 +956,7 @@ dependencies = [
  "midir",
  "serde",
  "serde_json",
+ "tao",
  "tauri",
  "tauri-build",
  "tauri-plugin-devtools",
@@ -966,6 +967,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "wry",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 mod waveform;
+mod junction_exchange_files;
 use std::env;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -112,6 +113,8 @@ pub fn run() {
             waveform::dj_waveform_pcm,
             waveform::dj_waveform_manifest,
             dj_engine::commands::junction_command,
+            junction_exchange_files::junction_read_exchange_file,
+            junction_exchange_files::junction_write_exchange_file,
         ])
         .setup(|app| {
             for arg in env::args().skip(1) { if valid_junction_invite(&arg) { if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(arg); } } }

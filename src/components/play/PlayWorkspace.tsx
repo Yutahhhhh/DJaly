@@ -1,4 +1,5 @@
 import { localTrackId } from '@/services/junction/asset-resolver';
+import { deckRealtimeStore } from '@/services/dj-engine/deck-realtime-store';
 import { junctionLeaseKey } from '@/services/junction/state';
 import { junctionState } from '@/services/junction/state';
 import { BeatFxPanel } from "./BeatFxPanel";
@@ -56,6 +57,8 @@ export function PlayWorkspace() {
   const [expandedPair,setExpandedPair]=useState<'AB'|'CD'|null>(null);
   const [waveContrast,setWaveContrast]=useState(()=>Number(localStorage.getItem('djaly.waveContrast'))||1);
   const [waveMonochrome,setWaveMonochrome]=useState(()=>localStorage.getItem('djaly.waveMonochrome')==='true');
+  const [waveDelay,setWaveDelay]=useState(()=>Math.max(-50,Math.min(500,Number(localStorage.getItem('djaly.waveDelay'))||0)));
+  useEffect(()=>{deckRealtimeStore.setPresentationDelay(waveDelay);},[waveDelay]);
   useEffect(()=>{const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setExpandedPair(null);};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[]);
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
   const [outputDevice, setOutputDevice] = useState(() => localStorage.getItem("djaly.djOutputDevice") ?? "");
@@ -770,6 +773,7 @@ export function PlayWorkspace() {
       <details className="dj-wave-settings"><summary>表示設定</summary><div>
         <label>波形コントラスト <input type="range" min="1" max="2" step="0.1" value={waveContrast} onChange={event=>{setWaveContrast(Number(event.target.value));localStorage.setItem('djaly.waveContrast',event.target.value);}} /></label>
         <label><input type="checkbox" checked={waveMonochrome} onChange={event=>{setWaveMonochrome(event.target.checked);localStorage.setItem('djaly.waveMonochrome',String(event.target.checked));}} />波形を単色で表示</label>
+        <label title="音より波形が先行する場合は増やします。">波形の表示遅延（ms） <input type="number" min="-50" max="500" step="1" value={waveDelay} onChange={event=>{const value=Math.max(-50,Math.min(500,Number(event.target.value)||0));setWaveDelay(value);localStorage.setItem('djaly.waveDelay',String(value));}} /></label>
       </div></details>
       <div className="dj-segmented" aria-label="波形レイアウト">{(["horizontal", "vertical"] as const).map((layout) => <button key={layout} title={layout === "horizontal" ? "横波形（デッキ上部に重ねて表示）" : "縦波形（デッキ中央に並べて表示）"} aria-label={layout === "horizontal" ? "横波形" : "縦波形（デッキ中央）"} aria-pressed={waveformLayout === layout} className={waveformLayout === layout ? "is-on" : ""} onClick={() => { setWaveformLayout(layout); localStorage.setItem("djaly.waveformLayout", layout); }}>{layout === "horizontal" ? <Rows3 /> : <Columns3 />}</button>)}</div>
       <div className="dj-engine-status"><i className={connected && snapshot?.audio.applied ? "is-connected" : ""} /><span>{connected ? snapshot?.engine.simulated ? "SIMULATOR · 音声出力なし" : snapshot?.audio.applied ? "AUDIO CONNECTED" : "音声出力を確認中" : busy ? "音声エンジンを起動中…" : "AUDIO OFFLINE"}</span></div>

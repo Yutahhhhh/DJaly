@@ -4,7 +4,9 @@
 #include "asset_cache.h"
 #include "validation.h"
 #include "validation_capture.h"
+#include "manual_exchange.h"
 #include "ice_servers.h"
+#include "network_settings.h"
 #include <samplerate.h>
 #include "../backend.h"
 #include <QJsonDocument>
@@ -58,7 +60,29 @@ struct Runtime::Impl {
     ProducerTap tap;ProgramOutput program;AssetCache cache;
     QTemporaryDir identityDir;
     std::shared_ptr<MediaTransport::Identity> identity;
-    struct Peer {QString id,name,fp;bool approved=false,hello=false,producing=false,endingAck=false;std::unique_ptr<MediaTransport> transport;QQueue<QByteArray> pending;};
+    // One manual offer/answer round for one DJ. The peer id it belongs to is
+    // stable across re-exchange; only `generation` and `attempt` move.
+    struct ManualAttempt {
+        ExchangeState state=ExchangeState::Idle;
+        QString inviteId,inviteText,responseText,noticeText,detail,errorCode,waitingFor=QStringLiteral("none");
+        QJsonArray ice;
+        QString answerSdp[2],answerType[2],answerFingerprint,answerName,answerDigest;
+        bool answerPending=false;
+        quint64 generation=0,attempt=0;
+        qint64 expiresAt=0,collectDeadline=0,connectDeadline=0;
+        unsigned retries=0;
+        void clearArtifacts(){
+            inviteText.clear();responseText.clear();answerPending=false;answerFingerprint.clear();
+            answerName.clear();answerDigest.clear();
+            for(auto& value:answerSdp)value.clear();
+            for(auto& value:answerType)value.clear();
+        }
+    };
+    // `candidate` is a replacement connection attempt built while `transport`
+    // is still carrying audio. It is promoted only once it actually connects,
+    // so a manual re-exchange never interrupts an established peer.
+    struct Peer {QString id,name,fp;bool approved=false,hello=false,producing=false,endingAck=false;std::unique_ptr<MediaTransport> transport;QQueue<QByteArray> pending;
+        qint64 lastControlAt=0;quint64 serial=0,candidateSerial=0;std::unique_ptr<MediaTransport> candidate,retiring; qint64 retireAt=0;ManualAttempt manual;};
     std::map<QString,std::unique_ptr<Peer>> peers;
 #if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
     std::shared_ptr<rtc::WebSocket> signal;
@@ -101,6 +125,14 @@ struct Runtime::Impl {
     std::future<std::pair<QJsonObject,std::map<QString,QString>>> exportJob;
     quint64 exportRevision=0;
     QJsonObject privateState;
+    // --- manual (signalling-free) exchange -------------------------------
+    bool manual=false;QByteArray hostCertificatePem;QString pinnedHostFingerprint;
+    quint64 serialCounter=0;
+    QString manualDetail,manualErrorCode;
+    std::unique_ptr<MediaTransport> networkProbe;
+    QJsonObject networkTestResult;
+    qint64 networkTestDeadline=0;
+    NetworkSettings network;
     explicit Impl(Runtime* owner,PlaybackBackend* b):q(owner),backend(b),cache(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)+"/junction") {
         timer.setInterval(5);QObject::connect(&timer,&QTimer::timeout,q,[this]{tick();});timer.start();
     }
@@ -116,19 +148,54 @@ struct Runtime::Impl {
 #endif
     }
     void queue(Peer& p,const QString& type,QJsonObject payload) {
-        if(p.pending.size()>=128) {p.pending.clear();fail("制御通信が混雑しています");return;}
+        if(p.pending.size()>=64&&(type=="session.snapshot"||type=="clock.probe"))return;
+        if(p.pending.size()>=128) {p.pending.clear();if(manual)manualSetState(p,ExchangeState::NeedsExchange,"このDJへの制御通信が混雑しています。接続情報を作り直してください","control_backpressure");else fail("制御通信が混雑しています");return;}
         p.pending.enqueue(json({{"version",1},{"sessionId",auth.sessionId},{"senderPeerId",auth.local},{"epoch",u64(auth.epoch)},{"messageId",secureRandomHex(12)},{"type",type},{"payload",payload}}));
     }
     void broadcast(const QString& type,const QJsonObject& payload) {for(auto& [id,p]:peers)if(p->approved&&p->transport)queue(*p,type,payload);}
-    QJsonObject publicState() const {
+    /// `wire` strips everything a remote peer must not see. Exchange packets
+    /// carry another DJ's invite/response/notice text and never go on the wire.
+    QJsonObject publicState(bool wire=false) const {
         QJsonArray participants;
         if(!auth.local.isEmpty())participants.append(QJsonObject{{"peerId",auth.local},{"displayName",displayName},{"approved",true},{"isHost",hosting},{"isPerformer",auth.owner==auth.local},{"isNextUp",auth.next==auth.local},{"status",connection}});
-        for(const auto& [id,p]:peers)participants.append(QJsonObject{{"peerId",id},{"displayName",p->name},{"approved",p->approved},{"isHost",id==auth.host},{"isPerformer",id==auth.owner},{"isNextUp",id==auth.next},{"status",p->hello?"connected":p->approved?"connecting":"pending"}});
+        for(const auto& [id,p]:peers){
+            QJsonObject row{{"peerId",id},{"displayName",p->name},{"approved",p->approved},{"isHost",id==auth.host},{"isPerformer",id==auth.owner},{"isNextUp",id==auth.next},{"status",p->hello?"connected":p->approved?"connecting":"pending"}};
+            if(manual&&!wire)row["exchange"]=manualExchangeJson(*p);
+            participants.append(row);
+        }
         if(!hosting)for(const auto& value:participantRoster){const auto row=value.toObject();const auto id=row["peerId"].toString();if(!validOpaqueId(id)||id==auth.local||peers.count(id))continue;
             participants.append(QJsonObject{{"peerId",id},{"displayName",sanitizeDisplayName(row["displayName"].toString())},{"approved",row["approved"].toBool()},{"isHost",id==auth.host},{"isPerformer",id==auth.owner},{"isNextUp",id==auth.next},{"status",row["status"].toString()}});
         }
         QJsonArray why;for(const auto& r:reasons)why.append(r);
-        return {{"active",!auth.sessionId.isEmpty()},{"sessionId",auth.sessionId},{"localPeerId",auth.local},{"hostPeerId",auth.host},{"performerPeerId",auth.owner},{"nextPeerId",auth.next},{"epoch",u64(auth.epoch)},{"revision",double(auth.revision)},{"sessionName",name},{"handoffState",auth.phase},{"handoffId",auth.handoffId},{"participants",participants},{"readiness",QJsonObject{{"ready",ready},{"reasons",why}}},{"connection",QJsonObject{{"state",connection},{"detail",problem}}},{"program",QJsonObject{{"state",programState},{"localMonitor",separateLocalMaster.load()?"direct":"program-delayed"},{"outputDevice",QString::number(programDevice)},{"recording",program.recording()},{"underruns",u64(program.underruns())},{"meter",double(program.peak())},{"rms",double(program.rms())},{"sampleRateHz",int(program.sampleRate())},{"deviceLatencySeconds",program.deviceLatencySeconds()}}},{"invite",hosting?invite:QString{}},{"privatePreview",backend->privatePreviewState()}};
+        return {{"active",!auth.sessionId.isEmpty()},{"sessionId",auth.sessionId},{"localPeerId",auth.local},{"hostPeerId",auth.host},{"performerPeerId",auth.owner},{"nextPeerId",auth.next},{"epoch",u64(auth.epoch)},{"revision",double(auth.revision)},{"sessionName",name},{"handoffState",auth.phase},{"handoffId",auth.handoffId},{"participants",participants},{"readiness",QJsonObject{{"ready",ready},{"reasons",why}}},{"connection",QJsonObject{{"state",connection},{"detail",problem}}},{"program",QJsonObject{{"state",programState},{"localMonitor",separateLocalMaster.load()?"direct":"program-delayed"},{"outputDevice",QString::number(programDevice)},{"recording",program.recording()},{"underruns",u64(program.underruns())},{"meter",double(program.peak())},{"rms",double(program.rms())},{"sampleRateHz",int(program.sampleRate())},{"deviceLatencySeconds",program.deviceLatencySeconds()}}},{"invite",hosting?invite:QString{}},{"privatePreview",backend->privatePreviewState()},{"exchange",wire?QJsonObject{{"mode",manual?QStringLiteral("manual"):QStringLiteral("server")}}:exchangeState()}};
+    }
+    /// Session-level exchange summary. For a guest it mirrors the attempt with
+    /// the host, which is the only one it has.
+    QJsonObject exchangeState() const {
+        QJsonObject value{{"mode",manual?QStringLiteral("manual"):QStringLiteral("server")}};
+        if(!manual){value["state"]=exchangeStateName(connection=="connected"?ExchangeState::Connected:connection=="disconnected"?ExchangeState::Idle:ExchangeState::Connecting);
+            if(!problem.isEmpty())value["detail"]=problem;return value;}
+        const Peer* subject=nullptr;
+        if(!hosting){auto i=peers.find(auth.host);if(i!=peers.end())subject=i->second.get();}
+        else{
+            // The host's own card summarises the attempt that most needs the
+            // user: an approval first, then anything still being produced.
+            for(const auto& [id,p]:peers){
+                const auto state=p->manual.state;
+                if(state==ExchangeState::ApprovalPending){subject=p.get();break;}
+                if(!subject&&(state==ExchangeState::Collecting||state==ExchangeState::InviteReady))subject=p.get();
+            }
+        }
+        value["state"]=exchangeStateName(subject?subject->manual.state:ExchangeState::Idle);
+        if(subject){
+            if(!subject->manual.detail.isEmpty())value["detail"]=subject->manual.detail;
+            if(!subject->manual.errorCode.isEmpty())value["errorCode"]=subject->manual.errorCode;
+            if(!subject->manual.responseText.isEmpty())value["responseText"]=subject->manual.responseText;
+            if(!subject->manual.inviteId.isEmpty())value["inviteId"]=subject->manual.inviteId;
+            if(subject->manual.expiresAt)value["expiresAt"]=double(subject->manual.expiresAt);
+        }else if(!manualDetail.isEmpty())value["detail"]=manualDetail;
+        if(!manualErrorCode.isEmpty())value["errorCode"]=manualErrorCode;
+        return value;
     }
     void updateInvite() {
         if(!hosting || room.isEmpty())return;
@@ -153,6 +220,30 @@ struct Runtime::Impl {
 #else
         return "このビルドにはWebRTCが含まれていません";
 #endif
+    }
+    /// Brings up a manual session. Nothing is contacted: the host mints its own
+    /// session and peer identifiers and is immediately live locally.
+    QString startManual(bool host) {
+        manual=true;hosting=host;QString error;
+#ifdef __APPLE__
+        if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("Djaly Junction audio session"),&sleepLease);
+#endif
+        if(!MediaTransport::available())return "このビルドにはWebRTCが含まれていません";
+        if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);
+        if(!identity)return error.isEmpty()?QStringLiteral("この端末の識別情報を作成できません"):error;
+        hostCertificatePem=readCertificatePem(identity->certificatePath);
+        if(hostCertificatePem.isEmpty())return "この端末の証明書を読み込めません";
+        // Manual mode needs no negotiated TURN credentials before it can build
+        // a transport; servers are resolved per attempt from local settings.
+        iceReady=true;
+        if(host){
+            auth.local=secureRandomHex(16);auth.host=auth.local;auth.owner=auth.local;
+            pinnedHostFingerprint=identity->fingerprint;
+            timeline.start(monotonicNanos());timelineAnchor.store(timeline.originNanos());
+            captureEnabled.store(true);tap.enable(false,true);
+            connection="connected";problem.clear();openProgram();
+        }
+        return {};
     }
     void onSignal(const QJsonObject& m) {
         if(m["v"]!=1)return;
@@ -186,22 +277,310 @@ struct Runtime::Impl {
             while(!deferredSignals.isEmpty())onSignal(deferredSignals.dequeue());
         }
     }
+    /// Resolves the slot a callback belongs to. A stale serial means the
+    /// attempt was replaced or cancelled while the callback was in flight;
+    /// every callback below drops out rather than touching the new attempt.
+    MediaTransport* transportForSerial(Peer& p,quint64 serial) const {
+        if(serial&&p.serial==serial)return p.transport.get();
+        if(serial&&p.candidateSerial==serial)return p.candidate.get();
+        return nullptr;
+    }
+    Peer* peerForSerial(const QString& id,quint64 serial) {
+        auto i=peers.find(id);if(i==peers.end())return nullptr;
+        return transportForSerial(*i->second,serial)?i->second.get():nullptr;
+    }
+    /// True while the callback belongs to the slot that is allowed to carry
+    /// session traffic. A not-yet-promoted candidate is admitted first.
+    bool liveSerial(Peer& p,quint64 serial) {
+        if(p.candidateSerial==serial)manualPromoteIfReady(p);
+        return p.serial==serial;
+    }
+    std::unique_ptr<MediaTransport> buildTransport(const QString& id,quint64 serial,bool offerer,const QStringList& servers,QString* error) {
+        QPointer<Runtime> safe=q;
+        MediaTransport::Callbacks callbacks;
+        // Manual mode aggregates candidates instead of trickling them, so the
+        // description/candidate callbacks below are inert without signalling.
+        callbacks.gatheringComplete=[safe,id,serial](bool){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->manualCollected(*p,serial);},Qt::QueuedConnection);};
+        callbacks.linkState=[safe,id,serial](bool,LinkState state){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,state]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->manualLinkChanged(*p,serial,state);},Qt::QueuedConnection);};
+        callbacks.localDescription=[safe,id,serial](bool bulk,QString sdp,QString type,QString){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bulk,sdp,type]{if(!safe||safe->d->manual)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","description"},{"bulk",bulk},{"sdp",sdp},{"descriptionType",type}}}});},Qt::QueuedConnection);};
+        callbacks.localCandidate=[safe,id,serial](bool bulk,QString candidate,QString mid){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bulk,candidate,mid]{if(!safe||safe->d->manual)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","candidate"},{"bulk",bulk},{"candidate",candidate},{"mid",mid}}}});},Qt::QueuedConnection);};
+        callbacks.producerManifest=[safe,id,serial](StreamManifest manifest){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,manifest]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p&&safe->d->liveSerial(*p,serial))safe->d->queue(*p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",safe->d->displayName},{"stream",streamJson(manifest)}});},Qt::QueuedConnection);};
+        callbacks.control=[safe,id,serial](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bytes]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p&&safe->d->liveSerial(*p,serial))safe->d->control(id,bytes);},Qt::QueuedConnection);};
+        callbacks.validation=[safe,id,serial](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bytes]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p&&safe->d->liveSerial(*p,serial))safe->d->validationChunk(id,bytes);},Qt::QueuedConnection);};
+        callbacks.bulk=[safe,id,serial](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bytes]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p&&safe->d->liveSerial(*p,serial))safe->d->bulk(id,bytes);},Qt::QueuedConnection);};
+        // A transport-level failure is scoped to its own peer. It must never
+        // tear down the shared session or another DJ's connection.
+        callbacks.error=[safe,id,serial](QString failure){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,failure]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(!p)return;
+            if(safe->d->manual){if(serial!=safe->d->attemptSerial(*p)||exchangeStateTerminal(p->manual.state))return;safe->d->manualSetState(*p,ExchangeState::Failed,failure,QStringLiteral("transport"));}
+            else safe->d->fail(failure);},Qt::QueuedConnection);};
+        auto transport=std::make_unique<MediaTransport>(id,servers,std::move(callbacks),identity,qEnvironmentVariable("DJALY_JUNCTION_FORCE_RELAY")=="1");
+        if(!transport->start(offerer,error))return {};
+        return transport;
+    }
     void makePeer(Peer& p,bool offerer) {
         if(!iceReady||p.transport)return;
-        const auto id=p.id;QPointer<Runtime> safe=q;
-        MediaTransport::Callbacks callbacks;
-        callbacks.localDescription=[safe,id](bool bulk,QString sdp,QString type,QString){if(safe)QMetaObject::invokeMethod(safe,[safe,id,bulk,sdp,type]{if(safe)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","description"},{"bulk",bulk},{"sdp",sdp},{"descriptionType",type}}}});},Qt::QueuedConnection);};
-        callbacks.localCandidate=[safe,id](bool bulk,QString candidate,QString mid){if(safe)QMetaObject::invokeMethod(safe,[safe,id,bulk,candidate,mid]{if(safe)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","candidate"},{"bulk",bulk},{"candidate",candidate},{"mid",mid}}}});},Qt::QueuedConnection);};
-        callbacks.producerManifest=[safe,id](StreamManifest manifest){if(safe)QMetaObject::invokeMethod(safe,[safe,id,manifest]{if(!safe)return;auto p=safe->d->peers.find(id);if(p!=safe->d->peers.end())safe->d->queue(*p->second,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",safe->d->displayName},{"stream",streamJson(manifest)}});},Qt::QueuedConnection);};
-        callbacks.control=[safe,id](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,bytes]{if(safe)safe->d->control(id,bytes);},Qt::QueuedConnection);};
-        callbacks.validation=[safe,id](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,bytes]{if(safe)safe->d->validationChunk(id,bytes);},Qt::QueuedConnection);};
-        callbacks.bulk=[safe,id](QByteArray bytes){if(safe)QMetaObject::invokeMethod(safe,[safe,id,bytes]{if(safe)safe->d->bulk(id,bytes);},Qt::QueuedConnection);};
-        callbacks.error=[safe](QString error){if(safe)QMetaObject::invokeMethod(safe,[safe,error]{if(safe)safe->d->fail(error);},Qt::QueuedConnection);};
-        p.transport=std::make_unique<MediaTransport>(id,iceServers,std::move(callbacks),identity,qEnvironmentVariable("DJALY_JUNCTION_FORCE_RELAY")=="1");QString error;if(!p.transport->start(offerer,&error)){fail(error);return;}
+        const auto serial=++serialCounter;p.serial=serial;QString error;
+        auto transport=buildTransport(p.id,serial,offerer,iceServers,&error);
+        if(!transport){p.serial=0;fail(error);return;}
+        p.transport=std::move(transport);
         queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",displayName}});
         if(hosting)queue(p,"session.snapshot",wireState());
     }
-    QJsonObject wireState() const {auto s=publicState();s.remove("invite");s.remove("privatePreview");s.remove("program");s["timelineOriginNanos"]=QString::number(timeline.originNanos());s["timelineOriginFrame"]=u64(timeline.originFrame());s["programDelayFrames"]=int(delay);s["engineFingerprint"]=fingerprint();if(auth.committed)s["commit"]=auth.committed->toJson();return s;}
+    // ---------------------------------------------------------------------
+    // Manual exchange
+    // ---------------------------------------------------------------------
+    MediaTransport* attemptSlot(Peer& p) const {return p.candidate?p.candidate.get():p.transport.get();}
+    quint64 attemptSerial(const Peer& p) const {return p.candidate?p.candidateSerial:p.serial;}
+    void manualSetState(Peer& p,ExchangeState state,const QString& detail={},const QString& code={}) {
+        p.manual.state=state;p.manual.detail=detail;p.manual.errorCode=code;
+        if(!hosting&&!p.candidate){
+            if(state==ExchangeState::Connected)connection="connected";
+            else if(state==ExchangeState::Interrupted)connection="reconnecting";
+            else if(state==ExchangeState::NeedsExchange||state==ExchangeState::Failed)connection="error";
+        }
+        p.manual.waitingFor=state==ExchangeState::InviteReady?QStringLiteral("guest")
+            :state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost?QStringLiteral("host")
+            :state==ExchangeState::ApprovalPending||state==ExchangeState::Collecting?QStringLiteral("local")
+            :QStringLiteral("none");
+        ++auth.revision;
+    }
+    /// Starts one connection attempt for `p`. When the peer already has a live
+    /// transport the attempt is built alongside it as a replacement candidate,
+    /// so an established connection keeps carrying audio until the new one is
+    /// actually up.
+    QString manualStartAttempt(Peer& p,bool offerer,const QJsonArray& remoteIce) {
+        const bool replacement=p.transport&&p.transport->aggregateLinkState()==LinkState::Connected;
+        const auto serial=++serialCounter;QString error;
+        auto transport=buildTransport(p.id,serial,offerer,iceServerUrls(remoteIce),&error);
+        if(!transport)return error.isEmpty()?QStringLiteral("接続を開始できません"):error;
+        if(replacement){p.candidate=std::move(transport);p.candidateSerial=serial;}
+        else{
+            // Not connected: replace outright and drop any older candidate so
+            // exactly one attempt is ever gathering for this peer.
+            p.candidate.reset();p.candidateSerial=0;
+            if(p.transport)p.transport->close();
+            p.transport=std::move(transport);p.serial=serial;p.hello=false;p.producing=false;p.pending.clear();
+        }
+        p.manual.retries=0;p.manual.clearArtifacts();p.manual.noticeText.clear();
+        p.manual.collectDeadline=monotonicNanos()+30000000000LL;p.manual.connectDeadline=0;
+        manualSetState(p,ExchangeState::Collecting,QStringLiteral("音声・操作と楽曲転送の両方の接続先を収集しています。完了までお待ちください"));
+        if(!replacement)queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",displayName}});
+        return {};
+    }
+    /// Both connections finished gathering: the aggregated descriptions are
+    /// now complete and the packet can be produced.
+    void manualCollected(Peer& p,quint64 serial) {
+        if(!manual||serial!=attemptSerial(p))return;
+        auto* transport=attemptSlot(p);
+        if(!transport||!transport->readyForManualExport())return;
+        if(p.manual.state!=ExchangeState::Collecting)return;
+        p.manual.collectDeadline=0;
+        const auto failure=hosting?manualBuildInvite(p):manualBuildResponse(p);
+        if(!failure.isEmpty()){manualSetState(p,ExchangeState::Failed,failure,QStringLiteral("packet"));return;}
+    }
+    QString manualPacketBase(Peer& p,ExchangePacket& packet) const {
+        packet.sessionId=auth.sessionId;packet.sessionName=name;packet.inviteId=p.manual.inviteId;
+        packet.hostPeerId=auth.host;packet.hostName=hosting?displayName:p.name;
+        packet.hostFingerprint=hosting?identity->fingerprint:pinnedHostFingerprint;
+        packet.peerId=hosting?p.id:auth.local;packet.generation=p.manual.generation;packet.attempt=p.manual.attempt;
+        packet.expiresAt=p.manual.expiresAt;
+        if(packet.hostFingerprint.isEmpty())return QStringLiteral("ホストの識別情報がありません");
+        return {};
+    }
+    QString manualSign(ExchangePacket& packet) const {
+        if(hostCertificatePem.isEmpty())return QStringLiteral("この端末の証明書を読み込めません");
+        packet.certificatePem=hostCertificatePem;QString failure;
+        packet.signature=signExchangePayload(identity->keyPath,packet.canonicalPayload(),&failure);
+        return packet.signature.isEmpty()?failure:QString{};
+    }
+    QString manualBuildInvite(Peer& p) {
+        auto* transport=attemptSlot(p);if(!transport)return QStringLiteral("接続を開始できません");
+        ExchangePacket packet;packet.kind=ExchangeKind::Invite;
+        auto failure=manualPacketBase(p,packet);if(!failure.isEmpty())return failure;
+        for(int index=0;index<2;++index){
+            QString type,fp;const auto sdp=transport->aggregatedDescription(index==1,&type,&fp);
+            if(sdp.isEmpty()||!sdp.contains("a=candidate:")||fp!=identity->fingerprint)return QStringLiteral("接続情報を作成できません");
+            packet.description[index]={type,sdp};
+        }
+        if(hosting)packet.iceServers=p.manual.ice;
+        failure=manualSign(packet);if(!failure.isEmpty())return failure;
+        const auto text=encodeExchangePacket(packet,&failure);if(text.isEmpty())return failure;
+        p.manual.inviteText=text;p.manual.responseText.clear();
+        manualSetState(p,ExchangeState::InviteReady,QStringLiteral("この接続情報を相手に渡してください"));
+        return {};
+    }
+    QString manualBuildResponse(Peer& p) {
+        auto* transport=attemptSlot(p);if(!transport)return QStringLiteral("接続を開始できません");
+        ExchangePacket packet;packet.kind=ExchangeKind::Response;
+        auto failure=manualPacketBase(p,packet);if(!failure.isEmpty())return failure;
+        packet.peerName=displayName;packet.peerFingerprint=identity->fingerprint;
+        for(int index=0;index<2;++index){
+            QString type,fp;const auto sdp=transport->aggregatedDescription(index==1,&type,&fp);
+            if(sdp.isEmpty()||!sdp.contains("a=candidate:")||fp!=identity->fingerprint)return QStringLiteral("接続情報を作成できません");
+            packet.description[index]={type,sdp};
+        }
+        if(hosting)packet.iceServers=p.manual.ice;
+        failure=manualSign(packet);if(!failure.isEmpty())return failure;
+        const auto text=encodeExchangePacket(packet,&failure);if(text.isEmpty())return failure;
+        p.manual.responseText=text;
+        // Producing the text is local work only. It is never evidence that the
+        // host has received, read or accepted anything.
+        manualSetState(p,ExchangeState::ResponseReady,QStringLiteral("この応答をホストに渡してください"));
+        return {};
+    }
+    /// Applies an imported answer. Only reached after the host has approved.
+    QString manualApplyAnswer(Peer& p) {
+        auto* transport=attemptSlot(p);
+        if(!transport||!p.manual.answerPending)return QStringLiteral("応答が読み込まれていません");
+        for(int index=0;index<2;++index){
+            QString failure;
+            if(!transport->remoteDescription(index==1,p.manual.answerSdp[index],p.manual.answerType[index],p.manual.answerFingerprint,&failure))
+                return failure.isEmpty()?QStringLiteral("応答を適用できません"):failure;
+        }
+        p.fp=p.manual.answerFingerprint;
+        if(!p.manual.answerName.isEmpty())p.name=p.manual.answerName;
+        p.manual.answerPending=false;
+        p.manual.connectDeadline=monotonicNanos()+45000000000LL;
+        manualSetState(p,ExchangeState::Connecting,QStringLiteral("接続しています"));
+        return {};
+    }
+    /// Promotes a replacement candidate once it is genuinely connected. The
+    /// previously established transport is only dropped at that point.
+    void manualPromoteIfReady(Peer& p) {
+        if(!p.candidate||p.candidate->aggregateLinkState()!=LinkState::Connected)return;
+        if(p.transport){
+            if(p.producing){p.transport->close();p.candidate->inheritProducerHistory(*p.transport);}
+            else {p.retiring=std::move(p.transport);p.retireAt=monotonicNanos()+500000000LL;}
+        }
+        p.transport=std::move(p.candidate);p.serial=p.candidateSerial;
+        p.candidate.reset();p.candidateSerial=0;
+        // The new link starts from a clean handshake; the peer id, approval and
+        // authenticated fingerprint are deliberately preserved.
+        p.hello=false;p.producing=false;p.lastControlAt=monotonicNanos();p.pending.clear();
+        queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",displayName}});
+        if(hosting)queue(p,"session.snapshot",wireState());
+        if(!hosting&&(auth.owner==auth.local||auth.next==auth.local))sendManifest(p);
+        p.manual.collectDeadline=0;p.manual.connectDeadline=0;
+        manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));
+    }
+    void manualLinkChanged(Peer& p,quint64 serial,LinkState state) {
+        if(!manual)return;
+        if(serial==p.candidateSerial){if(state==LinkState::Connected)manualPromoteIfReady(p);
+            else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("再接続できませんでした。接続情報を作り直してください"),QStringLiteral("candidate_failed"));
+            return;}
+        if(serial!=p.serial||p.candidate||exchangeStateTerminal(p.manual.state))return;
+        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
+        else if(state==LinkState::Disconnected){
+            // A transient outage is not a manual re-exchange. The performer,
+            // the epoch and the authorisation all stay exactly as they are.
+            if(!p.candidate&&!exchangeStateTerminal(p.manual.state))manualSetState(p,ExchangeState::Interrupted,QStringLiteral("接続が不安定です。復旧を待っています"),QStringLiteral("interrupted"));
+        }
+        else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("接続が切れました。接続情報を作り直してください"),QStringLiteral("link_failed"));
+    }
+    /// Signed offline notice. Without a channel to the other end, the only
+    /// honest option is a transferable packet the user delivers by hand.
+    QString manualBuildNotice(Peer& p,const QString& reason,const QString& text) {
+        if(!hosting)return QStringLiteral("通知はホストだけが発行できます");
+        ExchangePacket packet;packet.kind=ExchangeKind::Notice;
+        auto failure=manualPacketBase(p,packet);if(!failure.isEmpty())return failure;
+        packet.noticeReason=reason;packet.noticeText=text.left(200);
+        packet.expiresAt=QDateTime::currentMSecsSinceEpoch()+7LL*24*3600*1000;
+        failure=manualSign(packet);if(!failure.isEmpty())return failure;
+        const auto encoded=encodeExchangePacket(packet,&failure);if(encoded.isEmpty())return failure;
+        p.manual.noticeText=encoded;return {};
+    }
+    QJsonObject manualExchangeJson(const Peer& p) const {
+        QJsonObject value{{"state",exchangeStateName(p.manual.state)},{"waitingFor",p.manual.waitingFor}};
+        if(!p.manual.detail.isEmpty())value["detail"]=p.manual.detail;
+        if(!p.manual.errorCode.isEmpty())value["errorCode"]=p.manual.errorCode;
+        if(!p.manual.inviteText.isEmpty())value["inviteText"]=p.manual.inviteText;
+        if(!p.manual.noticeText.isEmpty())value["noticeText"]=p.manual.noticeText;
+        if(!p.manual.inviteId.isEmpty())value["inviteId"]=p.manual.inviteId;
+        if(p.manual.expiresAt)value["expiresAt"]=double(p.manual.expiresAt);
+        if(p.manual.attempt)value["attempt"]=double(p.manual.attempt);
+        const auto* transport=p.candidate?p.candidate.get():p.transport.get();
+        if(transport&&p.manual.state==ExchangeState::Connected)
+            value["route"]=transport->selectedRelay(false)||transport->selectedRelay(true)
+                ?(transport->selectedRelay(false)&&transport->selectedRelay(true)?QStringLiteral("relay"):QStringLiteral("mixed"))
+                :QStringLiteral("direct");
+        else value["route"]=QStringLiteral("unknown");
+        return value;
+    }
+    void discardAttempt(Peer& p) {
+        if(p.candidate){p.candidateSerial=0;p.candidate.reset();}
+        else if(p.transport&&p.transport->aggregateLinkState()!=LinkState::Connected){p.serial=0;p.transport.reset();p.hello=false;p.pending.clear();}
+        p.manual.collectDeadline=0;p.manual.connectDeadline=0;p.manual.clearArtifacts();
+    }
+    QString acceptManualInvite(const ExchangePacket& packet,bool initial) {
+        if(packet.kind!=ExchangeKind::Invite)return "ホストから届いた招待を取り込んでください";
+        if(!initial&&(packet.sessionId!=auth.sessionId||packet.peerId!=auth.local||packet.hostPeerId!=auth.host||packet.hostFingerprint!=pinnedHostFingerprint))return "別のセッション・参加者への招待です";
+        QString failure;
+        if(!verifyExchangeSignature(packet,initial?packet.hostFingerprint:pinnedHostFingerprint,&failure))return failure;
+        if(initial){
+            auth.sessionId=packet.sessionId;auth.local=packet.peerId;auth.host=packet.hostPeerId;auth.owner=auth.host;
+            name=packet.sessionName;pinnedHostFingerprint=packet.hostFingerprint;audible.store(false);connection="pending";
+            auto peer=std::make_unique<Peer>();peer->id=auth.host;peer->name=packet.hostName;peer->fp=packet.hostFingerprint;peer->approved=true;peers[auth.host]=std::move(peer);
+        }
+        auto& peer=*peers.at(auth.host);
+        if(!initial&&packet.generation<=peer.manual.generation)return "取り込み済み、または古い招待です。ホストから新しい招待を受け取ってください";
+        peer.manual.inviteId=packet.inviteId;peer.manual.generation=packet.generation;peer.manual.attempt=packet.attempt;peer.manual.expiresAt=packet.expiresAt;
+        // The host supplies only bounded, expiring TURN credentials. Local STUN
+        // may supplement them but a guest's saved TURN is not redistributed.
+        QJsonArray servers=packet.iceServers;
+        const auto local=network.credentials(auth.sessionId,auth.local,QDateTime::currentMSecsSinceEpoch());
+        for(const auto& item:local)servers.append(item);
+        failure=manualStartAttempt(peer,false,servers);if(!failure.isEmpty())return failure;
+        auto* transport=attemptSlot(peer);
+        for(int i=0;i<2;++i)if(!transport->remoteDescription(i==1,packet.description[i].sdp,packet.description[i].type,pinnedHostFingerprint,&failure)){discardAttempt(peer);manualSetState(peer,ExchangeState::Failed,failure);return failure;}
+        return {};
+    }
+    QJsonObject testNetwork(bool start) {
+        if(networkProbe){
+            if(networkProbe->readyForManualExport()){
+                const bool relay=networkProbe->aggregatedDescription(false).contains(" typ relay")&&networkProbe->aggregatedDescription(true).contains(" typ relay");
+                networkTestResult={{"state",relay?"success":"failure"},{"detail",relay?"中継用の接続先を取得できました。相手との接続成立は招待・返答の交換後に確認します":"中継用の接続先を取得できませんでした。URL・資格情報と回線を確認してください"}};
+                networkProbe.reset();networkTestDeadline=0;
+            }else if(monotonicNanos()>=networkTestDeadline){networkProbe.reset();networkTestDeadline=0;networkTestResult={{"state","timeout"},{"detail","30秒以内に中継用の接続先を取得できませんでした"}};}
+            return networkTestResult;
+        }
+        if(!start)return networkTestResult;
+        QString failure;auto servers=network.credentials(secureRandomHex(16),secureRandomHex(16),QDateTime::currentMSecsSinceEpoch(),&failure);
+        bool hasTurn=false;for(const auto& v:servers)hasTurn|=v.toObject().contains("credential");
+        if(!hasTurn)return {{"state","failure"},{"detail",failure.isEmpty()?QStringLiteral("中継設定を適用してからテストしてください"):failure}};
+        networkProbe=std::make_unique<MediaTransport>(secureRandomHex(16),iceServerUrls(servers),MediaTransport::Callbacks{},nullptr,true);
+        if(!networkProbe->start(true,&failure)){networkProbe.reset();return {{"state","failure"},{"detail",failure}};}
+        networkTestDeadline=monotonicNanos()+30000000000LL;
+        networkTestResult={{"state","checking"},{"detail","中継用の接続先を収集しています"}};return networkTestResult;
+    }
+    /// Deadlines and expiry for every manual attempt. Runs from the session
+    /// tick so one peer's timeout never touches another's.
+    void manualTick() {
+        if(!manual)return;
+        const auto nowNanos=monotonicNanos(),nowMs=QDateTime::currentMSecsSinceEpoch();
+        for(auto& [id,p]:peers){
+            auto& attempt=p->manual;
+            if(p->retiring){if(hosting)route(p->retiring->decodedRing(),id);if(nowNanos>=p->retireAt)p->retiring.reset();}
+            if(attempt.state==ExchangeState::Connected&&p->lastControlAt&&nowNanos-p->lastControlAt>3000000000LL){manualSetState(*p,ExchangeState::Interrupted,"通信が途切れています。15秒間、同じ接続の復旧を待ちます");attempt.connectDeadline=nowNanos+15000000000LL;}
+            if(p->candidate)manualPromoteIfReady(*p);
+            if(attempt.collectDeadline&&nowNanos>=attempt.collectDeadline){
+                discardAttempt(*p);
+                manualSetState(*p,ExchangeState::Failed,QStringLiteral("接続情報を作成できませんでした。ネットワーク設定を確認して、もう一度お試しください"),QStringLiteral("gathering_timeout"));
+            }
+            if(attempt.state==ExchangeState::Connecting&&attempt.connectDeadline&&nowNanos>=attempt.connectDeadline){
+                attempt.connectDeadline=0;
+                if(attempt.state==ExchangeState::Connecting){discardAttempt(*p);
+                    manualSetState(*p,ExchangeState::NeedsExchange,QStringLiteral("時間内に接続できませんでした。接続情報を作り直してください"),QStringLiteral("connect_timeout"));}
+            }
+            const bool waiting=attempt.state==ExchangeState::InviteReady||attempt.state==ExchangeState::ResponseReady
+                ||attempt.state==ExchangeState::AwaitingHost||attempt.state==ExchangeState::ApprovalPending;
+            if(attempt.state==ExchangeState::Interrupted){if(!attempt.connectDeadline)attempt.connectDeadline=nowNanos+15000000000LL;else if(nowNanos>=attempt.connectDeadline){discardAttempt(*p);manualSetState(*p,ExchangeState::NeedsExchange,"接続が戻りません。ホストから新しい接続情報を受け取ってください");}}
+            if(waiting&&attempt.expiresAt&&nowMs>=attempt.expiresAt){
+                discardAttempt(*p);
+                manualSetState(*p,ExchangeState::Expired,QStringLiteral("接続情報の期限が切れました。作り直してください"),QStringLiteral("expired"));
+            }
+        }
+    }
+    QJsonObject wireState() const {auto s=publicState(true);s.remove("invite");s.remove("privatePreview");s.remove("program");s["timelineOriginNanos"]=QString::number(timeline.originNanos());s["timelineOriginFrame"]=u64(timeline.originFrame());s["programDelayFrames"]=int(delay);s["engineFingerprint"]=fingerprint();if(auth.committed)s["commit"]=auth.committed->toJson();return s;}
     void sendManifest(Peer& p) {
         if(p.producing)return;
         p.producing=true;
@@ -213,10 +592,12 @@ struct Runtime::Impl {
         Envelope envelope;auto decoded=decodeEnvelopeBytes(bytes,&envelope,id);if(!decoded.ok())return;
         if(!hosting && auth.sessionId=="pending" && id==auth.host && envelope.type==MessageType::SessionSnapshot)auth.sessionId=envelope.sessionId;
         if(envelope.sessionId!=auth.sessionId)return;
+        p.lastControlAt=monotonicNanos();
+        if(manual&&p.manual.state==ExchangeState::Interrupted&&p.transport&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;manualSetState(p,ExchangeState::Connected,"通信が復旧しました");}
         const auto payload=envelope.payload;
         if(envelope.type==MessageType::SessionSnapshot && payload["engineFingerprint"]!=fingerprint()){fail("エンジンのバージョンが一致しません");return;}
         if(!p.hello && envelope.type!=MessageType::PeerHello && envelope.type!=MessageType::SessionSnapshot)return;
-        if(envelope.type==MessageType::PeerHello){if(payload["fingerprint"]!=fingerprint()){p.hello=false;fail("エンジンのバージョンが一致しません");return;}const bool firstHello=!p.hello;p.hello=true;if(firstHello)queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",displayName}});p.name=payload["displayName"].toString(p.name);connection="connected";
+        if(envelope.type==MessageType::PeerHello){if(payload["fingerprint"]!=fingerprint()){p.hello=false;if(manual){discardAttempt(p);manualSetState(p,ExchangeState::Failed,"エンジンのバージョンが一致しません。両方のアプリを更新してください","version_mismatch");}else fail("エンジンのバージョンが一致しません");return;}const bool firstHello=!p.hello;p.hello=true;if(firstHello)queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"displayName",displayName}});p.name=payload.contains("displayName")?sanitizeDisplayName(payload["displayName"].toString()):p.name;if(!manual||p.transport->aggregateLinkState()==LinkState::Connected)connection="connected";
             if(payload["stream"].isObject()){auto m=readStream(payload["stream"].toObject());if(m && m->producerPeerId==id && (id==auth.owner || id==auth.next) && (m->epoch==auth.epoch || (auth.committed&&m->epoch==auth.committed->newEpoch))){p.transport->setReceiveManifest(*m);queue(p,"peer.hello",{{"fingerprint",fingerprint()},{"streamAck",m->streamId}});}}
             else if(payload["streamAck"].isString())p.transport->acknowledgeSendManifest(payload["streamAck"].toString());
             else if(!hosting && (auth.owner==auth.local || auth.next==auth.local))sendManifest(p);
@@ -229,6 +610,7 @@ struct Runtime::Impl {
                     if(auth.commit(*commit,id).isEmpty()){scheduleCaptureCommit(*commit);auth.advance(now());}
                 }
             }
+            if(manual&&auth.phase=="recovery"&&payload["handoffState"]=="playing"){problem.clear();reasons.clear();}
             if(!auth.committed){auth.epoch=*epoch;auth.owner=payload["performerPeerId"].toString();auth.next=payload["nextPeerId"].toString();auth.phase=payload["handoffState"].toString();auth.handoffId=payload["handoffId"].toString();}
             name=payload["sessionName"].toString();if(payload["participants"].toArray().size()<=8)participantRoster=payload["participants"].toArray();
             bool valid=false;const auto t0=payload["timelineOriginNanos"].toString().toLongLong(&valid);auto f0=parseU64(payload["timelineOriginFrame"]);if(valid&&f0)timeline.adopt(t0,*f0);
@@ -279,6 +661,7 @@ struct Runtime::Impl {
         else if(envelope.type==MessageType::HandoffCommit && id==auth.host){auto commit=HandoffCommitMessage::fromJson(payload);if(commit){auto failure=applyCommit(*commit,id);if(!failure.isEmpty())fail(failure);else scheduleCaptureCommit(*commit);}}
 
         else if(envelope.type==MessageType::SessionRecovery&&id==auth.host){
+            if(manual&&payload["stage"]=="active"&&auth.owner==auth.local&&!auth.committed){q->setCaptureAnchor(lastCaptureSourceEnd.load(),now());captureEnabled.store(true);sendManifest(p);}
             if(payload["stage"]=="scheduled"){auto frame=parseU64(payload["frame"]),epoch=parseU64(payload["epoch"]);if(frame&&epoch&&*epoch>auth.epoch){recoveryResumeFrame=*frame;recoveryEpoch=*epoch;}}
             auth.phase="recovery";fail(payload["reason"].toString("配信を復旧中です"));
         }
@@ -439,12 +822,17 @@ struct Runtime::Impl {
             if(producer==auth.local)collectValidation(pcm.data(),result.info);
             if(!hosting||!programOpened)continue;
             auto info=result.info;
-            if(producer==auth.owner&&info.epoch==auth.epoch)ownerAudioAt=monotonicNanos();
+            if(producer==auth.owner&&info.epoch==auth.epoch){
+                ownerAudioAt=monotonicNanos();
+                // A returned live stream resumes its existing owner and epoch.
+                // Only the explicit recovery action can select the host instead.
+                if(manual&&auth.phase=="recovery"&&!auth.committed&&!recoveryResumeFrame&&info.mediaFrame+4800>=now()&&info.mediaFrame<=now()+4800){auth.phase="playing";recoveryUntil=0;problem.clear();reasons.clear();++auth.revision;broadcast("session.snapshot",wireState());}
+            }
             if(auth.committed&&producer==auth.committed->oldOwner&&info.epoch==auth.committed->oldEpoch){
                 backupPending.insert_or_assign(info.mediaFrame,ProgramBlock{info,std::vector<float>(pcm.data(),pcm.data()+info.frameCount*2)});
                 while(backupPending.size()>384)backupPending.erase(backupPending.begin());
             }
-            const auto allowed=[&](quint64 f){if(auth.phase=="recovery"){if(recoveryResumeFrame&&f>=recoveryResumeFrame)return producer==auth.host&&info.epoch==recoveryEpoch;return f<recoveryUntil&&producer==backupOwner&&info.epoch==backupEpoch;}if(auth.committed)return f<auth.cutoverFrame?producer==auth.committed->oldOwner&&info.epoch==auth.committed->oldEpoch:producer==auth.committed->newOwner&&info.epoch==auth.committed->newEpoch;return producer==auth.owner&&info.epoch==auth.epoch;};
+            const auto allowed=[&](quint64 f){if(f<programEnqueuedThrough)return false;if(auth.phase=="recovery"){if(recoveryResumeFrame&&f>=recoveryResumeFrame)return producer==auth.host&&info.epoch==recoveryEpoch;return f<recoveryUntil&&producer==backupOwner&&info.epoch==backupEpoch;}if(auth.committed)return f<auth.cutoverFrame?producer==auth.committed->oldOwner&&info.epoch==auth.committed->oldEpoch:producer==auth.committed->newOwner&&info.epoch==auth.committed->newEpoch;return producer==auth.owner&&info.epoch==auth.epoch;};
             quint32 begin=0,end=info.frameCount;
             while(begin<end&&!allowed(info.mediaFrame+mediaFrameAdvance(begin,info.sampleRateHz)))++begin;
             while(end>begin&&!allowed(info.mediaFrame+mediaFrameAdvance(end-1,info.sampleRateHz)))--end;
@@ -532,7 +920,8 @@ struct Runtime::Impl {
         ownerAudioAt=monotonicNanos();scheduleCaptureCommit(commit);broadcast("handoff.commit",commit.toJson());ready=true;problem.clear();reasons.clear();
     }
     void tick() {
-        ++ticks;if(auth.sessionId.isEmpty())return;
+        ++ticks;if(networkProbe)testNetwork(false);if(auth.sessionId.isEmpty())return;
+        manualTick();
 #if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
         if(turnRefreshAt&&monotonicNanos()>=turnRefreshAt&&signal&&signal->isOpen()){
             turnRefreshAt=monotonicNanos()+5000000000LL;signalSend({{"type","turn.credentials"}});
@@ -590,7 +979,7 @@ struct Runtime::Impl {
 #if defined(DJALY_JUNCTION_WITH_LIBDATACHANNEL)
         if(signal){signal->resetCallbacks();signal->forceClose();signal.reset();}
 #endif
-        endingAt=0;endingHost=false;reconnectAt=0;reconnectAttempts=0;turnRefreshAt=0;iceReady=false;iceServers.clear();deferredSignals.clear();identity.reset();participantRoster={};auth=Authority{};timeline=MediaTimeline{};clock.reset();q->setCaptureAnchor(UINT64_MAX,0);captureEpoch.store(1);scheduledFrame.store(UINT64_MAX);scheduledEpoch.store(0);sourceAnchor.store(UINT64_MAX);connection="disconnected";problem.clear();reasons.clear();invite.clear();ready=false;prepared=false;preparedGraph={};outgoing.clear();programEnqueuedThrough=0;backupPending.clear();backupOwner.clear();recoveryResumeFrame=0;recoveryUntil=0;ownerAudioAt=0;assetWaiters.clear();requestedAssets.clear();programPending.clear();validationReceiving.clear();validationOutgoing.clear();validationStart=0;validationCapture.reset();finalCheckpoint=false;aligned=false;graph={};
+        endingAt=0;endingHost=false;reconnectAt=0;reconnectAttempts=0;turnRefreshAt=0;iceReady=false;iceServers.clear();deferredSignals.clear();identity.reset();manual=false;manualDetail.clear();manualErrorCode.clear();hostCertificatePem.clear();pinnedHostFingerprint.clear();participantRoster={};auth=Authority{};timeline=MediaTimeline{};clock.reset();q->setCaptureAnchor(UINT64_MAX,0);captureEpoch.store(1);scheduledFrame.store(UINT64_MAX);scheduledEpoch.store(0);sourceAnchor.store(UINT64_MAX);connection="disconnected";problem.clear();reasons.clear();invite.clear();ready=false;prepared=false;preparedGraph={};outgoing.clear();programEnqueuedThrough=0;backupPending.clear();backupOwner.clear();recoveryResumeFrame=0;recoveryUntil=0;ownerAudioAt=0;assetWaiters.clear();requestedAssets.clear();programPending.clear();validationReceiving.clear();validationOutgoing.clear();validationStart=0;validationCapture.reset();finalCheckpoint=false;aligned=false;graph={};
     }
 };
 Runtime::Runtime(PlaybackBackend* backend,QObject* parent):QObject(parent),d(std::make_unique<Impl>(this,backend)){}
@@ -613,7 +1002,7 @@ QJsonObject Runtime::snapshot()const{return d->publicState();}
 bool Runtime::localMasterAudible()const noexcept{return d->separateLocalMaster.load(std::memory_order_relaxed);}
 bool Runtime::sharedAudible()const noexcept{return d->audible.load(std::memory_order_relaxed);}
 QString Runtime::authorize(const QString& op,const QJsonObject& p)const{if(op=="audio.config.set"&&d->auth.local!=d->auth.owner){const auto mic=p["microphone"].toObject();if(mic.size()==1&&mic["enabled"].isBool()&&!mic["enabled"].toBool())return {};}d->auth.advance(d->now());return d->auth.authorize(op,p["_junction"].toObject(),d->now());}
-void Runtime::applied(const QString& op,const QJsonObject& params){if(!active()||d->auth.local!=d->auth.owner||Authority::localOnly(op))return;++d->controlSeq;++d->auth.revision;if(d->auth.phase=="preparing"){d->ready=false;d->graphDirty=true;d->lastSharedChange=monotonicNanos();d->reasons={"演奏の変更に同期しています"};d->broadcast("graph.applied",{{"throughSeq",u64(d->controlSeq)}});}Q_UNUSED(params);}
+void Runtime::applied(const QString& op,const QJsonObject& params){if(!active()||d->auth.local!=d->auth.owner||Authority::localOnly(op)||Authority::readOnlyQuery(op))return;++d->controlSeq;++d->auth.revision;if(d->auth.phase=="preparing"){d->ready=false;d->graphDirty=true;d->lastSharedChange=monotonicNanos();d->reasons={"演奏の変更に同期しています"};d->broadcast("graph.applied",{{"throughSeq",u64(d->controlSeq)}});}Q_UNUSED(params);}
 void Runtime::capture(const float* pcm,unsigned frames,quint64 sourceFrame,unsigned rate)noexcept{
     if(!d->captureEnabled.load(std::memory_order_relaxed))return;
     const auto revision=d->pendingAnchorRevision.load(std::memory_order_acquire);
@@ -639,6 +1028,105 @@ void Runtime::capture(const float* pcm,unsigned frames,quint64 sourceFrame,unsig
 QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* error){
     auto reject=[&](const QString& reason){if(error)*error=reason;return QJsonObject{};};
     if(op=="snapshot")return snapshot();
+    if(op.startsWith("network.")){
+        if(op=="network.get")return d->network.summary();
+        if(op=="network.test"){
+            if(p["cancel"].toBool()){d->networkProbe.reset();d->networkTestDeadline=0;d->networkTestResult={{"state","failure"},{"detail","接続テストを中止しました"}};return d->networkTestResult;}
+            return d->testNetwork(!p["poll"].toBool());
+        }
+        if(op=="network.configure"||op=="network.clear"){
+            auto failure=op=="network.clear"?d->network.clear():d->network.configure(p);if(!failure.isEmpty())return reject(failure);
+            d->networkProbe.reset();d->networkTestResult={};return d->network.summary();
+        }
+    }
+    if(op=="exchange.inspect"){
+        QString failure,code;auto packet=decodeExchangePacket(p["text"].toString(),QDateTime::currentMSecsSinceEpoch(),&failure,&code);
+        if(!packet||!failure.isEmpty())return reject(failure);
+        if(!verifyExchangeSignature(*packet,packet->descriptionFingerprint(),&failure))return reject(failure);
+        return packet->sanitized();
+    }
+    const auto input=p["text"].toString(p["invite"].toString());
+    const bool manualCreate=op=="create"&&(p["exchangeMode"]=="manual"||p["signalingUrl"].toString().isEmpty());
+    const bool manualJoin=op=="join"&&input.startsWith("DJALY-JUNCTION-");
+    if(manualCreate||manualJoin){
+        if(active())return reject("参加中のセッションを終了してから操作してください");
+        if(!d->backend->available()||!MediaTransport::available())return reject("音声エンジンとWebRTCの準備が必要です");
+        const auto displayName=sanitizeDisplayName(p["displayName"].toString());if(displayName.isEmpty())return reject("表示名を入力してください");
+        QString failure,code;std::optional<ExchangePacket> packet;
+        if(manualJoin){packet=decodeExchangePacket(input,QDateTime::currentMSecsSinceEpoch(),&failure,&code);if(!packet||!failure.isEmpty())return reject(failure);if(packet->kind!=ExchangeKind::Invite)return reject("ホストから届いた招待を取り込んでください");if(!verifyExchangeSignature(*packet,packet->hostFingerprint,&failure))return reject(failure);}
+        if(manualCreate&&!p["adoptCurrent"].toBool()){
+            bool sounding=d->backend->audio()["microphone"].toObject()["enabled"].toBool();for(int deck=0;deck<4;++deck)sounding|=d->backend->playing(deck);
+            for(const auto& row:d->backend->samplerState()["slots"].toArray())sounding|=row.toObject()["playing"].toBool();
+            if(sounding)return reject("現在の演奏を使う場合は「現在の演奏をこのセッションで使う」を選択してください");
+        }
+        d->displayName=displayName;d->name=p["sessionName"].toString(displayName+" のセッション").trimmed().left(80);if(d->name.isEmpty())return reject("セッション名を入力してください");
+        bool ok=false;d->programDevice=p["programDevice"].toString().toInt(&ok);if(!ok)d->programDevice=-1;
+        if(manualCreate)d->auth.sessionId=secureRandomHex(16);
+        failure=d->startManual(manualCreate);if(failure.isEmpty()&&manualJoin)failure=d->acceptManualInvite(*packet,true);
+        if(!failure.isEmpty()){d->stop();return reject(failure);}return snapshot();
+    }
+    if(d->manual&&active()){
+        if(op=="invite.create"){
+            if(!d->hosting)return reject("ホストだけが招待を作成できます");
+            const auto requested=p["peerId"].toString();auto i=d->peers.find(requested);
+            if(!requested.isEmpty()&&i==d->peers.end())return reject("参加者が見つかりません");
+            if(requested.isEmpty()){
+                if(d->peers.size()>=7){
+                    auto unused=std::find_if(d->peers.begin(),d->peers.end(),[](const auto& item){return !item.second->approved&&exchangeStateTerminal(item.second->manual.state);});
+                    if(unused!=d->peers.end())d->peers.erase(unused);
+                    else return reject("このセッションはホストを含め8人までです。不要な招待を取り消してください");
+                }
+                auto peer=std::make_unique<Impl::Peer>();peer->id=secureRandomHex(16);peer->name="招待中のDJ";auto id=peer->id;i=d->peers.emplace(id,std::move(peer)).first;
+            }
+            auto& peer=*i->second;QString failure;
+            auto ice=d->network.credentials(d->auth.sessionId,peer.id,QDateTime::currentMSecsSinceEpoch(),&failure);if(!failure.isEmpty())return reject(failure);
+            peer.manual.ice=ice;peer.manual.inviteId=secureRandomHex(16);++peer.manual.generation;++peer.manual.attempt;peer.manual.expiresAt=QDateTime::currentMSecsSinceEpoch()+900000;
+            for(const auto& v:ice)if(v.toObject().contains("expiresAt"))peer.manual.expiresAt=std::min(peer.manual.expiresAt,qint64(v.toObject()["expiresAt"].toDouble()));
+            failure=d->manualStartAttempt(peer,true,ice);if(!failure.isEmpty()){d->manualSetState(peer,ExchangeState::Failed,failure);return reject(failure);}return snapshot();
+        }
+        if(op=="exchange.import"){
+            QString failure,code;auto packet=decodeExchangePacket(input,QDateTime::currentMSecsSinceEpoch(),&failure,&code);if(!packet||!failure.isEmpty())return reject(failure);
+            if(packet->sessionId!=d->auth.sessionId||packet->hostPeerId!=d->auth.host)return reject("別のセッションへの接続情報です");
+            if(!d->hosting&&packet->kind==ExchangeKind::Invite){failure=d->acceptManualInvite(*packet,false);if(!failure.isEmpty())return reject(failure);return snapshot();}
+            auto i=d->peers.find(d->hosting?packet->peerId:d->auth.host);if(i==d->peers.end())return reject("対応する招待が見つかりません");auto& peer=*i->second;
+            if(packet->inviteId!=peer.manual.inviteId||packet->generation!=peer.manual.generation||packet->attempt!=peer.manual.attempt)return reject("別の招待、または更新前の接続情報です。最新の招待への返答を取り込んでください");
+            if(d->hosting){
+                if(packet->kind!=ExchangeKind::Response)return reject("DJから届いた返答を取り込んでください");
+                if(packet->hostFingerprint!=d->identity->fingerprint||packet->expiresAt!=peer.manual.expiresAt)return reject("招待と返答の識別情報が一致しません");
+                if(exchangeStateTerminal(peer.manual.state))return reject("この招待は取り消し済み、または無効です。新しい招待を作成してください");
+                if(!verifyExchangeSignature(*packet,packet->peerFingerprint,&failure))return reject(failure);
+                if(peer.approved&&!peer.fp.isEmpty()&&packet->peerFingerprint!=peer.fp)return reject("接続済みDJと異なる端末の返答です。別の参加者として招待してください");
+                const auto digest=sha256Hex(packet->canonicalPayload());if(digest==peer.manual.answerDigest)return reject("この返答は取り込み済みです。参加者カードで次の操作を確認してください");
+                if(peer.manual.state!=ExchangeState::InviteReady)return reject("この招待の返答はすでに取り込まれています。必要なら招待を作り直してください");
+                peer.manual.answerDigest=digest;peer.manual.answerPending=true;peer.manual.answerName=packet->peerName;peer.name=packet->peerName;peer.manual.answerFingerprint=packet->peerFingerprint;
+                for(int j=0;j<2;++j){peer.manual.answerSdp[j]=packet->description[j].sdp;peer.manual.answerType[j]=packet->description[j].type;}
+                d->manualSetState(peer,ExchangeState::ApprovalPending,"表示名だけでは本人確認になりません。返答の送り主を確認して、参加を許可してください");return snapshot();
+            }
+            if(packet->kind!=ExchangeKind::Notice||packet->peerId!=d->auth.local)return reject("ホストから届いた招待・通知を取り込んでください");
+            if(!verifyExchangeSignature(*packet,d->pinnedHostFingerprint,&failure))return reject(failure);
+            d->discardAttempt(peer);d->manualSetState(peer,packet->noticeReason=="rejected"?ExchangeState::Rejected:ExchangeState::Cancelled,packet->noticeText);return snapshot();
+        }
+        if(op=="invite.cancel"||op=="peer.retry"||op=="peer.approve"){
+            const auto id=d->hosting?p["peerId"].toString():d->auth.host;auto i=d->peers.find(id);if(i==d->peers.end())return reject("参加者が見つかりません");auto& peer=*i->second;
+            if(op=="peer.retry"){
+                if(peer.transport&&peer.transport->aggregateLinkState()==LinkState::Connected){d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::Connected,"接続は継続しています");return snapshot();}
+                if(peer.manual.state==ExchangeState::Interrupted&&peer.manual.retries++<2){peer.manual.connectDeadline=monotonicNanos()+15000000000LL;return snapshot();}
+                d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::NeedsExchange,"新しい接続情報の交換が必要です。ホストがこの参加者の招待を作り直してください");return snapshot();
+            }
+            if(op=="peer.approve"){
+                if(!d->hosting)return reject("ホストだけが参加を承認できます");
+                if(peer.manual.state!=ExchangeState::ApprovalPending)return reject("返答を取り込んでから参加を許可してください");
+                if(!p["accept"].isBool())return reject("参加を許可するか指定してください");
+                if(p["accept"].toBool()){
+                    if(peer.manual.expiresAt<=QDateTime::currentMSecsSinceEpoch())return reject("招待の期限が切れました。作り直してください");
+                    auto failure=d->manualApplyAnswer(peer);if(!failure.isEmpty()){d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::Failed,failure);return reject(failure);}peer.approved=true;return snapshot();
+                }
+            }
+            const bool rejection=op=="peer.approve";QString notice;
+            if(d->hosting){auto failure=d->manualBuildNotice(peer,rejection?"rejected":"cancelled",rejection?"ホストが参加を許可しませんでした":"ホストがこの招待を取り消しました");if(!failure.isEmpty())return reject(failure);notice=peer.manual.noticeText;}
+            d->discardAttempt(peer);peer.manual.noticeText=notice;d->manualSetState(peer,rejection?ExchangeState::Rejected:ExchangeState::Cancelled,d->hosting?"招待を取り消しました。相手には通知をコピーして送ってください":"接続操作を取り消しました。ホストから新しい招待を受け取ってください");return snapshot();
+        }
+    }
     if(op=="create"||op=="join"){
         if(active())return reject("参加中のセッションを終了してから操作してください");
         if(!d->backend->available()||!MediaTransport::available())return reject("音声エンジンとWebRTCの準備が必要です");
