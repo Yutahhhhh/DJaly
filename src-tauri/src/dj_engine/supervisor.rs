@@ -903,52 +903,59 @@ fn resolve_binary() -> Result<PathBuf, String> {
         }
     }
 
-    // 開発時のフォールバック。配布バンドルにこのパスは存在しないので、
-    // その場合は「未インストール」として素直に劣化する。
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .map(|parent| parent.to_path_buf())
-        .unwrap_or_else(|| manifest_dir.clone());
-    let staged_host = repo_root
-        .join("native")
-        .join("mixxx-engine-host")
-        .join("stage")
-        .join("PlumdeckMixxxHost.app")
-        .join("Contents")
-        .join("MacOS")
-        .join("plumdeck-mixxx-engine-host");
-    if staged_host.is_file() {
-        return Ok(staged_host);
+    #[cfg(not(debug_assertions))]
+    {
+        Err("音声エンジンが同梱されていません。お使いのOSに対応したPerformance版をインストールしてください。".to_string())
     }
-
-    let real_host = repo_root
-        .join("native")
-        .join("mixxx-engine-host")
-        .join("build-upstream")
-        .join("plumdeck-mixxx-engine-host");
-    if real_host.is_file() {
-        return Ok(real_host);
-    }
-
-    let target_dir = repo_root
-        .join("native")
-        .join("dj-engine-host")
-        .join("target");
-    for profile in ["release", "debug"] {
-        let candidate = target_dir.join(profile).join("dj-engine-sim");
-        if candidate.is_file() {
-            return Ok(candidate);
+    #[cfg(debug_assertions)]
+    {
+        // 開発時のフォールバック。配布バンドルにこのパスは存在しないので、
+        // その場合は「未インストール」として素直に劣化する。
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .unwrap_or_else(|| manifest_dir.clone());
+        let staged_host = repo_root
+            .join("native")
+            .join("mixxx-engine-host")
+            .join("stage")
+            .join("PlumdeckMixxxHost.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("plumdeck-mixxx-engine-host");
+        if staged_host.is_file() {
+            return Ok(staged_host);
         }
-    }
 
-    Err(format!(
-        "エンジンバイナリが見つかりません。\
-         `bash native/mixxx-engine-host/scripts/build-macos.sh` または \
-         `cargo build --manifest-path native/dj-engine-host/Cargo.toml` を実行するか、\
-         PLUMDECK_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
-        target_dir.display()
-    ))
+        let real_host = repo_root
+            .join("native")
+            .join("mixxx-engine-host")
+            .join("build-upstream")
+            .join("plumdeck-mixxx-engine-host");
+        if real_host.is_file() {
+            return Ok(real_host);
+        }
+
+        let target_dir = repo_root
+            .join("native")
+            .join("dj-engine-host")
+            .join("target");
+        for profile in ["release", "debug"] {
+            let candidate = target_dir.join(profile).join(format!("dj-engine-sim{}", std::env::consts::EXE_SUFFIX));
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        Err(format!(
+            "エンジンバイナリが見つかりません。\
+             `bash native/mixxx-engine-host/scripts/build-macos.sh` または \
+             `cargo build --manifest-path native/dj-engine-host/Cargo.toml` を実行するか、\
+             PLUMDECK_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
+            target_dir.display()
+        ))
+    }
 }
 
 #[cfg(test)]

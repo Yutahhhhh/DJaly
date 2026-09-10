@@ -1,7 +1,5 @@
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import unicodedata
@@ -451,18 +449,8 @@ def _recording_file(session: Session, recording_id: int) -> tuple[dict, Path]:
 
 
 def _ffmpeg_path() -> str | None:
-    """Find FFmpeg even when a macOS GUI launch supplies a minimal PATH."""
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    if bundle_root:
-        bundled = Path(bundle_root) / "bin" / "ffmpeg"
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
-    executable = shutil.which("ffmpeg")
-    if executable:
-        return executable
-    return next((str(candidate) for candidate in (
-        Path("/opt/homebrew/bin/ffmpeg"), Path("/usr/local/bin/ffmpeg"),
-    ) if candidate.is_file() and os.access(candidate, os.X_OK)), None)
+    from utils.executables import find_ffmpeg
+    return find_ffmpeg()
 
 
 @lru_cache(maxsize=1)

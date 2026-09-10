@@ -14,7 +14,9 @@ fn valid_junction_invite(value: &str) -> bool {
 fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String> {
     state.0.lock().ok()?.take()
 }
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandEvent, CommandChild};
+#[derive(Default)]
+struct BackendChild(Mutex<Option<CommandChild>>);
 use tauri_plugin_shell::ShellExt;
 
 mod assist;
@@ -23,6 +25,7 @@ mod dj_engine;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(BackendChild::default())
         .plugin(tauri_plugin_shell::init())
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
         .plugin(tauri_plugin_devtools::init())
@@ -143,7 +146,7 @@ pub fn run() {
             }
 
             // CI環境やビルド時はサイドカーを起動しない
-            if env::var("CI").is_ok() || env::var("TAURI_SKIP_SIDECAR").is_ok() {
+            if cfg!(debug_assertions) && (env_flag("CI") || env_flag("TAURI_SKIP_SIDECAR")) {
                 println!("Skipping sidecar startup (CI/build environment)");
                 return Ok(());
             }
@@ -173,6 +176,8 @@ pub fn run() {
                 e
             })?;
 
+            *app.state::<BackendChild>().0.lock().unwrap() = Some(_child);
+
             // 非同期でログを出力するスレッドを作成（デバッグ用）
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = _rx.recv().await {
@@ -189,6 +194,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Ok(mut child) = app.state::<BackendChild>().0.lock() {
+                    if let Some(child) = child.take() { let _ = child.kill(); }
+                }
+            }
             if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
                 if app.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
                     api.prevent_exit(); let _ = app.emit("junction://close-blocked", ());

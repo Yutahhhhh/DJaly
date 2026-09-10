@@ -1,3 +1,4 @@
+import { pathBreadcrumbs } from "@/lib/path-breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
 
@@ -7,26 +8,7 @@ interface BreadcrumbsProps {
 }
 
 export function Breadcrumbs({ currentPath, onNavigate }: BreadcrumbsProps) {
-  const getBreadcrumbs = () => {
-    if (!currentPath) return [];
-    const parts = currentPath.split("/").filter(Boolean);
-    const crumbs = [];
-    let accum = "";
-
-    if (currentPath.startsWith("/")) {
-      crumbs.push({ name: "/", path: "/" });
-      accum = "/";
-    }
-
-    parts.forEach((part) => {
-      const nextPath = accum === "/" ? `/${part}` : `${accum}/${part}`;
-      crumbs.push({ name: part, path: nextPath });
-      accum = nextPath;
-    });
-    return crumbs;
-  };
-
-  const breadcrumbs = getBreadcrumbs();
+  const breadcrumbs = pathBreadcrumbs(currentPath);
 
   return (
     <div className="flex items-center gap-1 text-sm text-muted-foreground overflow-x-auto whitespace-nowrap pb-2 flex-1 mr-4">

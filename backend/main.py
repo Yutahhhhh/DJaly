@@ -61,6 +61,7 @@ origins = [
     f"http://localhost:{settings.PLUMDECK_PORT}",    # Dynamic Port
     f"http://127.0.0.1:{settings.PLUMDECK_PORT}",    # Dynamic Port
     "tauri://localhost",                          # Tauri Production (macOS)
+    "http://tauri.localhost",                     # Tauri default (Windows)
     "https://tauri.localhost",                    # Tauri Production (Windows/Linux)
 ]
 

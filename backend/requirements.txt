@@ -4,6 +4,7 @@ sqlmodel
 duckdb
 duckdb-engine
 essentia-tensorflow; sys_platform != "win32"
+numpy
 tinytag
 pydantic
 python-multipart

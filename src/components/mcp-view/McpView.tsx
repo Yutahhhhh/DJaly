@@ -61,6 +61,7 @@ export function McpView() {
         {
           mcpServers: {
             plumdeck: {
+              type: "http",
               url: info.url,
             },
           },
@@ -121,7 +122,7 @@ export function McpView() {
         <CardHeader>
           <CardTitle className="text-base">設定方法</CardTitle>
           <CardDescription>
-            Claude Desktop / Claude Code の MCP サーバー設定に、以下を追記してください。
+            Streamable HTTP に対応する MCP クライアントの設定に、以下を追記してください。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

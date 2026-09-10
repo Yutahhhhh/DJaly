@@ -40,7 +40,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: MIDI and audio recovery regression tests
-        run: node --experimental-strip-types --test src/services/midi/generic-midi.test.mjs src/services/dj-engine/audio-ready.test.mjs
+        run: node --experimental-strip-types --test src/services/midi/generic-midi.test.mjs src/services/dj-engine/audio-ready.test.mjs src/lib/path-breadcrumbs.test.mjs
 
   backend:
     name: Database and import regression tests
@@ -58,3 +58,7 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity -q
+      - name: Test portable runtime paths
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest --confcutdir=backend/tests/portability backend/tests/portability -q
