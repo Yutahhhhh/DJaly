@@ -46,7 +46,9 @@ const MAX_TIMEOUT_MS: u64 = 60_000;
 /// 壁時計モードのティック間隔。
 const TICK_MS: u64 = 20;
 /// stop 時に正常終了を待つ猶予。
-const STOP_GRACE: Duration = Duration::from_millis(500);
+// Give recorder finalization and audio/transport teardown time to finish before
+// the bounded fallback, including on Windows with a busy storage device.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 const WRITER_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,6 +186,11 @@ impl EngineSupervisor {
 
         let output_device = normalize_output_device(output_device)?;
         let mut command = Command::new(&binary_path);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
         command.env("PLUMDECK_WAVEFORM_CACHE", crate::waveform::cache_root()?);
         command
             .arg(format!("--tick-ms={TICK_MS}"))
@@ -884,6 +891,14 @@ fn resolve_binary() -> Result<PathBuf, String> {
         return Ok(path);
     }
 
+    #[cfg(target_os = "windows")]
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            let host = directory.join("engine").join("plumdeck-mixxx-engine-host.exe");
+            if host.is_file() { return Ok(host); }
+        }
+    }
+
     // Optional packaged Performance build. The nested .app must be bundled as
     // a whole because the executable depends on its Frameworks/Resources.
     if let Ok(current_exe) = std::env::current_exe() {
@@ -903,52 +918,64 @@ fn resolve_binary() -> Result<PathBuf, String> {
         }
     }
 
-    // 開発時のフォールバック。配布バンドルにこのパスは存在しないので、
-    // その場合は「未インストール」として素直に劣化する。
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .map(|parent| parent.to_path_buf())
-        .unwrap_or_else(|| manifest_dir.clone());
-    let staged_host = repo_root
-        .join("native")
-        .join("mixxx-engine-host")
-        .join("stage")
-        .join("PlumdeckMixxxHost.app")
-        .join("Contents")
-        .join("MacOS")
-        .join("plumdeck-mixxx-engine-host");
-    if staged_host.is_file() {
-        return Ok(staged_host);
+    #[cfg(not(debug_assertions))]
+    {
+        Err("音声エンジンが同梱されていません。アプリを再インストールしてください。".to_string())
     }
-
-    let real_host = repo_root
-        .join("native")
-        .join("mixxx-engine-host")
-        .join("build-upstream")
-        .join("plumdeck-mixxx-engine-host");
-    if real_host.is_file() {
-        return Ok(real_host);
-    }
-
-    let target_dir = repo_root
-        .join("native")
-        .join("dj-engine-host")
-        .join("target");
-    for profile in ["release", "debug"] {
-        let candidate = target_dir.join(profile).join("dj-engine-sim");
-        if candidate.is_file() {
-            return Ok(candidate);
+    #[cfg(debug_assertions)]
+    {
+        // 開発時のフォールバック。配布バンドルにこのパスは存在しないので、
+        // その場合は「未インストール」として素直に劣化する。
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .unwrap_or_else(|| manifest_dir.clone());
+        #[cfg(target_os = "windows")]
+        {
+            let staged = repo_root.join("native/mixxx-engine-host/stage/PlumdeckMixxxHost/plumdeck-mixxx-engine-host.exe");
+            if staged.is_file() { return Ok(staged); }
         }
-    }
+        let staged_host = repo_root
+            .join("native")
+            .join("mixxx-engine-host")
+            .join("stage")
+            .join("PlumdeckMixxxHost.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("plumdeck-mixxx-engine-host");
+        if staged_host.is_file() {
+            return Ok(staged_host);
+        }
 
-    Err(format!(
-        "エンジンバイナリが見つかりません。\
-         `bash native/mixxx-engine-host/scripts/build-macos.sh` または \
-         `cargo build --manifest-path native/dj-engine-host/Cargo.toml` を実行するか、\
-         PLUMDECK_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
-        target_dir.display()
-    ))
+        let real_host = repo_root
+            .join("native")
+            .join("mixxx-engine-host")
+            .join("build-upstream")
+            .join("plumdeck-mixxx-engine-host");
+        if real_host.is_file() {
+            return Ok(real_host);
+        }
+
+        let target_dir = repo_root
+            .join("native")
+            .join("dj-engine-host")
+            .join("target");
+        for profile in ["release", "debug"] {
+            let candidate = target_dir.join(profile).join(format!("dj-engine-sim{}", std::env::consts::EXE_SUFFIX));
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        Err(format!(
+            "エンジンバイナリが見つかりません。\
+             `bash native/mixxx-engine-host/scripts/build-macos.sh` または \
+             `cargo build --manifest-path native/dj-engine-host/Cargo.toml` を実行するか、\
+             PLUMDECK_DJ_ENGINE_BIN に絶対パスを設定してください（探索先: {}）",
+            target_dir.display()
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1036,7 +1063,7 @@ mod tests {
             Some(Arc::downgrade(&notifications)),
             "overflow",
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + STOP_GRACE + Duration::from_secs(2);
         loop {
             if let Some(status) = lock(&child).try_wait().unwrap() {
                 assert!(!status.success());

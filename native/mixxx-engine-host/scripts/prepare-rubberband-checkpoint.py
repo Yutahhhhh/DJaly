@@ -5,7 +5,7 @@ import re
 import sys
 import tarfile
 root = Path(sys.argv[1])
-adapter = Path(sys.argv[2]).resolve()
+adapter = Path(sys.argv[2]).resolve().as_posix()
 hooks = {'rubberband/RubberBandStretcher.h':['RubberBandStretcher'], 'src/faster/R2Stretcher.h':['R2Stretcher'],
  'src/common/Resampler.h':['Resampler'], 'src/common/StretchCalculator.h':['StretchCalculator'],
  'src/faster/CompoundAudioCurve.h':['CompoundAudioCurve'], 'src/faster/PercussiveAudioCurve.h':['PercussiveAudioCurve'],
@@ -19,7 +19,7 @@ with tarfile.open(archive) as source:
   if not item.isfile():continue
   assert '..' not in relative.parts
   data=source.extractfile(item).read()
-  key=str(relative)
+  key=relative.as_posix()
   names=hooks.get(key,[])
   if key=='src/RubberBandStretcher.cpp':names=['RubberBandStretcher::Impl']
   if key=='src/common/Resampler.cpp':names=['D_SRC']

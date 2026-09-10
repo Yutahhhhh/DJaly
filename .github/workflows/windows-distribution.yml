@@ -1,0 +1,180 @@
+name: Windows distribution validation
+
+# Heavy Windows packaging validation. Not a per-PR gate (pr-checks.yml covers
+# that); run it on demand or from the release workflow.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    concurrency:
+      group: windows-packages-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            native/mixxx-engine-host/build-deps
+            native/mixxx-engine-host/upstream
+            native/mixxx-engine-host/build-upstream
+            native/mixxx-engine-host/stage/PlumdeckMixxxHost
+          key: windows-native-stage-v2-${{ hashFiles('native/mixxx-engine-host/scripts/*.py', 'native/mixxx-engine-host/cmake/**', 'native/mixxx-engine-host/src/**') }}
+          restore-keys: |
+            windows-native-stage-v2-
+            windows-native-
+      - run: python -m pip install cmake ninja
+        if: steps.native-cache.outputs.cache-hit != 'true'
+      - name: Build and test real native engine
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: python native/mixxx-engine-host/scripts/build-windows.py
+      - name: Smoke cached native engine
+        if: steps.native-cache.outputs.cache-hit == 'true'
+        run: node native/mixxx-engine-host/scripts/smoke-bundle.mjs native/mixxx-engine-host/stage/PlumdeckMixxxHost/plumdeck-mixxx-engine-host.exe
+      - name: Report native payload
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem native/mixxx-engine-host/stage/PlumdeckMixxxHost -Recurse -File
+          $bytes = ($files | Measure-Object Length -Sum).Sum
+          "### Windows native engine" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "$($files.Count) files, $([math]::Round($bytes / 1MB, 1)) MiB" >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/cache/save@v4
+        if: success() && steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            native/mixxx-engine-host/build-deps
+            native/mixxx-engine-host/upstream
+            native/mixxx-engine-host/build-upstream
+            native/mixxx-engine-host/stage/PlumdeckMixxxHost
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-engine
+          path: native/mixxx-engine-host/stage/PlumdeckMixxxHost
+          if-no-files-found: error
+
+  backend:
+    concurrency:
+      group: windows-backend-build-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache/restore@v4
+        id: backend-cache
+        with:
+          path: backend/dist/plumdeck-server.exe
+          key: windows-backend-${{ hashFiles('backend/**/*.py', 'backend/requirements.txt', 'backend/*.spec', 'backend/models/**', 'backend/**/*.json') }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: choco install ffmpeg -y --no-progress
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+      - run: python -m pip install -r backend/requirements.txt
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+      - name: Fetch verified Windows inference model
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        run: python backend/fetch_musicnn_onnx.py
+      - name: Portable analysis regression tests
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m pytest --confcutdir=backend/tests/portable_audio backend/tests/portable_audio -q
+          python -m pytest --confcutdir=backend/tests/portability backend/tests/portability -q
+          python -m pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity -q
+      - name: Analyze real generated audio using Windows runtime
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        run: python backend/analysis_diagnostic.py
+      - name: Package backend
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: python -m PyInstaller --clean --noconfirm plumdeck-server.spec
+      - name: Validate bundled decoder and model without developer PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & .\backend\dist\plumdeck-server.exe --diagnose-analysis
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
+      - name: Start packaged API and initialize MCP
+        run: python scripts/smoke-backend.py backend/dist/plumdeck-server.exe
+      - name: Report backend payload
+        shell: pwsh
+        run: |
+          $file = Get-Item backend/dist/plumdeck-server.exe
+          "### Windows backend" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "$([math]::Round($file.Length / 1MB, 1)) MiB" >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/cache/save@v4
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        with:
+          path: backend/dist/plumdeck-server.exe
+          key: ${{ steps.backend-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-backend
+          path: backend/dist/plumdeck-server.exe
+          if-no-files-found: error
+
+  installer:
+    concurrency:
+      group: windows-installer-build-${{ github.ref }}
+      cancel-in-progress: true
+    needs: [native, backend]
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-native-engine
+          path: native/mixxx-engine-host/stage/PlumdeckMixxxHost
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-backend
+          path: src-tauri/bin
+      - shell: pwsh
+        run: Rename-Item src-tauri/bin/plumdeck-server.exe plumdeck-server-x86_64-pc-windows-msvc.exe
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tauri build --bundles msi --config src-tauri/tauri.windows.conf.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install and start desktop app from a relocated Unicode directory
+        run: python scripts/smoke-windows-installer.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error

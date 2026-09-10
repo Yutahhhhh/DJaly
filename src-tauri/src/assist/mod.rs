@@ -10,6 +10,14 @@ use serde::Serialize;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(target_os = "windows")]
+#[path = "macos/decks.rs"]
+mod decks;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::AssistState;
+
 pub mod commands;
 
 /// One deck slot as rekordbox is currently drawing it.
@@ -53,7 +61,7 @@ pub struct AssistSnapshot {
     pub warnings: Vec<String>,
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl AssistSnapshot {
     pub fn unsupported(reason: &str) -> Self {
         Self {
@@ -67,14 +75,14 @@ impl AssistSnapshot {
 #[cfg(target_os = "macos")]
 pub use macos::AssistState;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[derive(Default)]
 pub struct AssistState;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl AssistState {
     pub fn snapshot(&self) -> AssistSnapshot {
-        AssistSnapshot::unsupported("デッキ読み取りは macOS のみ対応しています")
+        AssistSnapshot::unsupported("デッキ読み取りは macOS と Windows に対応しています")
     }
 
     pub fn request_permission(&self) -> bool {

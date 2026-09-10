@@ -18,6 +18,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class AudioAnalyzer:
+    def __new__(cls):
+        if cls is AudioAnalyzer and sys.platform == "win32":
+            from .portable import PortableAudioAnalyzer
+            return object.__new__(PortableAudioAnalyzer)
+        return object.__new__(cls)
+
     def __init__(self):
         if not HAS_ESSENTIA:
             raise ImportError("Essentia not found")
@@ -49,7 +55,6 @@ class AudioAnalyzer:
                 logger.warning(f"Failed to load MusiCNN: {e}")
 
     def analyze(self, filepath: str, skip_basic: bool = False, skip_waveform: bool = False, external_lyrics: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        if not HAS_ESSENTIA: return None
         filename = os.path.basename(filepath)
 
         try:

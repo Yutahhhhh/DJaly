@@ -10,6 +10,9 @@ disturbed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+import ntpath
+import sys
 from pathlib import Path
 import os
 import threading
@@ -51,6 +54,8 @@ def normalize_path(filepath: str) -> str:
     equal. Case is deliberately left alone: on a case-sensitive volume two
     spellings really are two files.
     """
+    if sys.platform == "win32":
+        filepath = ntpath.normpath(filepath)
     return unicodedata.normalize("NFC", filepath)
 
 
@@ -64,22 +69,18 @@ def path_variants(filepath: str) -> list[str]:
     """
     if not filepath:
         return []
-    return list(
-        dict.fromkeys(
-            [
-                filepath,
-                unicodedata.normalize("NFC", filepath),
-                unicodedata.normalize("NFD", filepath),
-            ]
-        )
-    )
+    variants = [filepath, unicodedata.normalize("NFC", filepath), unicodedata.normalize("NFD", filepath)]
+    if sys.platform == "win32":
+        variants += [variant.replace("\\", "/") for variant in variants.copy()]
+        variants += [variant.replace("/", "\\") for variant in variants.copy()]
+    return list(dict.fromkeys(variants))
 
 
 def same_path(left: str, right: str) -> bool:
     """Accept alternate Unicode spelling only when it refers to the same file."""
     if left == right:
         return True
-    if normalize_path(left) != normalize_path(right):
+    if sys.platform != "win32" and normalize_path(left) != normalize_path(right):
         return False
     try:
         return os.path.samefile(left, right)
@@ -87,7 +88,20 @@ def same_path(left: str, right: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=2)
+def _windows_path_index(registered: frozenset[str]) -> dict[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    for path in registered:
+        grouped.setdefault(ntpath.normcase(normalize_path(path)), []).append(path)
+    return {key: tuple(values) for key, values in grouped.items()}
+
+
 def is_registered_path(filepath: str, registered: frozenset[str]) -> bool:
+    if sys.platform == "win32":
+        candidates = _windows_path_index(registered).get(ntpath.normcase(normalize_path(filepath)), ())
+        # Case-insensitive candidate lookup must still prove filesystem identity:
+        # Windows can also have directories with case-sensitive filenames.
+        return any(same_path(filepath, path) for path in candidates)
     return any(path in registered and same_path(filepath, path)
                for path in path_variants(filepath))
 
@@ -144,10 +158,14 @@ def lookup_by_paths(paths: list[str]) -> dict[str, RekordboxEntry]:
         for start in range(0, len(spellings), _SQL_CHUNK):
             chunk = spellings[start : start + _SQL_CHUNK]
             placeholders = ",".join("?" * len(chunk))
+            column = "c.FolderPath"
+            if sys.platform == "win32":
+                column = "replace(c.FolderPath, char(92), '/') COLLATE NOCASE"
+                chunk = [path.replace("\\", "/") for path in chunk]
             rows += connection.execute(
                 "SELECT c.FolderPath, c.ID, c.Title, a.Name, c.BPM "
                 "FROM djmdContent c LEFT JOIN djmdArtist a ON a.ID = c.ArtistID "
-                f"WHERE c.FolderPath IN ({placeholders}) AND c.rb_local_deleted = 0",
+                f"WHERE {column} IN ({placeholders}) AND c.rb_local_deleted = 0",
                 chunk,
             ).fetchall()
     except Exception as error:

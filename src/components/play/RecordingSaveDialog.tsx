@@ -121,7 +121,7 @@ export function RecordingSaveDialog({ recording, onClose, onBeforePreview, onSet
       onPointerDownOutside={(event) => { if (pending) event.preventDefault(); }}>
       <DialogHeader>
         <DialogTitle className="text-[#f1f3f5]">録音を保存</DialogTitle>
-        <DialogDescription className="text-[#aeb3bb]">再生するとデッキを一時停止し、macOSの標準出力からプレビューします。確認して名前を付けてください。破棄すると音声ファイルごと削除されます。</DialogDescription>
+        <DialogDescription className="text-[#aeb3bb]">再生するとデッキを一時停止し、システムの標準出力からプレビューします。確認して名前を付けてください。破棄すると音声ファイルごと削除されます。</DialogDescription>
       </DialogHeader>
 
       <div className="dj-recording-preview">

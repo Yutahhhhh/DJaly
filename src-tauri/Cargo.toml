@@ -34,6 +34,10 @@ tauri-plugin-process = "2.3.1"
 # separately licensed npm wrapper.
 tauri-plugin-drag = "2.1.1"
 midir = "0.10"
+tauri-plugin-deep-link = "2"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 # examples/waveform_validation.rs だけが使う実 WKWebView シェル。tauri 2 が内部で
 # 使うのと同じ版に固定し、アプリ本体の依存関係は増やさない。
@@ -44,6 +48,9 @@ tao = "0.34"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 hidapi = { version = "2.6.7", features = ["macos-shared-device"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+hidapi = "2.6.7"
 
 # macOS external Copy drags also advertise Generic for JUCE drop targets.
 [patch.crates-io]

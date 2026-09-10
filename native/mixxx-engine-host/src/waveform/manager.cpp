@@ -5,6 +5,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QStandardPaths>
 #include <QFileInfo>
 #include <QFile>
 #include <QSaveFile>
@@ -40,7 +41,7 @@ QByteArray encode(unsigned lod,std::uint64_t index,const std::vector<Bin>& bins,
 }
 }
 Manager::Manager():root_(qEnvironmentVariable("PLUMDECK_WAVEFORM_CACHE")) {
-    if(root_.isEmpty())root_=QDir::homePath()+"/Library/Caches/plumdeck/waveform-v2";
+    if(root_.isEmpty())root_=QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)+"/plumdeck/waveform-v2";
     QDir().mkpath(root_);worker_=std::thread([this]{run();});
 }
 Manager::~Manager(){stop_=true;wake_.notify_one();if(worker_.joinable())worker_.join();}

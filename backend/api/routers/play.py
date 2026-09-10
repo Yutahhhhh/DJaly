@@ -1,7 +1,5 @@
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import unicodedata
@@ -451,18 +449,8 @@ def _recording_file(session: Session, recording_id: int) -> tuple[dict, Path]:
 
 
 def _ffmpeg_path() -> str | None:
-    """Find FFmpeg even when a macOS GUI launch supplies a minimal PATH."""
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    if bundle_root:
-        bundled = Path(bundle_root) / "bin" / "ffmpeg"
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
-    executable = shutil.which("ffmpeg")
-    if executable:
-        return executable
-    return next((str(candidate) for candidate in (
-        Path("/opt/homebrew/bin/ffmpeg"), Path("/usr/local/bin/ffmpeg"),
-    ) if candidate.is_file() and os.access(candidate, os.X_OK)), None)
+    from utils.executables import find_ffmpeg
+    return find_ffmpeg()
 
 
 @lru_cache(maxsize=1)
@@ -471,7 +459,8 @@ def _probe_recording_formats(executable: str) -> tuple[str, ...]:
     # Cache successful probes only, allowing a failed first launch to retry.
     probe = subprocess.run(
         [executable, "-hide_banner", "-encoders"], capture_output=True, text=True,
-        timeout=180, check=True,
+        encoding="utf-8", errors="replace",
+        timeout=180, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     words = set(probe.stdout.split())
     return tuple(name for name, details in _EXPORT_FORMATS.items() if details["encoder"] in words)
@@ -523,7 +512,7 @@ def _converted_recording(path: Path, target: Path, export_format: str) -> Path:
         "-c:a", str(details["encoder"]), str(temporary),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
             message = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "変換結果が空です"
             raise HTTPException(422, f"録音を {export_format.upper()} に変換できません: {message}")

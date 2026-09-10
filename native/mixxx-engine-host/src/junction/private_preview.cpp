@@ -1,3 +1,4 @@
+#include "../sound_file.h"
 #include "private_preview.h"
 #include <sndfile.h>
 #include <QFileInfo>
@@ -35,7 +36,7 @@ struct PrivatePreview::Impl {
                 QString next; double target;
                 {std::lock_guard<std::mutex> lock(mutex);next=path;target=seekMs;}
                 if(file)sf_close(file);file=nullptr; info={};
-                if(!next.isEmpty())file=sf_open(next.toUtf8().constData(),SFM_READ,&info);
+                if(!next.isEmpty())file=openSoundFile(next,SFM_READ,&info);
                 if(file && (info.channels<1||info.channels>8||info.samplerate<8000||info.samplerate>192000)){sf_close(file);file=nullptr;}
                 {std::lock_guard<std::mutex> lock(mutex);if(gen==generation.load())error=file?QString():next.isEmpty()?QString():QStringLiteral("Private preview decoder could not open this file");}
                 if(gen==generation.load()){

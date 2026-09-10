@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -30,15 +29,12 @@ class WaveformDetailError(Exception):
 
 
 def _cache_dir() -> Path:
-    return Path(platformdirs.user_cache_dir("plumdeck", "plumdeckDev")) / "waveform-detail-v1"
+    return Path(platformdirs.user_cache_dir("plumdeck", "plumdeck")) / "waveform-detail-v1"
 
 
 def _decode(filepath: Path) -> tuple[np.ndarray, int]:
-    decoder = shutil.which("ffmpeg")
-    if not decoder:
-        # GUI applications on macOS may have a minimal PATH.
-        decoder = next((str(p) for p in (Path("/opt/homebrew/bin/ffmpeg"), Path("/usr/local/bin/ffmpeg"))
-                        if p.is_file() and os.access(p, os.X_OK)), None)
+    from utils.executables import find_ffmpeg
+    decoder = find_ffmpeg()
     if not decoder:
         raise WaveformDetailError("詳細波形には FFmpeg が必要です。FFmpeg をインストールしてください。", 503)
     graph = (
@@ -57,7 +53,7 @@ def _decode(filepath: Path) -> tuple[np.ndarray, int]:
     # A temporary stderr file avoids subprocess pipe deadlocks and unbounded RAM.
     with tempfile.TemporaryFile() as errors:
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors)
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
             raise WaveformDetailError("波形デコーダーを起動できませんでした。", 503) from exc
         timed_out = threading.Event()

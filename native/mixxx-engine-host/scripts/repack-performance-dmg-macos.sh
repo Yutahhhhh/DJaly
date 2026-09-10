@@ -2,15 +2,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
-bundle="$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app"
-version="$(node -p "require('$repo_root/src-tauri/tauri.conf.json').version")"
+bundle="${1:-$repo_root/src-tauri/target/release/bundle/macos/plumdeck.app}"
+version="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version)' "$repo_root/src-tauri/tauri.conf.json")"
 machine_arch="$(uname -m)"
 case "$machine_arch" in
   arm64) bundle_arch=aarch64 ;;
   x86_64) bundle_arch=x64 ;;
   *) echo "Unsupported macOS architecture: $machine_arch" >&2; exit 1 ;;
 esac
-dmg_dir="$repo_root/src-tauri/target/release/bundle/dmg"
+dmg_dir="$(dirname "$(dirname "$bundle")")/dmg"
 output="$dmg_dir/plumdeck_${version}_${bundle_arch}.dmg"
 
 [[ -d "$bundle" ]] || { echo "Missing signed app bundle: $bundle" >&2; exit 1; }

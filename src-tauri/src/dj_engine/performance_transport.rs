@@ -1,12 +1,87 @@
 //! Bounded local channel independent of WebView rendering and notification ACKs.
+#[cfg(unix)]
+use std::os::unix::net::UnixStream as LocalStream;
+#[cfg(windows)]
+use windows_pipe::LocalStream;
+
+#[cfg(windows)]
+mod windows_pipe {
+    use std::{cell::Cell, fs::{File, OpenOptions}, io::{self, Read, Write},
+        os::windows::io::AsRawHandle, time::{Duration, Instant}};
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ReadFile(handle: *mut std::ffi::c_void, buffer: *mut u8, length: u32,
+            read: *mut u32, overlapped: *mut std::ffi::c_void) -> i32;
+        fn SetNamedPipeHandleState(handle: *mut std::ffi::c_void, mode: *const u32,
+            count: *const u32, timeout: *const u32) -> i32;
+    }
+    pub struct LocalStream {
+        file: File,
+        timeout: Cell<Option<Duration>>,
+        nonblocking: Cell<bool>,
+    }
+    impl LocalStream {
+        pub fn connect(path: &str) -> io::Result<Self> {
+            // Only this machine's named pipes; never open an arbitrary file or UNC share.
+            if !path.starts_with(r"\\.\pipe\") {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "Expected local named pipe"));
+            }
+            let file = OpenOptions::new().read(true).write(true).open(path)?;
+            let mode = 1u32; // PIPE_NOWAIT | PIPE_READMODE_BYTE
+            if unsafe { SetNamedPipeHandleState(file.as_raw_handle(), &mode,
+                std::ptr::null(), std::ptr::null()) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { file, timeout: Cell::new(None), nonblocking: Cell::new(false) })
+        }
+        pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            self.timeout.set(timeout); Ok(())
+        }
+        pub fn set_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+            // PIPE_NOWAIT bounds every write, including the handshake.
+            Ok(())
+        }
+        pub fn set_nonblocking(&self, value: bool) -> io::Result<()> {
+            self.nonblocking.set(value); Ok(())
+        }
+    }
+    impl Read for LocalStream {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            let start = Instant::now();
+            loop {
+                let mut count = 0u32;
+                // std::fs::File maps ERROR_NO_DATA to EOF, losing the distinction
+                // between an empty nonblocking pipe and a disconnected peer.
+                let result = if unsafe { ReadFile(self.file.as_raw_handle(), bytes.as_mut_ptr(),
+                    bytes.len().min(u32::MAX as usize) as u32, &mut count, std::ptr::null_mut()) } != 0 {
+                    Ok(count as usize)
+                } else { Err(io::Error::last_os_error()) };
+                match result {
+                    Err(e) if e.raw_os_error() == Some(232) => {
+                        if self.nonblocking.get() {
+                            return Err(io::ErrorKind::WouldBlock.into());
+                        }
+                        if self.timeout.get().is_some_and(|t| start.elapsed() >= t) {
+                            return Err(io::ErrorKind::TimedOut.into());
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    result => return result,
+                }
+            }
+        }
+    }
+    impl Write for LocalStream {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> { self.file.write(bytes) }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+}
+
 use serde::{Deserialize, Serialize};
 
-#[cfg(unix)]
 use serde_json::{json, Value};
-#[cfg(unix)]
 use std::{
     io::{Read, Write},
-    os::unix::net::UnixStream,
     time::{Duration, Instant},
 };
 
@@ -28,9 +103,8 @@ pub struct Observation {
     pub ranges: [f64; 4],
 }
 
-#[cfg(unix)]
 pub struct Transport {
-    stream: UnixStream,
+    stream: LocalStream,
     input: Vec<u8>,
     generations: [u32; 4],
     generation_since: [Instant; 4],
@@ -41,7 +115,6 @@ pub struct Transport {
     pub observation: Observation,
 }
 
-#[cfg(unix)]
 impl Transport {
     pub fn connect(config: &Config) -> Result<Self, String> {
         if !config.sensitivity.is_finite()
@@ -55,7 +128,7 @@ impl Transport {
         {
             return Err("Invalid performance settings".into());
         }
-        let mut stream = UnixStream::connect(&config.path).map_err(|e| e.to_string())?;
+        let mut stream = LocalStream::connect(&config.path).map_err(|e| e.to_string())?;
         stream
             .set_read_timeout(Some(Duration::from_millis(200)))
             .map_err(|e| e.to_string())?;
@@ -206,37 +279,13 @@ impl Transport {
     }
 }
 
-// The native Mixxx performance host currently communicates over a Unix domain
-// socket and is staged by the macOS-only performance build. Keep the regular
-// Windows plumdeck application buildable and make this optional acceleration path
-// explicitly unavailable instead of compiling Unix APIs on Windows.
-#[cfg(not(unix))]
-pub struct Transport {
-    pub observation: Observation,
-}
-
-#[cfg(not(unix))]
-impl Transport {
-    pub fn connect(_config: &Config) -> Result<Self, String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-
-    pub fn poll(&mut self) -> Result<(), String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-
-    pub fn send(&mut self, _bytes: &[u8], _captured: std::time::Instant) -> Result<(), String> {
-        Err("Native performance transport is not supported on this platform".into())
-    }
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     #[test]
     fn queued_midi_is_not_relabelled_after_track_replacement() {
-        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (stream, mut peer) = LocalStream::pair().unwrap();
         let origin = Instant::now() - Duration::from_secs(1);
         let mut transport = Transport {
             stream,
@@ -269,5 +318,42 @@ mod tests {
             2
         );
         assert_eq!(u64::from_le_bytes(record[..8].try_into().unwrap()), 2);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::{fs::File, os::windows::io::{FromRawHandle, AsRawHandle}};
+    #[link(name="kernel32")]
+    extern "system" {
+        fn CreateNamedPipeW(name:*const u16, access:u32, mode:u32, instances:u32,
+            output:u32, input:u32, timeout:u32, security:*const std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn ConnectNamedPipe(handle:*mut std::ffi::c_void, overlapped:*mut std::ffi::c_void) -> i32;
+    }
+    #[test]
+    fn windows_pipe_handshake_and_timestamped_midi() {
+        let path=format!(r"\\.\pipe\plumdeck-test-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        let name=path.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+        let handle=unsafe { CreateNamedPipeW(name.as_ptr(),3,0,1,65536,65536,0,std::ptr::null()) };
+        assert_ne!(handle as isize,-1);
+        let mut file=unsafe { File::from_raw_handle(handle) };
+        let server=std::thread::spawn(move || {
+            let result=unsafe { ConnectNamedPipe(file.as_raw_handle(),std::ptr::null_mut()) };
+            if result==0 { assert_eq!(std::io::Error::last_os_error().raw_os_error(),Some(535)); }
+            let mut hello=Vec::new(); let mut byte=[0];
+            loop { file.read_exact(&mut byte).unwrap(); if byte[0]==b'\n' {break} hello.push(byte[0]); }
+            assert_eq!(serde_json::from_slice::<Value>(&hello).unwrap()["token"],"test-token");
+            file.write_all(b"{\"nativeUs\":1000,\"decks\":[{\"generation\":1}]}\n").unwrap();
+            let mut packet=[0u8;48]; file.read_exact(&mut packet).unwrap();
+            assert_eq!(&packet[33..36],&[0x90,0x36,127]);
+            assert_eq!(u32::from_le_bytes(packet[16..20].try_into().unwrap()),1);
+        });
+        let mut transport=Transport::connect(&Config { path,token:"test-token".into(),
+            sensitivity:0.1,ranges:[16.0;4],cues:[0.0;4] }).unwrap();
+        transport.poll().unwrap(); // Empty pipe must return immediately.
+        transport.send(&[0x90,0x36,127],Instant::now()).unwrap();
+        server.join().unwrap();
     }
 }

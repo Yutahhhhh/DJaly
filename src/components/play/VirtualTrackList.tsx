@@ -105,7 +105,7 @@ export function VirtualTrackList({ resourceKey, tracks, total, hasMore, loading,
     <div className="dj-library-footer">
       <span>{sort && sortScope === "loaded" && hasMore
         ? `並べ替えは読み込み済みの ${tracks.length.toLocaleString()} 曲が対象。下までスクロールすると残りも読み込みます`
-        : `ドラッグまたはダブルクリックで DECK ${activeDeck} へロード${onRemove ? " · ⌘+Delete で選択曲をプレイリストから削除" : ""}${onDropTrack ? " · レコメンド/検索からドロップで追加" : ""}`}</span>
+        : `ドラッグまたはダブルクリックで DECK ${activeDeck} へロード${onRemove ? " · Ctrl/⌘+Delete で選択曲をプレイリストから削除" : ""}${onDropTrack ? " · レコメンド/検索からドロップで追加" : ""}`}</span>
       <span className="dj-num">{total.toLocaleString()} tracks</span></div>
   </div>;
 }

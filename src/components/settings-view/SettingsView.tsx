@@ -302,7 +302,7 @@ export function SettingsView() {
               <div className="flex gap-2">
                 <Input
                   id="root_path"
-                  placeholder="/Users/username/Music"
+                  placeholder="音楽フォルダーのパス"
                   value={settings["root_path"] || ""}
                   onChange={(e) =>
                     updateLocalSetting("root_path", e.target.value)

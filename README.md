@@ -33,22 +33,48 @@ CSVとM3U8には音源ファイル自体は含まれません。音源の移動�
 - 完全バックアップはDuckDB、解析ジョブ、許可されたUI設定をmanifestとSHA-256付きで保存し、必要なら音源と録音も含めます。復元は検査、確認、staging移行、DBと解析ジョブのrollback保存を経て行います。復元中に終了した場合は次回起動時に両DBを復元前へ戻します。音源を含めなかったバックアップから音源本体は復元できません。TURN資格情報、キーチェーン、再生中の状態は含めません。
 - 音声ルーティングは名前付きプリセットとして保存できます。読み込んだだけでは出力を変更せず、Playのオーディオ画面で接続機器のMaster/CUEチャンネルを選び、適用して確認します。現在は同一機器内の連続2チャンネル、44,100 Hz / 256 framesに対応します。
 - DDJ-400の内蔵マッピングと、選択したMIDI機器から1操作ずつ取得するMIDI Learnに対応します。DDJ-1000固有の高速入力・表示フィードバックは他機器へ送りません。DDJ-400と汎用MIDIのLEDフィードバックは未対応です。
-- USBはセットの固定snapshotとrekordbox XMLを作ります。rekordboxでXMLを取り込み、対象USBへExportしてから確認記録を残します。plumdeckはPioneerのUSBデータベースを直接生成・変更しません。実機確認は型番、firmware、日時、確認項目を伴う別の証拠です。
+- USB一覧と安全な取り外しはmacOS／Windowsに対応します。WindowsではUSB接続のSSDも認識し、ドライブ文字が変わってもボリュームIDで識別します。USBはセットの固定snapshotとrekordbox XMLを作ります。rekordboxでXMLを取り込み、対象USBへExportしてから確認記録を残します。plumdeckはPioneerのUSBデータベースを直接生成・変更しません。実機確認は型番、firmware、日時、確認項目を伴う別の証拠です。
 - 録音の長さはレコーダーの実フレーム数を使用します。曲目の区間は約20ms間隔のエンジン観測による推定で、細かなカットの完全な記録は保証しません。録音一覧からRange対応で試聴でき、外部録音はファイルから長さを検証して登録できます。
-- Play画面へFinderから音源／フォルダをドロップできます。Collectionまたはドロップ時点のローカルプレイリストを追加先として固定し、元ファイルへタグを書きません。Rekordbox Mirror、履歴、録音へのドロップは拒否します。
+- Play画面へFinder／エクスプローラーから音源／フォルダをドロップできます。Collectionまたはドロップ時点のローカルプレイリストを追加先として固定し、元ファイルへタグを書きません。Rekordbox Mirror、履歴、録音へのドロップは拒否します。
 
 USBのXML取り込み、CDJ/XDJ、任意のMIDI機器、各音声出力は環境依存です。自動テスト済みの状態と、rekordbox／実機で確認済みの状態は画面と検証記録で区別してください。
 
+## 配布版の環境とMCP設定
+
+Plumdeck本体のMCPは、起動中のアプリへHTTPで接続します。Python、ソースコード、開発者のホームディレクトリは不要です。接続先はアプリのMCP画面で確認してください。配布版の既定は `http://127.0.0.1:48123/mcp`、開発時は `http://127.0.0.1:8001/mcp` です。リポジトリの `.mcp.json` と `opencode.json` は配布版の接続例です。
+
+rekordboxのDBを直接操作する `rekordbox-mcp` は別の任意ツールです。Plumdeck本体の利用に必須ではありません。必要な場合だけ、[導入手順](rekordbox-mcp/README.md)に従ってインストールし、クライアント側で登録してください。PATHで実行できる環境の設定例は次の通りです。
+
+```json
+{
+  "mcpServers": {
+    "rekordbox": {
+      "type": "stdio",
+      "command": "rekordbox-mcp",
+      "args": ["--mode", "readonly"]
+    }
+  }
+}
+```
+
+DBは実行ユーザーのmacOS／Windows標準保存先から自動検出します。独自の場所へ移している場合のみ `REKORDBOX_DB_PATH` を指定してください。GUIから起動したMCPクライアントのPATHにコマンドがない場合は、その利用者のインストール先をクライアントのローカル設定に指定します。個人パスを共有設定へコミットする必要はありません。
+
+アプリのDBとログは `platformdirs` によるユーザー専用データディレクトリに保存します。`USER_DATA_DIR`、`DB_PATH` による明示指定は引き続き使用できます。音楽フォルダーの既定もOSのユーザーフォルダーです。録音変換と詳細波形は同梱FFmpegを使い、Windowsでは `ffmpeg.exe` を解決します。配布物が壊れている場合、開発機のツールへ暗黙に切り替えません。
+
+起動時にポートが競合しても、別アプリのプロセスを終了しません。競合するアプリを確認して終了してから再起動してください。Plumdeck自身が起動したバックエンドはアプリ終了時に停止します。
+
+WindowsではFFmpeg・librosa・TensorFlow CPUでBPM／キー／音色／波形／MusiCNN埋め込みを解析します。macOSはEssentiaを使用します。MusiCNNのモデルと入力スペクトル仕様は共通です。BPM・キーの推定アルゴリズムにはOS差があるため、解析履歴には使用したコンポーネントのバージョンを記録します。
+
+Release workflowは両OSでネイティブ音声エンジンをビルドし、必要なDLL／Frameworkとバックエンドを同梱します。Windows distribution validationでは、通常のPATHを外して同梱exeから解析し、API・MCPの起動とインストーラーの生成を検証します。音声デバイス、DDJ本体、rekordboxのUIとの実機検証はこのCIとは別です。
+
 ## ローカル開発
 
-フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。MixxxホストとJCTの実音声経路はmacOS / Apple Silicon向けです。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
+フロントエンドはNode / pnpm、デスクトップはRust / Tauri、バックエンドはPython環境を使います。ネイティブ音声エンジンのビルド対象はmacOS / Apple SiliconとWindows x64です。ブラウザだけでは音声エンジン、MIDI、rekordboxデッキ取得、外部アプリへのドラッグは利用できません。
 
 ```bash
 cp .env.example .env
 pnpm install
-cd backend
-./setup.sh
-cd ..
+pnpm backend:install
 pnpm tauri
 ```
 
@@ -72,9 +98,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 ```bash
 pnpm dj-engine:build
 pnpm dj-engine:stage
-pnpm exec tauri build --bundles app --no-sign --config src-tauri/tauri.mixxx.conf.json
-bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh
+pnpm tauri:build:performance
 ```
+
+WindowsではVisual Studioの「x64 Native Tools Command Prompt」でビルドします。Python 3.11、Git、Node 24、Rust、CMake、Ninjaが必要です（`python -m pip install cmake ninja`）。依存ソースとWindowsライブラリは固定リビジョン／ハッシュから取得し、DLL・Qtプラグイン・リソースをステージへまとめます。Windows利用者側にVisual Studio、Python、WSL、Homebrewは不要です。
 
 Apple Siliconでは `/opt/homebrew` のARM64ツールチェーンを使用します。依存バージョンは `native/mixxx-engine-host/dependency-versions.json`、固定リビジョンと取得処理はビルドスクリプトにあります。Mixxxホストを含む配布では、同梱ライブラリ・署名・対応ソースの確認も必要です。
 
@@ -106,7 +133,7 @@ JCTはホストとプレイ担当者を分けます。音声はWebRTC / Opusで�
 
 既定では公開STUNを接続先の探索に使います。直接接続できない場合は、ホストが「直接つながらないときの中継設定」に自分のTURNを設定できます。「運営サーバー不要」は「外部サーバーを一切使わない」という意味ではありません。今回は運営クラウドを配備していません。
 
-TURN RESTの共有シークレットはネイティブ内に保持し、保存を選ぶとmacOSキーチェーンに保管します。招待へ渡すのは参加者ごとに発行する30分有効の接続用資格情報だけです。発行済み一時資格情報も、期限を示すTURN REST形式のユーザー名と24時間以内の期限で利用できます。期限切れの資格情報を再使用しません。設定変更・更新後は同じDJの招待を作り直して再交換します。管理用APIキーや長期秘密鍵を招待・返答へ入れません。接続テストは実際の中継候補取得を確認しますが、相手との接続や全回線での成功を保証するものではありません。
+TURN RESTの共有シークレットはネイティブ内に保持し、保存を選ぶとmacOSキーチェーン、WindowsではログインユーザーのDPAPIで暗号化して保管します。招待へ渡すのは参加者ごとに発行する30分有効の接続用資格情報だけです。発行済み一時資格情報も、期限を示すTURN REST形式のユーザー名と24時間以内の期限で利用できます。期限切れの資格情報を再使用しません。設定変更・更新後は同じDJの招待を作り直して再交換します。管理用APIキーや長期秘密鍵を招待・返答へ入れません。接続テストは実際の中継候補取得を確認しますが、相手との接続や全回線での成功を保証するものではありません。
 
 短い通信断は同じ接続の復旧を待ち、戻らなければ同じ参加者カードで新しい招待・返答を交換します。他のDJの接続と演奏権は維持します。取り消し・拒否をオフラインの相手に知らせる場合は、署名付き通知をコピーして渡します。表示名だけでは本人確認できないため、招待と返答は相手を確認できる経路で受け渡してください。
 
@@ -152,7 +179,7 @@ pnpm junction:test:integration # 既存サーバー方式の回帰試験
 
 ## rekordboxアシスト
 
-macOSのアクセシビリティから、rekordboxが表示しているデッキの曲情報を読み取ります。初回の案内に従ってplumdeckのアクセシビリティを許可してください。OCRや画面録画は使用しません。
+macOSのアクセシビリティ、WindowsのUI Automationから、rekordboxが表示しているデッキの曲情報を読み取ります。macOSでは初回の案内に従ってplumdeckのアクセシビリティを許可してください。Windowsでは両アプリを同じユーザー・権限で起動し、rekordboxのPERFORMANCE画面を表示します。Windows標準のPowerShell／.NETを使う読み取り処理は、時間と出力量を制限した別プロセスで動きます。OCRや画面録画は使用しません。
 
 「グルーヴ」「展開」「ワードプレイ」、エネルギーの方向、ジャンル条件を選んで候補を探します。現在の基準デッキは手動で選択します。ロードを確認した曲は履歴へ保存し、候補から除外します。新しいセットでは履歴をリセットできます。
 
@@ -186,7 +213,7 @@ rekordbox MCPの起動・DBモード・操作手順は [rekordbox-mcp/README.md]
 
 `main` を配布の基点とし、変更は `feature/*`、`fix/*`、`refactor/*`、`chore/*` で進めます。ブランチのプッシュと製品リリースは別の操作です。
 
-`pnpm release vX.Y.Z` はバックエンドの梱包、Tauriビルド、GitHub Releasesへのアップロードを含みます。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/plumdeck/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
+`pnpm package` はこのOSのバックエンド・ネイティブ音声エンジン・Tauriインストーラーをローカルで作成します。公開操作は行いません。タグをGitHubへプッシュするとRelease workflowが両OSの配布物を作成します。`pnpm release vX.Y.Z` は既にプッシュしたタグのRelease workflowをGitHub CLIで再実行します。通常の開発確認では実行しません。配布物は [Releases](https://github.com/Yutahhhhh/plumdeck/releases) で確認してください。対応OS・アーキテクチャ・署名状況は実際に配布されたファイルに従います。
 
 ## ライセンスと対応ソース
 
@@ -200,3 +227,7 @@ JCTではSoundTouch 2.4.1、RubberBand 4.0.0、libdatachannel、libnice、Opus�
 - [Mixxxのソース](https://github.com/mixxxdj/mixxx/tree/2.5.6)
 
 RustのシミュレーターはMixxxコードを含まず、依存バージョンは `native/dj-engine-host/Cargo.lock` で固定しています。
+
+Release workflowはmacOS／Windowsのビルドと検証が両方成功した後に、インストーラーと署名付き `latest.json` を公開します。更新用のGitHub Actions Secretsには `TAURI_SIGNING_PRIVATE_KEY` と、鍵にパスワードがある場合は `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` を登録します。秘密鍵は既存の `tauri.conf.json` の公開鍵と対になるものを使い、利用者の環境へ配りません。不一致・未設定・タグとアプリバージョンの不一致は公開前にエラーにします。macOSの更新アーカイブはネストした音声エンジンの最終署名処理後に作ります。
+
+自動更新のURLは一般利用者が認証なしで取得できるHTTPS配布先である必要があります。非公開リポジトリのまま配布する場合は、公開の配布先を用意して `plugins.updater.endpoints` と Actions Variable `PLUMDECK_RELEASE_DOWNLOAD_BASE`（末尾は `/releases/download` 相当）を設定し、生成された配布物を同じURLへ配置してください。AppleのDeveloper ID署名・公証、およびWindowsの発行元署名に使う証明書は、更新ファイルの署名鍵とは別の発行者設定です。

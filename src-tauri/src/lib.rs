@@ -10,19 +10,67 @@ struct JunctionInvite(Mutex<Option<String>>);
 fn valid_junction_invite(value: &str) -> bool {
     value.len() <= 8192 && value.starts_with("plumdeck-junction://join?") && !value.chars().any(char::is_control)
 }
+fn receive_junction_invite(app: &tauri::AppHandle, value: &str) {
+    if !valid_junction_invite(value) { return; }
+    if let Some(state) = app.try_state::<JunctionInvite>() {
+        if let Ok(mut pending) = state.0.lock() { *pending = Some(value.to_string()); }
+    }
+    let _ = app.emit("junction://invite", value);
+    if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
+}
 #[tauri::command]
 fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String> {
     state.0.lock().ok()?.take()
 }
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandEvent, CommandChild};
+#[derive(Default)]
+struct BackendChild(Mutex<Option<ManagedBackend>>);
+struct ManagedBackend {
+    child: CommandChild,
+    ended: std::sync::mpsc::Receiver<()>,
+}
+fn stop_backend(mut backend: ManagedBackend) {
+    let _ = backend.child.write(b"plumdeck:shutdown\n");
+    // The analysis worker gets 30 seconds to checkpoint; Uvicorn first drains
+    // requests for up to 5 seconds. Do not kill it before that work can finish.
+    if backend.ended.recv_timeout(std::time::Duration::from_secs(40)).is_ok() { return; }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // PyInstaller's one-file bootloader owns a Python child. A forced
+        // fallback must end this owned tree, never another listener on a port.
+        if let Some(system) = std::env::var_os("SystemRoot") {
+            if let Ok(mut command) = std::process::Command::new(std::path::PathBuf::from(system).join("System32/taskkill.exe"))
+                .args(["/PID", &backend.child.pid().to_string(), "/T", "/F"])
+                .creation_flags(0x08000000).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+                let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+                while matches!(command.try_wait(), Ok(None)) && std::time::Instant::now()<deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                let _=command.kill(); let _=command.wait();
+            }
+        }
+    }
+    let _ = backend.child.kill();
+}
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 mod assist;
 mod dj_engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize(); let _ = window.show(); let _ = window.set_focus();
+        }
+    }));
+    builder
+        .plugin(tauri_plugin_deep_link::init())
+        .manage(BackendChild::default())
         .plugin(tauri_plugin_shell::init())
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
         .plugin(tauri_plugin_devtools::init())
@@ -119,6 +167,10 @@ pub fn run() {
             junction_exchange_files::junction_write_exchange_file,
         ])
         .setup(|app| {
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() { receive_junction_invite(&handle, url.as_str()); }
+            });
             for arg in env::args().skip(1) { if valid_junction_invite(&arg) { if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(arg); } } }
             app.manage(dj_engine::midi::controller(app.handle().clone()));
             app.manage(dj_engine::jog_display::JogDisplay::new());
@@ -143,7 +195,7 @@ pub fn run() {
             }
 
             // CI環境やビルド時はサイドカーを起動しない
-            if env::var("CI").is_ok() || env::var("TAURI_SKIP_SIDECAR").is_ok() {
+            if cfg!(debug_assertions) && (env_flag("CI") || env_flag("TAURI_SKIP_SIDECAR")) {
                 println!("Skipping sidecar startup (CI/build environment)");
                 return Ok(());
             }
@@ -163,7 +215,8 @@ pub fn run() {
                     eprintln!("Failed to create sidecar command: {}", e);
                     e
                 })?
-                .env("PLUMDECK_PORT", port);
+                .env("PLUMDECK_PORT", port)
+                .env("PLUMDECK_MANAGED_SIDECAR", "1");
 
             // コマンドの実行結果を詳細にログ出力
             println!("Attempting to spawn sidecar with port: {}", port);
@@ -173,6 +226,9 @@ pub fn run() {
                 e
             })?;
 
+            let (ended, completion) = std::sync::mpsc::channel();
+            *app.state::<BackendChild>().0.lock().unwrap() = Some(ManagedBackend {child: _child, ended: completion});
+
             // 非同期でログを出力するスレッドを作成（デバッグ用）
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = _rx.recv().await {
@@ -180,6 +236,8 @@ pub fn run() {
                         println!("[PY]: {}", String::from_utf8_lossy(&line));
                     } else if let CommandEvent::Stderr(line) = event {
                         eprintln!("[PY ERR]: {}", String::from_utf8_lossy(&line));
+                    } else if let CommandEvent::Terminated(_) = event {
+                        let _ = ended.send(());
                     }
                 }
             });
@@ -189,19 +247,18 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                let _ = app.state::<Arc<dj_engine::EngineSupervisor>>().stop();
+                if let Ok(mut child) = app.state::<BackendChild>().0.lock() {
+                    if let Some(child) = child.take() { stop_backend(child); }
+                }
+            }
             if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
                 if app.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
                     api.prevent_exit(); let _ = app.emit("junction://close-blocked", ());
                 }
             }
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            if let tauri::RunEvent::Opened { urls } = event {
-                for url in urls { let value = url.to_string(); if valid_junction_invite(&value) {
-                    if let Ok(mut pending) = app.state::<JunctionInvite>().0.lock() { *pending = Some(value.clone()); }
-                    let _ = app.emit("junction://invite", value);
-                    if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
-                }}
-            }
+
         });
 }
 

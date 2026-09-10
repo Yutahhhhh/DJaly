@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
-import os
 from collections import defaultdict
 from pathlib import Path
 from uuid import uuid4
+
+import os
+import platformdirs
 
 import duckdb
 
@@ -15,18 +17,7 @@ from rekordbox_mcp.db.connection import db6_tables
 from rekordbox_mcp.db.repository import RekordboxRepository
 from rekordbox_mcp.domain.models import OperationMode, Playlist
 
-PLUMDECK_DB = Path(
-    os.environ.get(
-        "PLUMDECK_DB_PATH",
-        Path.home() / "Library/Application Support/plumdeck/plumdeck.duckdb",
-    )
-).expanduser()
-REKORDBOX_DB = Path(
-    os.environ.get(
-        "REKORDBOX_DB_PATH",
-        Path.home() / "Library/Pioneer/rekordbox/master.db",
-    )
-).expanduser()
+PLUMDECK_DB = Path(os.environ.get("DB_PATH") or str(Path(platformdirs.user_data_dir("plumdeck", "plumdeck")) / "plumdeck.duckdb")).expanduser()
 ROOT_NAME = "GENRES"
 SPLIT_AT = 900
 MIN_SUBGENRE_TRACKS = 20
@@ -66,7 +57,7 @@ def main() -> None:
                 leaf = genre
             target_paths[(genre, leaf)].add(filepath)
 
-    settings = Settings(db_path=str(REKORDBOX_DB), mode="masterdb")
+    settings = Settings(mode="masterdb")
     repo = RekordboxRepository(settings, OperationMode.MASTERDB)
     repo.connect()
     try:

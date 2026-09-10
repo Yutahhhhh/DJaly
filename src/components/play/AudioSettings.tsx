@@ -94,7 +94,7 @@ export function AudioSettings({ onClose, onApply }: {
         </div>
         <label className={labelClass} htmlFor="dj-output-device">マスター出力</label>
         <select id="dj-output-device" value={selected} disabled={disabled} onChange={event => { setSelected(event.target.value); setRouting({ masterChannels: [0,1], pflChannels: event.target.value === "DDJ-1000" ? [2,3] : null }); }} className={selectClass}>
-          <option value="">macOSの既定出力{defaultDevice ? ` — ${defaultDevice.displayName}` : ""}</option>
+          <option value="">システムの既定出力{defaultDevice ? ` — ${defaultDevice.displayName}` : ""}</option>
           {selected && !outputs.some(device => device.name === selected) && <option value={selected} disabled>{selected}（未接続）</option>}
           {outputs.map(device => <option key={device.id} value={device.name} disabled={device.outputChannels < 2}>{device.displayName} — {device.outputChannels} ch</option>)}
         </select>
@@ -108,7 +108,7 @@ export function AudioSettings({ onClose, onApply }: {
           </label>)}
         </div>
         {!routeValid && <p role="alert" className="text-xs text-amber-300">接続機器に存在する、重複しないMaster / CUEチャンネルを選択してください。</p>}
-        {ambiguous && <p role="alert" className="text-xs text-amber-300">同名の出力が複数あります。macOSの既定出力を選択してください。</p>}
+        {ambiguous && <p role="alert" className="text-xs text-amber-300">同名の出力が複数あります。システムの既定出力を選択してください。</p>}
         <fieldset disabled={disabled || !micSupported} className="space-y-3 rounded border border-[#2b2d31] p-3 disabled:opacity-60">
           <legend className="flex items-center gap-1 px-1 text-xs"><Mic className="size-3.5" />マイク入力</legend>
           <label className={labelClass} htmlFor="dj-mic-device">入力デバイス</label>

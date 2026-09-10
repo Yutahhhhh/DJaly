@@ -2,8 +2,12 @@
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 from pathlib import Path
 import runpy
+import sys
 
-datas = [('models/msd-musicnn-1.pb', 'models')]
+datas = [(
+    'models/msd-musicnn-1.onnx' if sys.platform == 'win32' else 'models/msd-musicnn-1.pb',
+    'models',
+)]
 binaries = []
 
 # Package the converter and its linked libraries; installed apps must not rely
@@ -31,9 +35,8 @@ hiddenimports = [
 ]
 
 # Collect packages that genuinely use dynamic imports/resources. NumPy is
-# handled by PyInstaller's built-in hook. scipy/sklearn/tensorflow are not
-# runtime dependencies of plumdeck and collecting them here only produced stale
-# hidden-import warnings and unnecessary discovery work.
+# handled by PyInstaller's built-in hook. Windows analysis libraries are
+# collected separately below because macOS uses Essentia instead.
 for package in [
     'uvicorn', 'starlette', 'fastapi', 'h11', 'essentia',
     'mcp', 'mcp_types', 'sse_starlette', 'jsonschema',
@@ -48,7 +51,16 @@ for package in [
         pass
 
 # Essentia ships native libraries on supported platforms.
-binaries += collect_dynamic_libs('essentia')
+if sys.platform != 'win32':
+    binaries += collect_dynamic_libs('essentia')
+else:
+    # Include librosa's lazy-loaded module map and ONNX Runtime's native CPU runtime.
+    for package in ['librosa', 'lazy_loader', 'pyloudnorm', 'onnxruntime']:
+        package_datas, package_binaries, package_imports = collect_all(package)
+        datas += package_datas
+        binaries += package_binaries
+        hiddenimports += package_imports
+    hiddenimports.append('domain.services.analysis.portable')
 
 # Fail the build if Rekordbox-import dependencies are missing; do not silently
 # ship a package that relies on another checkout or virtual environment.

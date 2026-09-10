@@ -3,6 +3,7 @@ import sys
 import uvicorn
 import multiprocessing
 import platformdirs
+import threading
 
 # Bound native pools before importing the audio stack; analysis jobs control concurrency.
 for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
@@ -12,7 +13,18 @@ for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMU
 # PyInstaller for multiprocessing support (Windows/macOS)
 multiprocessing.freeze_support()
 
+# The desktop reads UTF-8 from redirected pipes. Windows' legacy ANSI code
+# page cannot encode Japanese profile/music paths in startup messages.
+for stream in (sys.stdout, sys.stderr):
+    if stream is not None and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--diagnose-analysis"]:
+        from analysis_diagnostic import run
+        run()
+        raise SystemExit(0)
+
     # 設定の読み込みと環境変数のセットアップ
     # これを最初に行うことで、後続のインポート(librosa等)が正しいパスを使用できる
     from config import settings
@@ -39,38 +51,18 @@ if __name__ == "__main__":
     print(f"Starting plumdeck Backend Server on port {port}...")
     print(f"User Data Directory: {settings.USER_DATA_DIR}")
     
-    # 既存のプロセスをチェックして終了させる (macOS/Linux)
-    # Windowsでは lsof がないためスキップ (必要なら psutil を使う)
-    if sys.platform != "win32":
-        try:
-            import subprocess
-            # 指定ポートを使用しているプロセスのPIDを取得
-            result = subprocess.run(
-                ["lsof", "-t", f"-i:{port}"],
-                capture_output=True,
-                text=True
-            )
-            pids = result.stdout.strip().split('\n')
-
-            my_pid = str(os.getpid())
-
-            for pid in pids:
-                if not pid or pid == my_pid:
-                    continue
-                # プロセス名を確認し、自分のサイドカー/Python プロセスのみ終了させる
-                # (無関係なアプリを巻き添えにしない)
-                name_result = subprocess.run(
-                    ["ps", "-p", pid, "-o", "comm="],
-                    capture_output=True,
-                    text=True
-                )
-                proc_name = name_result.stdout.strip().lower()
-                if any(k in proc_name for k in ("plumdeck", "python", "server")):
-                    print(f"Killing existing plumdeck process on port {port} (PID: {pid}, name: {proc_name})...")
-                    subprocess.run(["kill", pid])  # まず SIGTERM
-                else:
-                    print(f"Warning: Port {port} is used by unrelated process '{proc_name}' (PID: {pid}). Not killing it.")
-        except Exception as e:
-            print(f"Warning: Failed to kill existing process: {e}")
-
-    uvicorn.run(app, host="127.0.0.1", port=port, reload=False, workers=1)
+    # Never terminate another process to claim a port. Uvicorn reports conflicts.
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+        reload=False, workers=1, timeout_graceful_shutdown=5))
+    if os.environ.get("PLUMDECK_MANAGED_SIDECAR") == "1":
+        def watch_parent():
+            # The desktop owns this pipe. EOF also handles a crashed desktop;
+            # standalone CLI launches keep their usual signal-based lifecycle.
+            try:
+                for line in iter(lambda: sys.stdin.buffer.readline(1024), b""):
+                    if line.strip() == b"plumdeck:shutdown":
+                        break
+            finally:
+                server.should_exit = True
+        threading.Thread(target=watch_parent, daemon=True, name="desktop-lifecycle").start()
+    server.run()

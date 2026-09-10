@@ -35,3 +35,8 @@ NORM_LOUDNESS_RANGE = (0.0, 15.0) # Lowered min to capture low-dynamic range gen
 
 # Default Values
 DEFAULT_LOUDNESS_RANGE = 5.0
+
+# Different DSP implementations must not claim each other's analysis version.
+import sys
+if sys.platform == "win32":
+    COMPONENT_VERSIONS.update(rhythm="librosa-rhythm-v1", key="librosa-key-v1", timbre="librosa-timbre-v1")

@@ -9,6 +9,7 @@ on:
       - 'src/**'
       - 'src-tauri/**'
       - 'native/**'
+      - 'scripts/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig*.json'
@@ -39,8 +40,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Verify signed release artifacts and incomplete-release rejection
+        run: python scripts/test-release-artifacts.py
       - name: MIDI and audio recovery regression tests
-        run: node --experimental-strip-types --test src/services/midi/generic-midi.test.mjs src/services/dj-engine/audio-ready.test.mjs
+        run: node --experimental-strip-types --test src/services/midi/generic-midi.test.mjs src/services/dj-engine/audio-ready.test.mjs src/lib/path-breadcrumbs.test.mjs
 
   backend:
     name: Database and import regression tests
@@ -58,3 +61,37 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity -q
+      - name: Test portable runtime paths
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest --confcutdir=backend/tests/portability backend/tests/portability -q
+
+  windows-shell:
+    name: Windows shell and controller regression tests
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          cache-on-failure: true
+      - name: Create build-only sidecar placeholder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/bin | Out-Null
+          New-Item -ItemType File -Force src-tauri/bin/plumdeck-server-x86_64-pc-windows-msvc.exe | Out-Null
+      - name: Compile and test native Windows shell
+        working-directory: src-tauri
+        env:
+          # Unit tests compile the shell independently; packaging validates real resources.
+          TAURI_CONFIG: '{"bundle":{"resources":[]}}'
+        run: cargo test --lib
+
+      - name: Preserve resolved Rust lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cargo-lock
+          path: src-tauri/Cargo.lock

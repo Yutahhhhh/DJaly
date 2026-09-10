@@ -51,7 +51,8 @@ def reveal_file_in_os(req: RevealFileRequest):
         if system_name == "Darwin": # macOS
             subprocess.run(["open", "-R", path], check=True)
         elif system_name == "Windows":
-            subprocess.run(f'explorer /select,"{path}"', shell=True, check=True)
+            from utils.reveal_file import reveal_windows_file
+            reveal_windows_file(path)
         elif system_name == "Linux":
             subprocess.run(["xdg-open", os.path.dirname(path)], check=True)
         return {"status": "success"}

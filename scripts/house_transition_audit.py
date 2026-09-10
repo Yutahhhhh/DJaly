@@ -5,22 +5,19 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import os
+import platformdirs
+
 import duckdb
 import numpy as np
 
 
-DB_PATH = Path(
-    os.environ.get(
-        "PLUMDECK_DB_PATH",
-        Path.home() / "Library/Application Support/plumdeck/plumdeck.duckdb",
-    )
-).expanduser()
+DB_PATH = Path(os.environ.get("DB_PATH") or str(Path(platformdirs.user_data_dir("plumdeck", "plumdeck")) / "plumdeck.duckdb")).expanduser()
 SR = 22050
 SEGMENT_SECONDS = 16.0
 

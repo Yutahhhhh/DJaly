@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # デフォルトは platformdirs を使用するが、環境変数 DB_PATH があればそれを優先する
     USER_DATA_DIR: str = Field(default_factory=lambda: platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
     DB_PATH: str | None = None
-    MUSIC_DIR: str = "/music_data"
+    MUSIC_DIR: str = Field(default_factory=platformdirs.user_music_dir)
     
     # Network
     PLUMDECK_PORT: int = 8001

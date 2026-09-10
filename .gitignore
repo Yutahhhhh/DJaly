@@ -35,6 +35,7 @@ backend/dist/
 
 # Backend models
 backend/models/*.pb
+backend/models/*.onnx
 
 # Tauri sidecar binaries
 src-tauri/bin/

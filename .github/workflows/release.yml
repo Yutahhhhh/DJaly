@@ -19,14 +19,16 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --config src-tauri/tauri.mixxx.conf.json'
             sidecar_target: 'aarch64-apple-darwin'
-          - platform: 'windows-latest'
-            args: ''
+            update_platform: 'darwin-aarch64'
+          - platform: 'windows-2022'
+            args: '--config src-tauri/tauri.windows.conf.json'
             sidecar_target: 'x86_64-pc-windows-msvc'
+            update_platform: 'windows-x86_64'
 
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 30
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -48,6 +50,12 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'backend/requirements.txt'
 
+      - name: Validate release tag and updater key
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/release-artifacts.py validate
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,10 +72,10 @@ jobs:
 
       - name: install FFmpeg (macOS)
         if: matrix.platform == 'macos-latest'
-        run: brew install ffmpeg
+        run: brew install ffmpeg cmake ninja pkgconf qtbase qt5compat qtsvg qtdeclarative qttranslations portaudio libsndfile libsamplerate rubberband sound-touch chromaprint libebur128 taglib protobuf abseil opus libnice openssl@3 flac libogg libvorbis speex mpg123
 
       - name: install FFmpeg (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: pwsh
         run: choco install ffmpeg -y --no-progress
 
@@ -76,6 +84,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
+
+      - name: fetch verified Windows inference model
+        if: matrix.platform == 'windows-2022'
+        run: python backend/fetch_musicnn_onnx.py
 
       - name: verify FFmpeg packaging requirements
         shell: bash
@@ -96,7 +108,7 @@ jobs:
           mkdir -p ../src-tauri/bin
 
           EXTENSION=""
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+          if [[ "${{ matrix.platform }}" == "windows-2022" ]]; then
             EXTENSION=".exe"
           fi
 
@@ -105,54 +117,47 @@ jobs:
           test -f ../src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION
           ls -la ../src-tauri/bin/
 
-      - name: smoke test packaged backend
+      - name: Exercise packaged API and MCP tools
         shell: bash
         run: |
-          set -euo pipefail
-
           EXTENSION=""
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-            EXTENSION=".exe"
-          fi
+          if [[ "${{ matrix.platform }}" == "windows-2022" ]]; then EXTENSION=".exe"; fi
+          python scripts/smoke-backend.py "src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION"
 
-          SIDECAR="src-tauri/bin/plumdeck-server-${{ matrix.sidecar_target }}$EXTENSION"
-          PORT=48123
-          LOG_FILE="${RUNNER_TEMP}/plumdeck-sidecar-smoke.log"
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.platform == 'windows-2022'
+        with:
+          arch: x64
 
-          PLUMDECK_PORT="$PORT" "$SIDECAR" >"$LOG_FILE" 2>&1 &
-          SIDECAR_PID=$!
+      - name: Build and stage Windows audio engine
+        if: matrix.platform == 'windows-2022'
+        run: |
+          python -m pip install cmake ninja
+          python native/mixxx-engine-host/scripts/build-windows.py
 
-          cleanup() {
-            kill "$SIDECAR_PID" 2>/dev/null || true
-            wait "$SIDECAR_PID" 2>/dev/null || true
-          }
-          trap cleanup EXIT
+      - name: Build and stage macOS audio engine
+        if: matrix.platform == 'macos-latest'
+        run: |
+          bash native/mixxx-engine-host/scripts/build-macos.sh
+          bash native/mixxx-engine-host/scripts/stage-macos.sh
 
-          READY=0
-          for attempt in {1..45}; do
-            if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/" | grep -q 'plumdeck Backend API is running'; then
-              READY=1
-              break
-            fi
-            if ! kill -0 "$SIDECAR_PID" 2>/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-
-          if [[ "$READY" -ne 1 ]]; then
-            echo "Packaged backend failed to become ready:"
-            cat "$LOG_FILE"
-            exit 1
-          fi
-
-          echo "Packaged backend smoke test passed."
+      - name: Verify packaged analysis
+        if: matrix.platform == 'windows-2022'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & .\src-tauri\bin\plumdeck-server-x86_64-pc-windows-msvc.exe --diagnose-analysis
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
 
       - name: build tauri app
         run: pnpm exec tauri build ${{ matrix.args }}
         env:
           CI: true
           TAURI_SKIP_SIDECAR: true
+
+      - name: Preserve and verify nested macOS frameworks
+        if: matrix.platform == 'macos-latest'
+        run: bash native/mixxx-engine-host/scripts/sign-tauri-bundle-macos.sh "$GITHUB_WORKSPACE/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/plumdeck.app"
 
       - name: verify macOS bundles
         if: matrix.platform == 'macos-latest'
@@ -163,33 +168,52 @@ jobs:
           compgen -G 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg' > /dev/null
 
       - name: verify Windows bundles
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: bash
         run: |
           set -euo pipefail
           compgen -G 'src-tauri/target/release/bundle/msi/*.msi' > /dev/null
           compgen -G 'src-tauri/target/release/bundle/nsis/*.exe' > /dev/null
 
-      # CI publishes the installable bundles. Updater metadata/signatures are
-      # intentionally kept separate until the updater signing key is configured
-      # as GitHub Actions secrets; PR validation never requires signing secrets.
-      - name: upload artifacts (macos)
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
-        uses: softprops/action-gh-release@v3
-        with:
-          draft: false
-          files: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install and exercise Windows desktop app
+        if: matrix.platform == 'windows-2022'
+        run: python scripts/smoke-windows-installer.py
 
-      - name: upload artifacts (windows)
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
-        uses: softprops/action-gh-release@v3
+      - name: Prepare signed update artifacts after final bundle sealing
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/release-artifacts.py ${{ matrix.update_platform }} release-artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PLUMDECK_RELEASE_DOWNLOAD_BASE: ${{ vars.PLUMDECK_RELEASE_DOWNLOAD_BASE }}
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-${{ matrix.update_platform }}
+          path: release-artifacts/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Require both signed platforms before publishing update metadata
+        run: python scripts/release-artifacts.py combine release-artifacts
+      - uses: softprops/action-gh-release@v3
         with:
           draft: false
-          files: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: release-artifacts/*
+          fail_on_unmatched_files: true

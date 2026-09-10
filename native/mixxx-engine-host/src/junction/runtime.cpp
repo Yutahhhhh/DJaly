@@ -1,3 +1,4 @@
+#include "../sound_file.h"
 #include "runtime.h"
 #include "media_transport.h"
 #include "program_output.h"
@@ -19,7 +20,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
-#include <unistd.h>
+#include "../platform_file.h"
 #ifdef __APPLE__
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #endif
@@ -206,6 +207,8 @@ struct Runtime::Impl {
         hosting=host;QString error;
 #ifdef __APPLE__
         if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 #endif
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);if(!identity)return error;
 #if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
@@ -227,6 +230,8 @@ struct Runtime::Impl {
         manual=true;hosting=host;QString error;
 #ifdef __APPLE__
         if(sleepLease==kIOPMNullAssertionID)IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,kIOPMAssertionLevelOn,CFSTR("plumdeck Junction audio session"),&sleepLease);
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 #endif
         if(!MediaTransport::available())return "このビルドにはWebRTCが含まれていません";
         if(!identity)identity=MediaTransport::createIdentity(identityDir.path(),&error);
@@ -678,7 +683,7 @@ struct Runtime::Impl {
             const auto object=QJsonDocument::fromJson(file.readAll()).object();return object["schema"]==1&&object["decks"].toArray().size()==4;
         }
         if(kind!=assetKinds.end()&&(kind->second=="plumdeck-ddj-dsp-v1"||kind->second=="plumdeck-keylock-v1"||kind->second=="plumdeck-fx-v1"))return backend->validateDspAsset(path);
-        SF_INFO info{};auto* f=sf_open(path.toUtf8().constData(),SFM_READ,&info);if(f)sf_close(f);return f!=nullptr;
+        SF_INFO info{};auto* f=openSoundFile(path,SFM_READ,&info);if(f)sf_close(f);return f!=nullptr;
     }
     void sendGraph(Peer& peer,const QJsonObject& value) {
         const auto bytes=json(value);if(bytes.size()>8*1024*1024){fail("演奏状態が転送上限を超えています");return;}
@@ -800,7 +805,7 @@ struct Runtime::Impl {
         if(program.open(programDevice,&error)){
             programOpened=true;programState="running";separateLocalMaster.store(true);
             const auto localName=backend->audio()["deviceId"].toString();
-            for(const auto& v:backend->audioDevices()["devices"].toArray()){const auto device=v.toObject();if(device["id"].toString()==QStringLiteral("coreaudio:")+QString::number(programDevice)&&device["name"].toString()==localName)separateLocalMaster.store(false);}
+            for(const auto& v:backend->audioDevices()["devices"].toArray()){const auto device=v.toObject();if(device["id"].toString().section(':',-1)==QString::number(programDevice)&&device["name"].toString()==localName)separateLocalMaster.store(false);}
         }else {programState="error";fail(error);}
     }
     void beginRecovery(const QString& reason){
@@ -881,7 +886,7 @@ struct Runtime::Impl {
         if(!QDir().mkpath(directory))return "引き継ぎ状態を保存できません";
         QSaveFile file(directory+"/"+auth.sessionId+".commit");
         const auto bytes=json(commit.toJson());
-        if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.flush()||::fsync(file.handle())!=0||!file.commit())return "引き継ぎ状態を保存できません";
+        if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.flush()||platform_file::sync(file.handle())!=0||!file.commit())return "引き継ぎ状態を保存できません";
         auth=std::move(next);return {};
     }
     void scheduleCaptureCommit(const HandoffCommitMessage& commit) {
@@ -973,6 +978,8 @@ struct Runtime::Impl {
         ++signalGeneration;
 #ifdef __APPLE__
         if(sleepLease!=kIOPMNullAssertionID){IOPMAssertionRelease(sleepLease);sleepLease=kIOPMNullAssertionID;}
+#elif defined(_WIN32)
+        SetThreadExecutionState(ES_CONTINUOUS);
 #endif
         captureEnabled.store(false);tap.enable(false,false);audible.store(true);separateLocalMaster.store(true);
         peers.clear();program.close();programOpened=false;programState="stopped";
@@ -1164,7 +1171,7 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         d->recoveryResumeFrame=d->now()+24000;d->recoveryEpoch=std::max(d->auth.epoch,d->auth.committed?d->auth.committed->newEpoch:quint64(0))+1;
         QSaveFile record(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)+"/junction/"+d->auth.sessionId+".recovery");
         const auto bytes=json({{"sessionId",d->auth.sessionId},{"epoch",u64(d->recoveryEpoch)},{"frame",u64(d->recoveryResumeFrame)},{"owner",d->auth.host}});
-        if(!record.open(QIODevice::WriteOnly)||record.write(bytes)!=bytes.size()||!record.flush()||::fsync(record.handle())!=0||!record.commit()){d->recoveryResumeFrame=0;return reject("復旧状態を保存できません");}
+        if(!record.open(QIODevice::WriteOnly)||record.write(bytes)!=bytes.size()||!record.flush()||platform_file::sync(record.handle())!=0||!record.commit()){d->recoveryResumeFrame=0;return reject("復旧状態を保存できません");}
         setCaptureAnchor(d->lastCaptureSourceEnd.load(),d->now());d->scheduledEpoch.store(d->recoveryEpoch);d->scheduledFrame.store(d->recoveryResumeFrame);d->captureEnabled.store(true);d->tap.enable(false,true);
         auto it=d->programPending.lower_bound(d->recoveryResumeFrame);d->programPending.erase(it,d->programPending.end());
         d->broadcast("session.recovery",{{"stage","scheduled"},{"reason","ホストの手元の演奏へ切り替えます"},{"frame",u64(d->recoveryResumeFrame)},{"epoch",u64(d->recoveryEpoch)}});return snapshot();

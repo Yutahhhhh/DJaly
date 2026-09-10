@@ -3,6 +3,8 @@
 #include "junction/ids.h"
 #include <QTemporaryDir>
 #include <QFile>
+#include <QDir>
+#include <QProcess>
 using namespace junction;
 JTEST("asset-cache","resumes verified chunks and atomically publishes only decoder accepted bytes") {
  QTemporaryDir dir;QByteArray data(40000,'x');QString id=sha256Hex(data);QString error;
@@ -10,7 +12,26 @@ JTEST("asset-cache","resumes verified chunks and atomically publishes only decod
  AssetCache c(dir.path());CHECK(c.begin(id,data.size(),&error));CHECK(c.receivedBitmap(id)[0]);CHECK(c.put(id,32768,data.mid(32768),&error));CHECK(!c.finalize(id,[](auto){return false;},&error));CHECK(c.finalize(id,[](auto){return true;},&error));CHECK(!c.resolve(id).isEmpty());
  QFile f(c.resolve(id));CHECK(f.open(QIODevice::ReadWrite));f.write("bad");f.close();CHECK(c.resolve(id).isEmpty());
 }
-JTEST("asset-cache","rejects traversal symlink escape and quota overrun") {QTemporaryDir dir;AssetCache c(dir.path(),1024);CHECK(!c.begin("../x",10));CHECK(!c.begin(QString(64,'a'),1025));QFile::link("/tmp",dir.path()+"/"+QString(64,'a')+".partial");CHECK(!c.begin(QString(64,'a'),100));}
+JTEST("asset-cache","rejects traversal symlink escape and quota overrun") {
+ QTemporaryDir dir, outside;AssetCache c(dir.path(),1024);
+ CHECK(!c.begin("../x",10));CHECK(!c.begin(QString(64,'a'),1025));
+ const auto link=dir.path()+"/"+QString(64,'a')+".partial";
+#ifdef Q_OS_WIN
+ // QFile::link creates a .lnk shortcut on Windows, not a filesystem link.
+ // A directory junction exercises the real reparse-point boundary without
+ // requiring symlink privileges or Windows Developer Mode.
+ QProcess command;
+ command.start(qEnvironmentVariable("SystemRoot")+"/System32/cmd.exe",
+   {"/d","/c","mklink","/J",QDir::toNativeSeparators(link),QDir::toNativeSeparators(outside.path())});
+ CHECK(command.waitForFinished(10000));CHECK_EQ(command.exitCode(),0);
+#else
+ CHECK(QFile::link(outside.path(),link));
+#endif
+ CHECK(!c.begin(QString(64,'a'),100));
+#ifdef Q_OS_WIN
+ CHECK(QDir().rmdir(link));
+#endif
+}
 
 #include "junction/ddj_checkpoint.h"
 JTEST("dsp-checkpoint","96 kHz preallocated routes preserve live Roll state and reject unsupported capacity") {

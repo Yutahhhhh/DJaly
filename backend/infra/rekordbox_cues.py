@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass, field
 import math
+import sys
+from infra.rekordbox_library import same_path
 
 from api.schemas.performance_metadata import CuePoint
 from infra.rekordbox_grid import connect_readonly, master_db_path
@@ -30,11 +32,19 @@ class RekordboxCueBulkResult:
 
 
 def _content_id(connection: Any, filepath: str) -> str | None:
-    rows = connection.execute(
-        "SELECT ID FROM djmdContent "
-        "WHERE FolderPath = ? AND rb_local_deleted = 0",
-        (filepath,),
-    ).fetchall()
+    if sys.platform == "win32":
+        candidates = connection.execute(
+            "SELECT ID, FolderPath FROM djmdContent "
+            "WHERE replace(FolderPath, char(92), '/') COLLATE NOCASE = ? AND rb_local_deleted = 0",
+            (filepath.replace("\\", "/"),),
+        ).fetchall()
+        rows = [row[:1] for row in candidates if same_path(filepath, str(row[1]))]
+    else:
+        rows = connection.execute(
+            "SELECT ID FROM djmdContent "
+            "WHERE FolderPath = ? AND rb_local_deleted = 0",
+            (filepath,),
+        ).fetchall()
     ids = {str(row[0]) for row in rows if row[0] is not None}
     if len(ids) > 1:
         raise RekordboxCueError("Multiple rekordbox tracks match this audio path")
@@ -125,6 +135,11 @@ def read_hot_cues_bulk(
             for offset in range(0, len(unique_paths), PATH_BATCH_SIZE):
                 batch = unique_paths[offset:offset + PATH_BATCH_SIZE]
                 placeholders = ",".join("?" for _ in batch)
+                column = "content.FolderPath"
+                parameters = batch
+                if sys.platform == "win32":
+                    column = "replace(content.FolderPath, char(92), '/') COLLATE NOCASE"
+                    parameters = [path.replace("\\", "/") for path in batch]
                 rows = connection.execute(
                     "SELECT content.FolderPath, content.ID, cue.Kind, cue.InMsec, cue.Comment "
                     "FROM djmdContent AS content "
@@ -132,15 +147,19 @@ def read_hot_cues_bulk(
                     "AND cue.rb_local_deleted = 0 "
                     f"AND cue.Kind IN ({','.join('?' for _ in HOT_CUE_SLOTS)}) "
                     "WHERE content.rb_local_deleted = 0 "
-                    f"AND content.FolderPath IN ({placeholders}) "
+                    f"AND {column} IN ({placeholders}) "
                     "ORDER BY content.FolderPath, cue.Kind",
-                    (*HOT_CUE_SLOTS, *batch),
+                    (*HOT_CUE_SLOTS, *parameters),
                 ).fetchall()
                 grouped: dict[str, dict[str, list[tuple[Any, Any, Any]]]] = {}
                 for filepath, content_id, kind, position_ms, comment in rows:
-                    grouped.setdefault(str(filepath), {}).setdefault(str(content_id), []).append(
-                        (kind, position_ms, comment)
-                    )
+                    aliases = [str(filepath)]
+                    if sys.platform == "win32":
+                        aliases = [requested for requested in batch if same_path(requested, str(filepath))]
+                    for alias in aliases:
+                        grouped.setdefault(alias, {}).setdefault(str(content_id), []).append(
+                            (kind, position_ms, comment)
+                        )
                 for filepath, contents in grouped.items():
                     if len(contents) != 1:
                         result.errors_by_path[filepath] = (

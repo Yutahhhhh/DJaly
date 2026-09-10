@@ -4,6 +4,7 @@ sqlmodel
 duckdb
 duckdb-engine
 essentia-tensorflow; sys_platform != "win32"
+numpy
 tinytag
 pydantic
 python-multipart
@@ -20,3 +21,6 @@ sqlcipher3-wheels==0.5.7
 pytest
 pytest-asyncio
 pytest-mock
+librosa==0.11.0; sys_platform == "win32"
+pyloudnorm==0.2.0; sys_platform == "win32"
+onnxruntime==1.30.0; sys_platform == "win32"

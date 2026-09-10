@@ -47,6 +47,29 @@
 #include "util/cmdlineargs.h"
 
 namespace {
+QString deviceId(PaDeviceIndex index) {
+#ifdef Q_OS_MACOS
+    return QStringLiteral("coreaudio:%1").arg(index);
+#else
+    return QStringLiteral("portaudio:%1").arg(index);
+#endif
+}
+QString deviceLabel(PaDeviceIndex index, const QString& fallback) {
+#ifdef Q_OS_WIN
+    const auto* device = Pa_GetDeviceInfo(index);
+    const auto* api = device ? Pa_GetHostApiInfo(device->hostApi) : nullptr;
+    if (api) return fallback + QStringLiteral(" [%1]").arg(QString::fromUtf8(api->name));
+#endif
+    return fallback;
+}
+PaDeviceIndex defaultOutputDevice() {
+#ifdef Q_OS_WIN
+    const auto apiIndex = Pa_HostApiTypeIdToHostApiIndex(paWASAPI);
+    const auto* api = apiIndex >= 0 ? Pa_GetHostApiInfo(apiIndex) : nullptr;
+    if (api && api->defaultOutputDevice != paNoDevice) return api->defaultOutputDevice;
+#endif
+    return Pa_GetDefaultOutputDevice();
+}
 const QString groups[] = {QStringLiteral("[Channel1]"), QStringLiteral("[Channel2]"), QStringLiteral("[Channel3]"), QStringLiteral("[Channel4]")};
 const QString names[] = {"A", "B", "C", "D"};
 class MixxxBackend final : public QObject, public PlaybackBackend {
@@ -260,18 +283,19 @@ public:
         // Explicit device name keeps smoke tests on the intended virtual/built-in
         // device. Never select the DDJ-1000 or an arbitrary output implicitly.
         const auto wanted = qEnvironmentVariable("PLUMDECK_MIXXX_OUTPUT_DEVICE");
-        auto devices = sound_->getDeviceList(MIXXX_PORTAUDIO_COREAUDIO_STRING, true, false);
+        QList<SoundDevicePointer> devices;
+        for (const auto& api : sound_->getHostAPIList()) devices.append(sound_->getDeviceList(api, true, false));
         SoundDevicePointer selected;
         for (const auto& device : devices) {
             qInfo() << "plumdeck output device:" << device->getDisplayName();
-            if (!wanted.isEmpty() && device->getDisplayName() == wanted) {
+            if (!wanted.isEmpty() && (deviceLabel(device->getDeviceId().portAudioIndex, device->getDisplayName()) == wanted || deviceId(device->getDeviceId().portAudioIndex) == wanted)) {
                 if (selected) { problem_ = "Ambiguous output display name"; return; }
                 selected = device;
             }
         }
         if (wanted.isEmpty()) {
             // Enumeration order is unrelated to the macOS default output.
-            const auto defaultOutput = Pa_GetDefaultOutputDevice();
+            const auto defaultOutput = defaultOutputDevice();
             for (const auto& device : devices) {
                 if (device->getDeviceId().portAudioIndex == defaultOutput &&
                         device->getNumOutputChannels() >= mixxx::audio::ChannelCount::stereo()) {
@@ -280,9 +304,9 @@ public:
                 }
             }
         }
-        if (!selected) { problem_ = wanted.isEmpty() ? QStringLiteral("The macOS default output is unavailable or has fewer than two channels. Choose an output in Audio Settings.") : QStringLiteral("Requested Core Audio output not found: ") + wanted; return; }
+        if (!selected) { problem_ = wanted.isEmpty() ? QStringLiteral("The system default output is unavailable or has fewer than two channels. Choose an output in Audio Settings.") : QStringLiteral("Requested audio output not found: ") + wanted; return; }
         if (selected->getNumOutputChannels() < mixxx::audio::ChannelCount::stereo()) { problem_ = "Choose an output with at least two channels"; return; }
-        config.setAPI(MIXXX_PORTAUDIO_COREAUDIO_STRING);
+        config.setAPI(selected->getHostAPI());
         config.setSampleRate(mixxx::audio::SampleRate(44100));
         // 256 / 44.1k = 5.8ms. A pointer release waits at most one callback
         // then traverses two rate ramps; 512 frames exceeded the 30ms budget.
@@ -326,7 +350,7 @@ public:
         if (status != SoundDeviceStatus::Ok) { problem_ = sound_->getLastErrorMessage(status); return; }
         outputDevice_ = selected;
         pflStart_ = pflAvailable_ ? 2 : -1;
-        output_ = selected->getDisplayName(); problem_.clear(); available_ = true;
+        output_ = deviceLabel(selected->getDeviceId().portAudioIndex, selected->getDisplayName()); problem_.clear(); available_ = true;
         auto* scratchDiagnostics = new QTimer(this);
         connect(scratchDiagnostics, &QTimer::timeout, this, [this] { saveScratchDiagnostics(); });
         scratchDiagnostics->start(250);
@@ -348,15 +372,15 @@ public:
         const auto status = Pa_Initialize();
         if (status != paNoError) return {{"devices", QJsonArray{}}, {"reason", QString::fromUtf8(Pa_GetErrorText(status))}};
         QJsonArray devices;
-        const auto defaultOutput = Pa_GetDefaultOutputDevice();
+        const auto defaultOutput = defaultOutputDevice();
         const auto defaultInput = Pa_GetDefaultInputDevice();
         const auto count = Pa_GetDeviceCount();
         for (PaDeviceIndex index = 0; index < count; ++index) {
             const auto* device = Pa_GetDeviceInfo(index);
             const auto* api = device ? Pa_GetHostApiInfo(device->hostApi) : nullptr;
-            if (!device || !api || api->type != paCoreAudio || (device->maxOutputChannels == 0 && device->maxInputChannels == 0)) continue;
-            devices.append(QJsonObject{{"id", QStringLiteral("coreaudio:%1").arg(index)},
-                    {"name", QString::fromUtf8(device->name)}, {"displayName", QString::fromUtf8(device->name)},
+            if (!device || !api || (device->maxOutputChannels == 0 && device->maxInputChannels == 0)) continue;
+            devices.append(QJsonObject{{"id", deviceId(index)},
+                    {"name", QString::fromUtf8(device->name)}, {"displayName", deviceLabel(index, QString::fromUtf8(device->name))},
                     {"outputChannels", device->maxOutputChannels}, {"isDefault", index == defaultOutput},
                     {"inputChannels", device->maxInputChannels}, {"isDefaultInput", index == defaultInput},
                     {"defaultSampleRateHz", device->defaultSampleRate}});
@@ -421,14 +445,14 @@ public:
             // Preserve the actual route for live controls, including devices
             // with identical display names. IDs identify this enumeration.
             const auto lookup = params.contains("deviceId") ? deviceName : micDeviceKey_;
-            const auto devices = sound_->getDeviceList(MIXXX_PORTAUDIO_COREAUDIO_STRING, false, true);
+            const auto devices = sound_->getDeviceList(outputDevice_->getHostAPI(), false, true);
             for (const auto& device : devices) {
-                if (device->getDisplayName() == lookup || QStringLiteral("coreaudio:%1").arg(device->getDeviceId().portAudioIndex) == lookup) {
+                if (deviceLabel(device->getDeviceId().portAudioIndex, device->getDisplayName()) == lookup || deviceId(device->getDeviceId().portAudioIndex) == lookup) {
                     if (selected) return "Ambiguous microphone display name; select its device id";
                     selected = device;
                 }
             }
-            if (!selected) return "Requested Core Audio microphone input not found: " + deviceName;
+            if (!selected) return "Requested microphone input not found: " + deviceName;
             if (channel >= selected->getNumInputChannels().value()) return "The selected microphone input channel does not exist";
             deviceKey = QStringLiteral("coreaudio:%1").arg(selected->getDeviceId().portAudioIndex);
             deviceName = selected->getDisplayName();
