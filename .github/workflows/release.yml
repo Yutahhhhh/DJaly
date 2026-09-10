@@ -53,26 +53,43 @@ jobs:
       - name: install frontend dependencies
         run: pnpm install
 
+      - name: install FFmpeg (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: brew install ffmpeg
+
+      - name: install FFmpeg (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+
       - name: install backend dependencies
+        shell: bash
         run: |
-          pip install -r backend/requirements.txt
-          pip install pyinstaller
+          set -euo pipefail
+          python -m pip install -r backend/requirements.txt
+
+      - name: verify FFmpeg packaging requirements
+        shell: bash
+        run: |
+          ffmpeg -version
+          python backend/packaging_ffmpeg.py
 
       - name: build backend sidecar
         shell: bash
         run: |
           cd backend
           # Keep CI packaging identical to local releases. The spec includes
-          # Essentia/MusiCNN assets and all MCP server dependencies.
+          # Essentia/MusiCNN assets and all MCP server dependencies available
+          # on the target platform.
           pyinstaller --clean --noconfirm djaly-server.spec
-          
+
           mkdir -p ../src-tauri/bin
-          
+
           EXTENSION=""
           if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
             EXTENSION=".exe"
           fi
-          
+
           mv dist/djaly-server$EXTENSION ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION
           chmod +x ../src-tauri/bin/djaly-server-${{ matrix.sidecar_target }}$EXTENSION 2>/dev/null || true
           ls -la ../src-tauri/bin/
