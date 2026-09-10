@@ -24,7 +24,33 @@ fn junction_pending_invite(state: tauri::State<JunctionInvite>) -> Option<String
 }
 use tauri_plugin_shell::process::{CommandEvent, CommandChild};
 #[derive(Default)]
-struct BackendChild(Mutex<Option<CommandChild>>);
+struct BackendChild(Mutex<Option<ManagedBackend>>);
+struct ManagedBackend {
+    child: CommandChild,
+    ended: std::sync::mpsc::Receiver<()>,
+}
+fn stop_backend(mut backend: ManagedBackend) {
+    let _ = backend.child.write(b"plumdeck:shutdown\n");
+    if backend.ended.recv_timeout(std::time::Duration::from_secs(15)).is_ok() { return; }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // PyInstaller's one-file bootloader owns a Python child. A forced
+        // fallback must end this owned tree, never another listener on a port.
+        if let Some(system) = std::env::var_os("SystemRoot") {
+            if let Ok(mut command) = std::process::Command::new(std::path::PathBuf::from(system).join("System32/taskkill.exe"))
+                .args(["/PID", &backend.child.pid().to_string(), "/T", "/F"])
+                .creation_flags(0x08000000).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+                let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+                while matches!(command.try_wait(), Ok(None)) && std::time::Instant::now()<deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                let _=command.kill(); let _=command.wait();
+            }
+        }
+    }
+    let _ = backend.child.kill();
+}
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -187,7 +213,8 @@ pub fn run() {
                     eprintln!("Failed to create sidecar command: {}", e);
                     e
                 })?
-                .env("PLUMDECK_PORT", port);
+                .env("PLUMDECK_PORT", port)
+                .env("PLUMDECK_MANAGED_SIDECAR", "1");
 
             // コマンドの実行結果を詳細にログ出力
             println!("Attempting to spawn sidecar with port: {}", port);
@@ -197,7 +224,8 @@ pub fn run() {
                 e
             })?;
 
-            *app.state::<BackendChild>().0.lock().unwrap() = Some(_child);
+            let (ended, completion) = std::sync::mpsc::channel();
+            *app.state::<BackendChild>().0.lock().unwrap() = Some(ManagedBackend {child: _child, ended: completion});
 
             // 非同期でログを出力するスレッドを作成（デバッグ用）
             tauri::async_runtime::spawn(async move {
@@ -206,6 +234,8 @@ pub fn run() {
                         println!("[PY]: {}", String::from_utf8_lossy(&line));
                     } else if let CommandEvent::Stderr(line) = event {
                         eprintln!("[PY ERR]: {}", String::from_utf8_lossy(&line));
+                    } else if let CommandEvent::Terminated(_) = event {
+                        let _ = ended.send(());
                     }
                 }
             });
@@ -216,8 +246,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                let _ = app.state::<Arc<dj_engine::EngineSupervisor>>().stop();
                 if let Ok(mut child) = app.state::<BackendChild>().0.lock() {
-                    if let Some(child) = child.take() { let _ = child.kill(); }
+                    if let Some(child) = child.take() { stop_backend(child); }
                 }
             }
             if let tauri::RunEvent::ExitRequested { ref api, .. } = event {

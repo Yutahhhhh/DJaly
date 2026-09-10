@@ -21,7 +21,8 @@ def main():
             app = directory / "plumdeck.exe"
             assert app.is_file(), f"Installed app missing: {directory}"
             assert (directory / "engine/plumdeck-mixxx-engine-host.exe").is_file()
-            subprocess.run([sys.executable, str(repository / "scripts/smoke-backend.py"), str(app), "--desktop"], check=True, timeout=160)
+            for _ in range(2):
+                subprocess.run([sys.executable, str(repository / "scripts/smoke-backend.py"), str(app), "--desktop"], check=True, timeout=180)
             print("Installed Windows desktop app and MCP passed")
         except Exception:
             if log.exists():

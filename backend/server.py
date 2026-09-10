@@ -3,6 +3,7 @@ import sys
 import uvicorn
 import multiprocessing
 import platformdirs
+import threading
 
 # Bound native pools before importing the audio stack; analysis jobs control concurrency.
 for thread_setting in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
@@ -45,4 +46,17 @@ if __name__ == "__main__":
     print(f"User Data Directory: {settings.USER_DATA_DIR}")
     
     # Never terminate another process to claim a port. Uvicorn reports conflicts.
-    uvicorn.run(app, host="127.0.0.1", port=port, reload=False, workers=1)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+        reload=False, workers=1, timeout_graceful_shutdown=5))
+    if os.environ.get("PLUMDECK_MANAGED_SIDECAR") == "1":
+        def watch_parent():
+            # The desktop owns this pipe. EOF also handles a crashed desktop;
+            # standalone CLI launches keep their usual signal-based lifecycle.
+            try:
+                for line in iter(lambda: sys.stdin.buffer.readline(1024), b""):
+                    if line.strip() == b"plumdeck:shutdown":
+                        break
+            finally:
+                server.should_exit = True
+        threading.Thread(target=watch_parent, daemon=True, name="desktop-lifecycle").start()
+    server.run()
