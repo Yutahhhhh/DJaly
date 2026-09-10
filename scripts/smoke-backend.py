@@ -42,11 +42,15 @@ def close_desktop(pid):
     from ctypes import wintypes
     user = ctypes.WinDLL("user32", use_last_error=True)
     user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-    windows = enum_pid_windows(pid)
-    assert windows, "Desktop window not found for normal close"
-    for hwnd, _visible, _cls, _title in windows:
+    # Post WM_CLOSE only to the real application window. Hitting the pid's other
+    # top-level windows (tao's "Tao Thread Event Target", the single-instance
+    # helper, IME windows) tears down the event loop's message pump so
+    # RunEvent::Exit never fires and the backend is never asked to stop.
+    targets = [w for w in enum_pid_windows(pid) if w[2] == "Tauri Window"]
+    assert targets, f"Tauri window not found; saw {enum_pid_windows(pid)}"
+    for hwnd, _visible, _cls, _title in targets:
         user.PostMessageW(hwnd, 0x10, 0, 0)  # WM_CLOSE
-    return windows
+    return targets
 
 
 def main():
