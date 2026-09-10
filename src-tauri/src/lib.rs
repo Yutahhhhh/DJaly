@@ -117,7 +117,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
+                // Only trap the close when a Junction session is positively active.
+                // If that state cannot be queried (engine starting, no session yet),
+                // fail open so the app still shuts down instead of needing a kill.
+                if window.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(false) {
                     api.prevent_close();
                     let _ = window.emit("junction://close-blocked", ());
                 }
@@ -254,7 +257,9 @@ pub fn run() {
                 }
             }
             if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
-                if app.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(true) {
+                // Same fail-open rule as CloseRequested: block exit only for a
+                // confirmed-active Junction, never on an unknown engine state.
+                if app.state::<Arc<dj_engine::EngineSupervisor>>().junction_active().unwrap_or(false) {
                     api.prevent_exit(); let _ = app.emit("junction://close-blocked", ());
                 }
             }
