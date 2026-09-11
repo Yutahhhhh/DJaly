@@ -30,7 +30,7 @@ export function TrackSelector({
 
   return (
     <div
-      className="w-[400px] border-l bg-background flex flex-col shadow-xl z-50 h-full"
+      className="setlist-selector border-l bg-background flex flex-col h-full"
       onDragOver={(e) => {
         e.preventDefault();
         console.log("TrackSelector: DragOver");

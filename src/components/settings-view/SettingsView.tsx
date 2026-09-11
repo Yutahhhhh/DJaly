@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { FolderSetting } from "./FolderSetting";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -254,33 +255,8 @@ export function SettingsView() {
 
             <div className="space-y-2">
               <Label htmlFor="recording-directory">録音の保存先</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="recording-directory"
-                  value={settings.recording_directory ?? ""}
-                  placeholder="未設定のときは ~/Music/plumdeck Recordings"
-                  onChange={(event) =>
-                    setSettings((prev) => ({ ...prev, recording_directory: event.target.value }))
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void saveSetting("recording_directory", (settings.recording_directory ?? "").trim());
-                    }
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    void saveSetting("recording_directory", (settings.recording_directory ?? "").trim())
-                  }
-                >
-                  保存
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                絶対パスで指定してください。保存すると次の録音から反映されます（エンジンの再起動は不要）。フォルダが無ければ自動で作成されます。
-              </p>
+              <FolderSetting id="recording-directory" value={settings.recording_directory ?? ""} placeholder="標準の録音フォルダー" onSelect={(path) => saveSetting("recording_directory", path)} />
+              <p className="text-xs text-muted-foreground">選択すると保存され、次の録音から反映されます。</p>
             </div>
 
             <div className="space-y-2">
@@ -299,23 +275,7 @@ export function SettingsView() {
 
             <div className="space-y-2">
               <Label htmlFor="root_path">Default Root Path</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="root_path"
-                  placeholder="音楽フォルダーのパス"
-                  value={settings["root_path"] || ""}
-                  onChange={(e) =>
-                    updateLocalSetting("root_path", e.target.value)
-                  }
-                />
-                <Button
-                  onClick={() =>
-                    saveSetting("root_path", settings["root_path"] || "")
-                  }
-                >
-                  Save
-                </Button>
-              </div>
+              <FolderSetting id="root_path" value={settings.root_path ?? ""} placeholder="音楽フォルダーを選択" onSelect={(path) => saveSetting("root_path", path)} />
             </div>
 
             <div className="space-y-2">

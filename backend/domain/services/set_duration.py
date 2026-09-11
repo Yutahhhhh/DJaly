@@ -21,13 +21,11 @@ def entry_duration_ms(entry: Any) -> float | None:
     duration_seconds = getattr(entry, "duration", None) if not isinstance(entry, dict) else entry.get("duration")
     in_ms = _finite(getattr(entry, "in_ms", 0) if not isinstance(entry, dict) else entry.get("in_ms", 0), "IN")
     out_value = getattr(entry, "out_ms", None) if not isinstance(entry, dict) else entry.get("out_ms")
+    rate = _finite(getattr(entry, "playback_rate", 1) if not isinstance(entry, dict) else entry.get("playback_rate", 1), "再生速度")
     if out_value is None:
-        if duration_seconds is None:
-            return None
-        out_ms = _finite(duration_seconds, "曲の長さ") * 1000
+        out_ms = min(float("inf") if duration_seconds is None else _finite(duration_seconds, "曲の長さ") * 1000, in_ms + 120_000 * rate)
     else:
         out_ms = _finite(out_value, "OUT")
-    rate = _finite(getattr(entry, "playback_rate", 1) if not isinstance(entry, dict) else entry.get("playback_rate", 1), "再生速度")
     extra = _finite(getattr(entry, "extra_duration_ms", 0) if not isinstance(entry, dict) else entry.get("extra_duration_ms", 0), "追加時間")
     if in_ms < 0 or out_ms <= in_ms or rate <= 0 or extra < 0:
         raise SetTimingError("IN/OUT・再生速度・追加時間の値が不正です")

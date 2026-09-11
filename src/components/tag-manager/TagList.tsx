@@ -52,7 +52,7 @@ export function TagList({ category, onSelectItem, selectedItem, trackSearch, sta
   );
 
   return (
-    <div className="w-80 border-r bg-muted/10 flex flex-col h-full">
+    <div className="tag-list border-r bg-muted/10 flex flex-col h-full">
       <div className="p-4 border-b space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">

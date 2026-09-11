@@ -96,8 +96,8 @@ export function TagEditor({ category, selectedItem }: TagEditorProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-background p-6 space-y-6">
-      <div className="flex justify-between items-start">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-background p-3 space-y-4">
+      <div className="flex flex-wrap gap-2 justify-between items-start">
         <div>
           <h2 className="text-2xl font-bold">{selectedItem.label || selectedItem.title}</h2>
           <p className="text-muted-foreground text-sm">
@@ -123,7 +123,7 @@ export function TagEditor({ category, selectedItem }: TagEditorProps) {
           <>
             {category === "track-info" && (
               <div className="space-y-4 max-w-xl">
-                <div className="flex items-start gap-6 p-4 border rounded-lg bg-muted/10">
+                <div className="flex flex-wrap items-start gap-3 p-3 border rounded-lg bg-muted/10">
                     <div className="w-32 h-32 bg-muted rounded-md overflow-hidden flex items-center justify-center border shrink-0 relative group">
                         {artwork ? (
                             <img src={`data:image/jpeg;base64,${artwork}`} className="w-full h-full object-cover" />

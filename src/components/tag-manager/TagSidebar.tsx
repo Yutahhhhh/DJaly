@@ -80,7 +80,7 @@ export function TagSidebar({ activeCategory, onSelectCategory, trackSearch, extr
   }, {} as Record<string, typeof categories>);
 
   return (
-    <div className="w-64 border-r bg-muted/10 flex flex-col shrink-0">
+    <div className="tag-sidebar border-r bg-muted/10 flex flex-col">
       <div className="p-4 font-semibold text-lg border-b">Tags & Metadata</div>
       <div className="flex-1 p-2 space-y-6 overflow-y-auto">
         {Object.entries(grouped).map(([group, items]) => (

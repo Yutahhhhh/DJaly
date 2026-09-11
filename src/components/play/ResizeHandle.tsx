@@ -23,11 +23,11 @@ export function ResizeHandle({ variable, storageKey, label, min, max, invert }: 
   const node = useRef<HTMLDivElement>(null);
   // 幅の変数は .dj-workspace 上で定義されている。:root に書いても負けるので、
   // 実際にその変数を持っている要素へインラインで当てる。
-  const scope = () => node.current?.closest<HTMLElement>(".dj-workspace") ?? null;
+  const scope = () => node.current?.closest<HTMLElement>("[data-resize-scope],.dj-workspace") ?? null;
 
   useEffect(() => {
     const stored = Number(localStorage.getItem(storageKey));
-    if (Number.isFinite(stored) && stored > 0) scope()?.style.setProperty(variable, `${stored}px`);
+    if (Number.isFinite(stored) && stored > 0) scope()?.style.setProperty(variable, `${Math.max(min, Math.min(max, stored))}px`);
   }, [variable, storageKey]);
 
   const currentWidth = () => {

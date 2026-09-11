@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronDown, ChevronRight, Copy, Disc3, Folder, History, Library, ListMusic, Loader2, Pencil, Plus, Radio, Search, Sparkles, Trash2 } from "lucide-react";
 import { playService, type HistoryTrack, type LocalPlaylist, type LocalPlaylistTrack, type MirrorPlaylist, type MirrorSource, type RecordingEntry } from "@/services/play";
 import type { Track } from "@/types";
@@ -17,8 +17,11 @@ import { ResizeHandle } from "./ResizeHandle";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { workflowsService } from "@/services/workflows";
 import "./play-library.css";
+import { SamplerCollection } from "./SamplerCollection";
+import { samplerLibrary, sampleDrag } from "@/services/sampler-library";
+import { sampler } from "@/services/dj-engine/sampler";
 
-type Source = "collection" | "local" | "mirror" | "history" | "recordings";
+type Source = "collection" | "sampler" | "local" | "mirror" | "history" | "recordings";
 type MirrorPageState = { items: MirrorPlaylist[]; total: number; hasMore: boolean; loading: boolean; error?: string };
 type MirrorFlatRow = { kind: "item"; item: MirrorPlaylist; depth: number } | { kind: "more" | "loading" | "error"; parent: string | null; depth: number };
 type PlaylistDialogState = { kind: "create" } | { kind: "rename" | "delete"; item: LocalPlaylist };
@@ -28,6 +31,7 @@ function useDebounced(value: string, delay = 180) { const [result, setResult] = 
 
 export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, onLoad, cueOverrides, cueRevision, cueImportControl }: { activeDeck: DeckId; seedTrackId: number | null; onLoad: (deck: DeckId, track: Track) => void; cueOverrides?: Record<number, (number | null)[]>; cueRevision?: number; cueImportControl?: import("react").ReactNode }) {
   const [source, setSource] = useState<Source>("collection");
+  const samples = useSyncExternalStore(samplerLibrary.subscribe, samplerLibrary.snapshot);
   const [query, setQuery] = useState(""); const debouncedQuery = useDebounced(query.trim());
   // Collection はサーバ側でライブラリ全体を並べ替える。プレイリストや履歴は読み込み済みの行を並べ替える。
   const [sort, setSort] = useState<SortState>(null);
@@ -101,6 +105,26 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
       document.querySelectorAll("[data-native-drop-active]").forEach((node) => node.removeAttribute("data-native-drop-active"));
       if (payload.type === "leave") return;
       const dropNode = nodeAt(payload.position.x, payload.position.y);
+      const draggedSample = sampleDrag.current();
+      if (draggedSample) {
+        const pad = dropNode?.closest<HTMLElement>("[data-sampler-slot]");
+        if (payload.type === "drop" && pad?.dataset.samplerEnabled === "true" && sampleDrag.claim()) {
+          void sampler.load(Number(pad.dataset.samplerSlot), draggedSample.path).catch(error => setNotice(String(error)));
+        }
+        if (payload.type === "drop") sampleDrag.end();
+        return;
+      }
+      const sampleTarget = dropNode?.closest<HTMLElement>("[data-sampler-collection]");
+      if (sampleTarget) {
+        if (payload.type === "enter" || payload.type === "over") sampleTarget.setAttribute("data-native-drop-active", "true");
+        if (payload.type === "drop" && payload.paths.length && !internalTrackDragRef.current) {
+          try {
+            const result = samplerLibrary.add(payload.paths);
+            setNotice(`${result.accepted}音源を登録しました（解析なし）${result.skipped ? `・非対応${result.skipped}件をスキップ` : ""}`);
+          } catch (error) { setNotice(String(error)); }
+        }
+        return;
+      }
       const internalTrack = internalTrackDragRef.current;
       if (internalTrack) {
         if (payload.type === "drop") {
@@ -166,11 +190,11 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const switchSource = (next: Source) => { setSource(next); setSelected(null); if (next !== "collection") setQuery(""); };
   const selectedLocal = playlists.items.find((item) => item.id === localPlaylistId);
   const center = source === "collection" ? collection : source === "local" ? localTracks : mirrorTracks;
-  const centerTracks: BrowserTrack[] = source === "history" ? history.map((row) => ({ ...row, id: row.track_id, browser_key: row.event_key }) as BrowserTrack) : source === "mirror" ? mirrorTracks.items.filter((row) => row.resolved && row.local_track_id).map((row) => ({ ...row, id: row.local_track_id!, browser_key: `${row.position}:${row.local_track_id}` }) as BrowserTrack) : source === "recordings" ? [] : center.items as BrowserTrack[];
+  const centerTracks: BrowserTrack[] = source === "history" ? history.map((row) => ({ ...row, id: row.track_id, browser_key: row.event_key }) as BrowserTrack) : source === "mirror" ? mirrorTracks.items.filter((row) => row.resolved && row.local_track_id).map((row) => ({ ...row, id: row.local_track_id!, browser_key: `${row.position}:${row.local_track_id}` }) as BrowserTrack) : source === "recordings" || source === "sampler" ? [] : center.items as BrowserTrack[];
   // Collection はサーバが並べ替えた順で返るので、ここで触らない。
   const sortedTracks = source === "collection" ? centerTracks : sortTracks(centerTracks, sort) as BrowserTrack[];
-  const centerTotal = source === "history" ? history.length : source === "recordings" ? recordings.length : center.total;
-  const title = source === "collection" ? "Collection" : source === "local" ? selectedLocal?.name ?? "plumdeck Playlist" : source === "mirror" ? mirrorPlaylist?.name ?? "Rekordbox Mirror" : source === "history" ? "プレイ履歴" : "録音";
+  const centerTotal = source === "sampler" ? samples.length : source === "history" ? history.length : source === "recordings" ? recordings.length : center.total;
+  const title = source === "sampler" ? "Sampler" : source === "collection" ? "Collection" : source === "local" ? selectedLocal?.name ?? "plumdeck Playlist" : source === "mirror" ? mirrorPlaylist?.name ?? "Rekordbox Mirror" : source === "history" ? "プレイ履歴" : "録音";
   const mutate = async (task: () => Promise<unknown>, after: () => void, success?: string) => { try { await task(); after(); if (success) setNotice(success); } catch (cause) { setNotice(cause instanceof Error ? cause.message : String(cause)); } };
   const openPlaylistDialog = (next: PlaylistDialogState) => { setPlaylistDialog(next); setDialogName(next.kind === "rename" ? next.item.name : ""); setDialogError(null); };
   const submitPlaylistDialog = async () => {
@@ -230,6 +254,7 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const rightPage = rightMode === "recommend" ? rightRecommend : rightSearch;
   return <section className="dj-browser" aria-label="Play library">
     <aside className="dj-library-tree"><div className="dj-tree-heading"><Library /><strong>ブラウザ</strong></div><div className="dj-tree-scroll">
+      <button data-sampler-collection className={cn("dj-tree-row", source === "sampler" && "is-selected")} onClick={() => switchSource("sampler")}><Disc3 /><span>Sampler</span></button>
       <button data-import-target-kind="collection" className={cn("dj-tree-row", source === "collection" && "is-selected")} onClick={() => switchSource("collection")}><Library /><span>Collection</span><small>{collection.total || ""}</small></button>
       <div className="dj-tree-row dj-tree-section"><span>plumdeck PLAYLISTS · {playlists.total.toLocaleString()}</span><button title="新規プレイリスト" onClick={() => openPlaylistDialog({ kind: "create" })}><Plus /></button></div>
       <LocalPlaylistRows items={playlists.items} selectedId={source === "local" ? localPlaylistId : null} hasMore={playlists.hasMore} loading={playlists.loading} error={playlists.error} onLoadMore={playlists.loadMore} onRetry={playlists.retry} onSelect={(item) => { setLocalPlaylistId(item.id); switchSource("local"); }} onRename={(item) => openPlaylistDialog({ kind: "rename", item })} onDelete={(item) => openPlaylistDialog({ kind: "delete", item })} onDrop={addTrack} />
@@ -240,7 +265,7 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
     <ResizeHandle variable="--d-tree" storageKey="plumdeck.width.tree" label="ブラウザ幅" min={140} max={420} />
     <div className="dj-library-center"><div className="dj-library-toolbar">{cueImportControl}<strong>{title}</strong><span className="dj-track-count">{centerTotal.toLocaleString()} 曲</span>{source === "collection" && <div className="dj-search"><Search /><input aria-label="Collectionを検索" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tracks…" /></div>}{source === "mirror" && mirrorPlaylist && <button className="dj-button" onClick={() => void copyMirror()}><Copy />plumdeckへコピー</button>}<button className={cn("dj-button", rightOpen && "is-on")} onClick={() => setRightOpen((value) => !value)}><Sparkles /></button></div>
       {notice && <div className="dj-library-notice" role="status"><span>{notice}</span><button onClick={() => setNotice(null)}>×</button></div>}
-      {source === "recordings" ? <RecordingRows rows={recordings} /> : <VirtualTrackList resourceKey={`${source}:${debouncedQuery}:${localPlaylistId}:${mirrorSource}:${mirrorPlaylist?.external_id}`} tracks={sortedTracks} total={centerTotal} sort={sort} sortScope={source === "collection" ? "server" : "loaded"} onSort={(field) => setSort((current) => nextSort(current, field))} hasMore={source === "history" ? false : center.hasMore} loading={source === "history" ? false : center.loading} error={source === "history" ? null : center.error} activeDeck={activeDeck} selected={selected} empty={source === "mirror" && !mirrorPlaylist ? "左のRekordboxツリーからプレイリストを選択" : source === "local" && !localPlaylistId ? "左のplumdeckプレイリストを選択" : "曲がありません"} onSelect={setSelected} onLoad={(track) => onLoad(activeDeck, track)} onLoadMore={center.loadMore} onRetry={center.retry} cueOverrides={cueOverrides} cueRevision={cueRevision} onDropTrack={source === "local" && localPlaylistId ? (track) => addTrack(track, localPlaylistId) : undefined} onRemove={source === "local" && localPlaylistId ? (track) => track.setlist_track_id && void mutate(() => playService.removeLocalPlaylistTrack(localPlaylistId, track.setlist_track_id!), () => { localTracks.reload(); playlists.reload(); }) : undefined} />}
+      {source === "sampler" ? <SamplerCollection /> : source === "recordings" ? <RecordingRows rows={recordings} /> : <VirtualTrackList resourceKey={`${source}:${debouncedQuery}:${localPlaylistId}:${mirrorSource}:${mirrorPlaylist?.external_id}`} tracks={sortedTracks} total={centerTotal} sort={sort} sortScope={source === "collection" ? "server" : "loaded"} onSort={(field) => setSort((current) => nextSort(current, field))} hasMore={source === "history" ? false : center.hasMore} loading={source === "history" ? false : center.loading} error={source === "history" ? null : center.error} activeDeck={activeDeck} selected={selected} empty={source === "mirror" && !mirrorPlaylist ? "左のRekordboxツリーからプレイリストを選択" : source === "local" && !localPlaylistId ? "左のplumdeckプレイリストを選択" : "曲がありません"} onSelect={setSelected} onLoad={(track) => onLoad(activeDeck, track)} onLoadMore={center.loadMore} onRetry={center.retry} cueOverrides={cueOverrides} cueRevision={cueRevision} onDropTrack={source === "local" && localPlaylistId ? (track) => addTrack(track, localPlaylistId) : undefined} onRemove={source === "local" && localPlaylistId ? (track) => track.setlist_track_id && void mutate(() => playService.removeLocalPlaylistTrack(localPlaylistId, track.setlist_track_id!), () => { localTracks.reload(); playlists.reload(); }) : undefined} />}
     </div>
     {rightOpen && <ResizeHandle variable="--d-recommend" storageKey="plumdeck.width.recommend" label="レコメンド幅" min={160} max={480} invert />}
     {rightOpen && <aside className="dj-recommend"><div className="dj-right-tabs"><button className={rightMode === "recommend" ? "is-on" : ""} onClick={() => setRightMode("recommend")}><Sparkles />RECOMMEND</button><button className={rightMode === "search" ? "is-on" : ""} onClick={() => setRightMode("search")}><Search />SEARCH</button></div>{rightMode === "search" && <div className="dj-right-search"><Search /><input aria-label="右パネル検索" value={rightQuery} onChange={(event) => setRightQuery(event.target.value)} placeholder="Title, artist…" /></div>}<div className="dj-recommend-subtitle"><span>{rightMode === "recommend" ? "NEXT TRACK" : "SEARCH RESULTS"}</span><b>{rightPage.total.toLocaleString()}</b></div><RecommendationList resourceKey={`${rightMode}:${seedTrackId}:${debouncedRightQuery}`} tracks={rightPage.items} loading={rightPage.loading} error={rightPage.error} hasMore={rightPage.hasMore} empty={rightMode === "recommend" ? seedTrackId ? "この曲の候補はありません" : "デッキに曲をロードしてください" : debouncedRightQuery ? "一致する曲はありません" : "検索語を入力してください"} onLoadMore={rightPage.loadMore} onRetry={rightPage.retry} onLoad={(track) => onLoad(activeDeck, track)} /></aside>}

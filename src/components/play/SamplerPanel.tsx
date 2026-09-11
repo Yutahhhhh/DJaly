@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { sampler } from "@/services/dj-engine/sampler";
+import { SAMPLE_MIME, readSample, sampleDrag } from "@/services/sampler-library";
 export function SamplerPanel({ enabled, cueAvailable }: { enabled: boolean; cueAvailable: boolean }) {
   const bank = useSyncExternalStore(sampler.subscribe, sampler.getSnapshot);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +17,9 @@ export function SamplerPanel({ enabled, cueAvailable }: { enabled: boolean; cueA
       <button disabled={!enabled || !cueAvailable} aria-pressed={bank.pfl} onClick={() => run(() => sampler.command("pfl", {enabled:!bank.pfl}))}>CUE</button>
       <button disabled={!enabled} onClick={() => run(() => sampler.command("stopAll"))}>全停止</button><span>SHIFT＋パッドで停止</span></div>
     {(error || bank.error) && <p role="alert">{error || bank.error}</p>}
-    <div className="dj-sampler-slots">{bank.slots.map(s => <div key={s.slot} className="dj-sampler-slot">
+    <div className="dj-sampler-slots">{bank.slots.map(s => <div key={s.slot} className="dj-sampler-slot" data-sampler-slot={s.slot} data-sampler-enabled={enabled && busy === null ? "true" : "false"}
+      onDragOver={event => { if (enabled && busy === null && event.dataTransfer.types.includes(SAMPLE_MIME)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; } }}
+      onDrop={event => { const asset = readSample(event.dataTransfer); if (!asset) return; event.preventDefault(); event.stopPropagation(); if (!enabled || busy !== null || !sampleDrag.claim()) return; run(async () => { setBusy(s.slot); try { await sampler.load(s.slot, asset.path); } finally { setBusy(null); } }); }}>
       <button disabled={!enabled || !["ready", "playing"].includes(s.status)} aria-pressed={s.status === "playing"} onClick={e => run(() => sampler.trigger(s.slot, e.shiftKey))}>{s.slot + 1} · {s.status === "loading" ? "読み込み中…" : s.name || "空き"}</button>
       <div><button disabled={!enabled || busy !== null} onClick={() => load(s.slot)}>音源を選択</button><button disabled={!enabled || !s.path} onClick={() => run(() => sampler.trigger(s.slot, true))}>停止</button><button disabled={!enabled || !s.path} onClick={() => run(() => sampler.eject(s.slot))}>解除</button></div>
       {s.error && <small role="alert">{s.error}</small>}

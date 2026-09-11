@@ -77,7 +77,7 @@ export function SetlistSidebar({
   };
 
   return (
-    <div className="w-64 border-r flex flex-col bg-background">
+    <div className="setlist-sidebar border-r flex flex-col bg-background">
       <div className="p-4 border-b flex items-center justify-between">
         <h3 className="font-semibold flex items-center gap-2">
           <ListMusic className="h-5 w-5" /> Setlists
