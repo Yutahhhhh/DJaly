@@ -89,15 +89,23 @@ export function FileExplorer() {
       setIsModalOpen(false);
       
       // Wait for completion (via Context)
-      await waitForIngestionComplete();
+      const outcome = await waitForIngestionComplete();
 
-      // Analysis finished
-      setSelectedPaths(new Set());
+      if (currentPathRef.current) await fetchItems(currentPathRef.current);
+      if (outcome.type === "complete" && outcome.errors === 0) {
+        setSelectedPaths(new Set());
+      } else if (outcome.failedFiles.length > 0) {
+        // Keep only failed files selected so a mixed batch can be retried as-is.
+        setSelectedPaths(new Set(outcome.failedFiles));
+      }
       setForceUpdate(false);
-      if (currentPathRef.current) fetchItems(currentPathRef.current);
+      if (outcome.type !== "complete" || outcome.errors > 0) {
+        throw new Error(outcome.lastError || outcome.message ||
+          `解析を完了できませんでした（失敗 ${outcome.errors}曲）`);
+      }
     } catch (e: any) {
       console.error("Ingest start failed", e);
-      alert("Failed to start analysis: " + e.message);
+      alert("解析を完了できませんでした: " + e.message);
     }
   };
 
@@ -153,7 +161,7 @@ export function FileExplorer() {
           selectedPaths={selectedPaths}
           hideAnalyzed={hideAnalyzed}
           isLoading={isLoading}
-          disabled={isAnalyzing}
+          disabled={false}
           onToggleSelection={toggleSelection}
           onNavigate={handleNavigate}
         />

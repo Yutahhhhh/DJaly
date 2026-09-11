@@ -10,6 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  prepare-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Restore verified Windows inference model
+        id: musicnn-model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: backend/models/msd-musicnn-1.onnx
+          key: musicnn-onnx-49668ffec47e52e94b96f45930bb46a28a1368d4bdfb5c05378fa834aca616e1
+      - name: Fetch and verify Windows inference model
+        run: python backend/fetch_musicnn_onnx.py
+      - name: Cache verified Windows inference model
+        if: steps.musicnn-model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: backend/models/msd-musicnn-1.onnx
+          key: ${{ steps.musicnn-model-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-inference-model
+          path: backend/models/msd-musicnn-1.onnx
+          if-no-files-found: error
+
   native:
     concurrency:
       group: windows-packages-${{ github.ref }}
@@ -71,6 +99,7 @@ jobs:
           if-no-files-found: error
 
   backend:
+    needs: prepare-model
     concurrency:
       group: windows-backend-build-${{ github.ref }}
       cancel-in-progress: true
@@ -92,9 +121,15 @@ jobs:
         if: steps.backend-cache.outputs.cache-hit != 'true'
       - run: python -m pip install -r backend/requirements.txt
         if: steps.backend-cache.outputs.cache-hit != 'true'
-      - name: Fetch verified Windows inference model
+      - name: Download verified Windows inference model
         if: steps.backend-cache.outputs.cache-hit != 'true'
-        run: python backend/fetch_musicnn_onnx.py
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-inference-model
+          path: backend/models
+      - name: Verify downloaded Windows inference model
+        if: steps.backend-cache.outputs.cache-hit != 'true'
+        run: python backend/fetch_musicnn_onnx.py --verify-only
       - name: Portable analysis regression tests
         if: steps.backend-cache.outputs.cache-hit != 'true'
         env:

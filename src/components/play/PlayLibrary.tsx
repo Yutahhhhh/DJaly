@@ -67,6 +67,11 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
       : null;
   }, [source, localPlaylistId]);
   useEffect(() => {
+    const refresh = () => { collection.reload(); localTracks.reload(); playlists.reload(); };
+    window.addEventListener("plumdeck:import-tracks-updated", refresh);
+    return () => window.removeEventListener("plumdeck:import-tracks-updated", refresh);
+  }, [collection.reload, localTracks.reload, playlists.reload]);
+  useEffect(() => {
     let disposed = false;
     let cleanup: (() => void) | undefined;
     let internalDragResetTimer: number | undefined;
@@ -158,14 +163,9 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
         return;
       }
       setNotice(`${payload.paths.length}件を受け付けました。バックグラウンドで解析します…`);
-      void workflowsService.createImport(payload.paths, captured, "native_file_drop").then((batch) => {
+      void workflowsService.createImport(payload.paths, captured, "native_file_drop").then(() => {
         setNotice(`取込ジョブを開始しました（追加先: ${captured.kind === "collection" ? "Collection" : `Playlist #${captured.id}`}）`);
-        const poll = window.setInterval(() => { void workflowsService.importStatus(batch.id).then((latest) => {
-          if (!["completed", "completed_with_errors", "canceled"].includes(latest.state)) return;
-          window.clearInterval(poll);
-          collection.reload(); localTracks.reload(); playlists.reload();
-          setNotice(latest.state === "completed" ? "音源の取り込みと解析が完了しました" : `取り込み完了: ${latest.state}`);
-        }).catch(() => window.clearInterval(poll)); }, 1200);
+        window.dispatchEvent(new Event("plumdeck:imports-changed"));
       }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     }).then((unlisten) => { if (disposed) unlisten(); else cleanup = unlisten; }).catch(() => undefined);
     return () => {

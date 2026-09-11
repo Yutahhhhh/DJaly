@@ -1,8 +1,9 @@
 import os
+import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
-from models import Track
+from models import Track, TrackEmbedding
 
 def test_stream_track(client: TestClient, session: Session, tmp_path):
     # ダミーの音声ファイルを作成
@@ -97,3 +98,73 @@ def test_list_directory(client: TestClient, session: Session, tmp_path):
     filenames = [item["name"] for item in data]
     assert "subdir" in filenames
     assert "file1.mp3" in filenames
+
+
+def test_list_directory_only_marks_completed_analysis_as_analyzed(
+    client: TestClient, session: Session, tmp_path
+):
+    completed_file = tmp_path / "completed.mp3"
+    incomplete_file = tmp_path / "incomplete.mp3"
+    failed_file = tmp_path / "failed.mp3"
+    for path in (completed_file, incomplete_file, failed_file):
+        path.touch()
+
+    completed = Track(
+        filepath=str(completed_file),
+        title="Completed",
+        artist="Artist",
+        album="Album",
+        genre="Genre",
+        bpm=120,
+        duration=60,
+    )
+    # Fast imports can leave a valid Track row before audio analysis completes.
+    incomplete = Track(
+        filepath=str(incomplete_file),
+        title="Incomplete",
+        artist="Artist",
+        album="Album",
+        genre="Genre",
+        bpm=None,
+        duration=60,
+    )
+    # A partial result without an embedding must also remain retryable.
+    failed = Track(
+        filepath=str(failed_file),
+        title="Failed",
+        artist="Artist",
+        album="Album",
+        genre="Genre",
+        bpm=120,
+        duration=60,
+    )
+    session.add_all([completed, incomplete, failed])
+    session.flush()
+    session.add(
+        TrackEmbedding(
+            track_id=completed.id,
+            embedding_json=json.dumps([0.1] * 200),
+            model_name="test",
+        )
+    )
+    session.commit()
+
+    response = client.post(
+        "/api/fs/list",
+        json={"path": str(tmp_path), "hide_analyzed": False},
+    )
+    assert response.status_code == 200
+    items = {item["name"]: item for item in response.json() if not item["is_dir"]}
+    assert items["completed.mp3"]["is_analyzed"] is True
+    assert items["incomplete.mp3"]["is_analyzed"] is False
+    assert items["failed.mp3"]["is_analyzed"] is False
+
+    hidden_response = client.post(
+        "/api/fs/list",
+        json={"path": str(tmp_path), "hide_analyzed": True},
+    )
+    assert hidden_response.status_code == 200
+    visible_names = {item["name"] for item in hidden_response.json()}
+    assert "completed.mp3" not in visible_names
+    assert "incomplete.mp3" in visible_names
+    assert "failed.mp3" in visible_names

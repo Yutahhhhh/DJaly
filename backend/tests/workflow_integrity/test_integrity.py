@@ -3,6 +3,7 @@
 Run: PYTHONPATH=backend pytest --confcutdir=backend/tests/workflow_integrity backend/tests/workflow_integrity
 """
 import json
+import asyncio
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -13,7 +14,7 @@ from sqlalchemy import text
 
 import infra.database.connection as db
 from infra.database.schema import init_raw_db
-from domain.models.track import Track
+from domain.models.track import Track, TrackEmbedding
 from domain.models.setlist import Setlist
 from app.services.play_import_service import PlayImportService, process_batch
 from app.services import workflow_service as workflow
@@ -36,11 +37,117 @@ def library(tmp_path, monkeypatch):
 def track(session, tmp_path):
     path = tmp_path / "song.wav"
     path.write_bytes(b"audio content")
-    value = Track(filepath=str(path), title="Song", artist="DJ", album="", genre="House", duration=60)
+    value = Track(filepath=str(path), title="Song", artist="DJ", album="", genre="House", duration=60, bpm=120)
     session.add(value)
+    session.flush()
+    session.add(TrackEmbedding(
+        track_id=value.id,
+        embedding_json=json.dumps([0.1] * 200),
+        model_name="musicnn",
+    ))
     session.commit()
     session.refresh(value)
     return value
+
+
+def test_only_completed_analysis_is_marked_and_failed_files_remain_retryable(library, tmp_path):
+    from app.services.filesystem_app_service import FilesystemAppService
+
+    complete_path = tmp_path / "complete.mp3"
+    missing_bpm_path = tmp_path / "missing-bpm.mp3"
+    missing_embedding_path = tmp_path / "missing-embedding.mp3"
+    for path in (complete_path, missing_bpm_path, missing_embedding_path):
+        path.touch()
+    complete = Track(filepath=str(complete_path), title="Complete", artist="DJ", genre="House", duration=60, bpm=120)
+    missing_bpm = Track(filepath=str(missing_bpm_path), title="Retry BPM", artist="DJ", genre="House", duration=60)
+    missing_embedding = Track(filepath=str(missing_embedding_path), title="Retry embedding", artist="DJ", genre="House", duration=60, bpm=120)
+    library.add_all([complete, missing_bpm, missing_embedding])
+    library.flush()
+    for value in (complete, missing_bpm):
+        library.add(TrackEmbedding(track_id=value.id, embedding_json=json.dumps([0.1] * 200)))
+    library.add(TrackEmbedding(track_id=missing_embedding.id, embedding_json="[]"))
+    library.commit()
+
+    rows = FilesystemAppService(library).list_directory(str(tmp_path))
+    files = {row["name"]: row for row in rows if not row["is_dir"]}
+    assert files["complete.mp3"]["is_analyzed"] is True
+    assert files["missing-bpm.mp3"]["is_analyzed"] is False
+    assert files["missing-embedding.mp3"]["is_analyzed"] is False
+    # This is the exact set left visible by Hide Analyzed.
+    assert {name for name, row in files.items() if not row["is_analyzed"]} == {
+        "missing-bpm.mp3", "missing-embedding.mp3",
+    }
+
+
+def test_fast_explorer_job_releases_global_analysis_slot(monkeypatch):
+    from app.services.analysis_coordinator import analysis_coordinator
+    from app.services.ingestion_app_service import IngestionAppService
+
+    service = IngestionAppService()
+
+    async def finish_immediately(_targets, _force_update):
+        service.update_state(type="complete")
+
+    monkeypatch.setattr(service, "_run_ingestion", finish_immediately)
+
+    async def run():
+        assert await service.start_ingestion([], False)
+        task = service.current_task
+        assert task is not None
+        await task
+
+    asyncio.run(run())
+    assert analysis_coordinator.owner is None
+
+
+@pytest.mark.parametrize("result,message", [
+    (None, "produced no result"),
+    ({"title": "Partial", "artist": "DJ", "duration": 60, "bpm": 120}, "incomplete"),
+])
+def test_decoder_or_partial_analysis_is_an_error_instead_of_a_skip(tmp_path, monkeypatch, result, message):
+    from domain.services import ingestion_domain_service as ingestion_module
+
+    path = tmp_path / "broken.mp3"
+    path.write_bytes(b"not audio")
+    monkeypatch.setattr(ingestion_module, "analyze_track_file", lambda *_args: result)
+
+    async def run():
+        service = ingestion_module.IngestionDomainService()
+        with pytest.raises(RuntimeError, match=message):
+            await service.process_track_ingestion(
+                str(path), True, asyncio.get_running_loop(), save_to_db=False,
+            )
+
+    asyncio.run(run())
+
+
+def test_forced_retry_combines_fresh_audio_with_existing_metadata_and_embedding(library, tmp_path, monkeypatch):
+    from domain.services import ingestion_domain_service as ingestion_module
+
+    path = tmp_path / "plain.mp3"
+    path.write_bytes(b"audio")
+    existing = Track(
+        filepath=str(path), title="Curated title", artist="Curated artist",
+        genre="House", duration=60, bpm=None,
+    )
+    library.add(existing)
+    library.flush()
+    library.add(TrackEmbedding(track_id=existing.id, embedding_json=json.dumps([0.1] * 200)))
+    library.commit()
+    monkeypatch.setattr(ingestion_module, "analyze_track_file", lambda *_args: {
+        "filepath": str(path), "title": "plain", "artist": "Unknown",
+        "duration": 60, "bpm": 120,
+    })
+
+    async def run():
+        return await ingestion_module.IngestionDomainService().process_track_ingestion(
+            str(path), True, asyncio.get_running_loop(), save_to_db=False,
+        )
+
+    result = asyncio.run(run())
+    assert result["artist"] == "Curated artist"
+    assert result["title"] == "Curated title"
+    assert result["bpm"] == 120
 
 
 @pytest.mark.parametrize("state", ["probing", "analyzing"])
@@ -212,7 +319,10 @@ def test_cancel_during_analysis_prevents_membership_until_explicit_retry(library
         assert kwargs["executor"] is not None
         with Session(db.engine) as other:
             PlayImportService(other).set_state(batch["id"], "cancel")
-        return {"filepath": str(path), "title": "New", "artist": "DJ", "duration": 60}
+        return {
+            "filepath": str(path), "title": "New", "artist": "DJ", "duration": 60,
+            "bpm": 120, "embedding": [0.1] * 200,
+        }
     monkeypatch.setattr(IngestionDomainService, "process_track_ingestion", analyze)
     library.commit()  # End the request snapshot before background work.
     process_batch(batch["id"])

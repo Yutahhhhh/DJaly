@@ -8,7 +8,7 @@ from tinytag import TinyTag
 from ingest import analyze_track_file
 from domain.constants import SUPPORTED_EXTENSIONS
 from utils.metadata import extract_metadata_smart, check_metadata_changed, update_file_metadata, extract_full_metadata
-from utils.ingestion import has_valid_metadata
+from utils.ingestion import has_completed_analysis, has_completed_analysis_result, has_valid_metadata
 import infra.database.connection as db_connection
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
@@ -82,45 +82,49 @@ class IngestionDomainService:
         skip_waveform = False
         metadata_update_only = False
         existing_data_cache = {}
+        existing_embedding = None
 
-        if not force_update:
-            try:
-                with Session(db_connection.engine) as session:
-                    track = session.exec(select(Track).where(Track.filepath == filepath)).first()
-                    if track:
-                        # テスト環境のモック汚染対策
-                        lyrics_from_db = None
-                        if not isinstance(track, MagicMock):
-                            lyrics_obj = session.get(Lyrics, track.id)
-                            if lyrics_obj and hasattr(lyrics_obj, 'content') and not isinstance(lyrics_obj.content, MagicMock):
-                                lyrics_from_db = lyrics_obj.content
-                        
-                        embedding = session.get(TrackEmbedding, track.id)
+        try:
+            with Session(db_connection.engine) as session:
+                track = session.exec(select(Track).where(Track.filepath == filepath)).first()
+                if track:
+                    # Read fallback values even for forced/incomplete imports.
+                    # A failed metadata probe must not erase already curated data.
+                    lyrics_from_db = None
+                    if not isinstance(track, MagicMock):
+                        lyrics_obj = session.get(Lyrics, track.id)
+                        if lyrics_obj and hasattr(lyrics_obj, 'content') and not isinstance(lyrics_obj.content, MagicMock):
+                            lyrics_from_db = lyrics_obj.content
+
+                    embedding = session.get(TrackEmbedding, track.id)
+                    existing_embedding = embedding
+                    existing_data_cache = {
+                        "title": track.title if hasattr(track, 'title') else "Unknown",
+                        "artist": track.artist if hasattr(track, 'artist') else "Unknown",
+                        "album": track.album if hasattr(track, 'album') else "Unknown",
+                        "bpm": track.bpm if hasattr(track, 'bpm') else 0,
+                        "key": track.key if hasattr(track, 'key') else "",
+                        "scale": track.scale if hasattr(track, 'scale') else "",
+                        "energy": track.energy if hasattr(track, 'energy') else 0.0,
+                        "duration": track.duration if hasattr(track, 'duration') else 0.0,
+                        "genre": track.genre if hasattr(track, 'genre') else "Unknown",
+                        "year": track.year if hasattr(track, 'year') else None,
+                        "lyrics": lyrics_from_db,
+                    }
+
+                    if not force_update:
                         is_metadata_incomplete = not has_valid_metadata(track)
-
-                        existing_data_cache = {
-                            "bpm": track.bpm if hasattr(track, 'bpm') else 0,
-                            "key": track.key if hasattr(track, 'key') else "",
-                            "scale": track.scale if hasattr(track, 'scale') else "",
-                            "energy": track.energy if hasattr(track, 'energy') else 0.0,
-                            "duration": track.duration if hasattr(track, 'duration') else 0.0,
-                            "genre": track.genre if hasattr(track, 'genre') else "Unknown",
-                            "year": track.year if hasattr(track, 'year') else None,
-                            "lyrics": lyrics_from_db
-                        }
-
-                        if not embedding:
+                        if not has_completed_analysis(track, embedding):
                             if is_metadata_incomplete:
                                 try:
                                     tag_check = TinyTag.get(filepath)
                                     meta_check = extract_metadata_smart(filepath, tag_check)
                                     if meta_check["artist"] != "Unknown" and meta_check["title"] != "Unknown":
-                                        is_metadata_incomplete = False
                                         existing_data_cache.update(meta_check)
-                                except: pass
+                                except Exception:
+                                    pass
                             skip_basic = False
-                            skip_waveform = True 
-                        
+                            skip_waveform = True
                         elif is_metadata_incomplete or check_metadata_changed(filepath, track):
                             metadata_update_only = True
                         else:
@@ -134,12 +138,13 @@ class IngestionDomainService:
                                 return result
                             print(f"DEBUG: Track {filename} skipped - no changes (lyrics_content: {bool(lyrics_content)}, existing: {bool(existing_data_cache.get('lyrics'))})", flush=True)
                             return None
-                            
-            except Exception as e:
-                print(f"WARNING: DB check failed for {filename}: {e}")
+        except Exception as e:
+            print(f"WARNING: DB check failed for {filename}: {e}")
 
         if metadata_update_only:
             result = await loop.run_in_executor(None, self._process_metadata_update, filepath, existing_data_cache, lyrics_content)
+            if not result:
+                raise RuntimeError(f"Metadata update failed for {filename}")
             if result and save_to_db:
                 if db_lock:
                     async with db_lock:
@@ -160,7 +165,12 @@ class IngestionDomainService:
             )
         except Exception as exc:
             raise RuntimeError(f"Audio analysis failed for {filename}: {exc}") from exc
-        
+
+        # AudioAnalyzer reports decoder/native failures as no result. This is
+        # different from the intentional unchanged-track return above and must
+        # remain retryable instead of being counted as skipped.
+        if not result:
+            raise RuntimeError(f"Audio analysis produced no result for {filename}")
         if result:
             # 外部歌詞の反映
             if lyrics_content:
@@ -173,16 +183,37 @@ class IngestionDomainService:
             elif existing_data_cache.get("lyrics"):
                 result["lyrics"] = existing_data_cache["lyrics"]
             
-            if result.get("artist") == "Unknown" or result.get("title") == "Unknown":
+            missing_artist = not result.get("artist") or str(result.get("artist")).lower() == "unknown"
+            if missing_artist or not result.get("title") or str(result.get("title")).lower() == "unknown":
                 meta_smart = extract_metadata_smart(filepath)
-                if result.get("artist") == "Unknown": result["artist"] = meta_smart["artist"]
-                if result.get("title") == "Unknown" or result.get("title") == os.path.basename(filepath): 
+                if missing_artist: result["artist"] = meta_smart["artist"]
+                missing_title = not result.get("title") or str(result.get("title")).lower() == "unknown"
+                filename_title = result.get("title") in {os.path.basename(filepath), os.path.splitext(filename)[0]}
+                if missing_title or filename_title and meta_smart.get("artist") != "Unknown":
                     result["title"] = meta_smart["title"]
+                elif filename_title and existing_data_cache.get("title"):
+                    result["title"] = existing_data_cache["title"]
+
+            for key in ("title", "artist"):
+                value = result.get(key)
+                cached = existing_data_cache.get(key)
+                if (not value or str(value).lower() == "unknown") and cached and str(cached).lower() != "unknown":
+                    result[key] = cached
+            duration = result.get("duration")
+            cached_duration = existing_data_cache.get("duration")
+            if (not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0):
+                if isinstance(cached_duration, (int, float)) and not isinstance(cached_duration, bool) and cached_duration > 0:
+                    result["duration"] = cached_duration
 
             if skip_basic and existing_data_cache:
                 for key, db_val in existing_data_cache.items():
                     if key != "lyrics" and db_val is not None and db_val != "" and db_val != 0:
                         result[key] = db_val
+
+            if not has_completed_analysis_result(result, existing_embedding):
+                raise RuntimeError(
+                    f"Audio analysis returned incomplete BPM, duration, metadata or embedding for {filename}"
+                )
             
             if save_to_db:
                 if db_lock:
@@ -191,4 +222,4 @@ class IngestionDomainService:
                 else:
                     await loop.run_in_executor(None, self.repository.save_track, result, True)
             return result
-        return None
+        raise RuntimeError(f"Audio analysis produced no result for {filename}")

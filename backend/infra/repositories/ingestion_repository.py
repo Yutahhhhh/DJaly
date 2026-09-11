@@ -119,14 +119,12 @@ class IngestionRepository:
             return int(track_id)
 
     def save_track(self, result: Dict[str, Any], update_metadata: bool = True):
-        try:
-            with Session(db_connection.engine) as session:
-                track_id = self._prepare_track_models(session, result, update_metadata)
-                session.commit()
-                return track_id
-        except Exception as e:
-            print(f"ERROR: Save track failed: {e}")
-            return None
+        # Callers use success to advance the progress counter. Propagate a DB
+        # failure so a track cannot be reported as analyzed without being saved.
+        with Session(db_connection.engine) as session:
+            track_id = self._prepare_track_models(session, result, update_metadata)
+            session.commit()
+            return track_id
 
     def save_track_result(self, session: Session, result: Dict[str, Any], update_metadata: bool = True) -> Dict[str, Any]:
         """Structured writer used by persistent imports; commit failures propagate."""

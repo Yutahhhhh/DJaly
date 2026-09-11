@@ -1,5 +1,8 @@
 import os
+import json
+import math
 import unicodedata
+from types import SimpleNamespace
 from typing import List, Dict, Any
 from sqlmodel import Session, select
 from models import Track, TrackEmbedding
@@ -7,6 +10,52 @@ import infra.database.connection as db_connection
 from utils.filesystem import resolve_path
 from utils.metadata import check_metadata_changed, has_valid_metadata
 from domain.constants import SUPPORTED_EXTENSIONS
+from domain.constants import EMBEDDING_DIM
+
+
+def has_valid_embedding(embedding: Any) -> bool:
+    """Reject missing, malformed, non-finite and placeholder embeddings."""
+    value = getattr(embedding, "embedding_json", embedding)
+    try:
+        vector = json.loads(value) if isinstance(value, str) else list(value)
+        return (
+            len(vector) == EMBEDDING_DIM
+            and all(
+                isinstance(item, (int, float))
+                and not isinstance(item, bool)
+                and math.isfinite(item)
+                for item in vector
+            )
+            and any(item != 0 for item in vector)
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def has_completed_analysis(track: Any, embedding: Any) -> bool:
+    """The single definition used by filtering, Explorer badges and imports."""
+    return bool(
+        track
+        and isinstance(getattr(track, "bpm", None), (int, float))
+        and not isinstance(track.bpm, bool)
+        and track.bpm > 0
+        and has_valid_embedding(embedding)
+        and has_valid_metadata(track)
+    )
+
+
+def has_completed_analysis_result(result: Dict[str, Any], existing_embedding: Any = None) -> bool:
+    """Validate a fresh full-analysis result before it is reported or saved."""
+    bpm = result.get("bpm")
+    duration = result.get("duration")
+    embedding = result.get("embedding", existing_embedding)
+    metadata = SimpleNamespace(title=result.get("title"), artist=result.get("artist"))
+    return bool(
+        isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and math.isfinite(bpm) and bpm > 0
+        and isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0
+        and has_valid_embedding(embedding)
+        and has_valid_metadata(metadata)
+    )
 
 def normalize_path(path: str) -> str:
     """
@@ -55,7 +104,7 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
         
         # Embeddingの存在確認
         existing_embeddings = session.exec(select(TrackEmbedding)).all()
-        embedding_map = {e.track_id: True for e in existing_embeddings}
+        embedding_map = {e.track_id: e for e in existing_embeddings}
         
         # Lyricsの存在確認
         from domain.models.lyrics import Lyrics
@@ -72,17 +121,12 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
         if not force_update:
             existing_track = track_map.get(norm_fp)
             if existing_track:
-                # 1. すでにBPM解析済みか
-                is_analyzed = existing_track.bpm and existing_track.bpm > 0
-                # 2. Embedding（ベクトルデータ）があるか
-                has_embedding = existing_track.id in embedding_map
-                # 3. メタデータ（タイトル/アーティスト）が正常か
-                has_valid_meta = has_valid_metadata(existing_track)
-                # 4. .lrcファイルが存在するか（内容の差分チェックは後段で行う）
+                embedding = embedding_map.get(existing_track.id)
+                # .lrcファイルが存在するか（内容の差分チェックは後段で行う）
                 lrc_path = os.path.splitext(fp)[0] + ".lrc"
                 has_lrc_file = os.path.exists(lrc_path)
                 
-                if is_analyzed and has_embedding and has_valid_meta:
+                if has_completed_analysis(existing_track, embedding):
                     # .lrcファイルがある場合、内容が変更されている可能性があるため処理する
                     # （実際の差分チェックはingestion_domain_serviceで行われる）
                     if has_lrc_file:
@@ -101,7 +145,7 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
         norm_fp = normalize_path(filepath)
         track = track_map.get(norm_fp)
         if track:
-            if track.id not in embedding_map or not has_valid_metadata(track):
+            if not has_completed_analysis(track, embedding_map.get(track.id)):
                 return 0 # 高優先
             return 1 # メタデータ更新のみ等
         return 1 # 完全な新規ファイル

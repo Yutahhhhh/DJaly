@@ -1,8 +1,39 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+from starlette.concurrency import run_in_threadpool
 from api.schemas.common import IngestRequest
 from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
+from app.services.analysis_coordinator import analysis_coordinator
 
 router = APIRouter()
+
+
+def import_queue_snapshot():
+    # A fresh, short transaction sees committed progress without holding a
+    # connection throughout audio inference or the lifetime of the socket.
+    from sqlmodel import Session
+    import infra.database.connection as db
+    from app.services.play_import_service import PlayImportService
+    with Session(db.engine) as session:
+        service = PlayImportService(session)
+        active = service.list(active=True)
+        active_ids = {row["id"] for row in active}
+        recent = [row for row in service.list() if row["id"] not in active_ids][:20]
+        return jsonable_encoder({"type": "import_queue", "batches": active + recent})
+
+
+@router.websocket("/ws/play-imports")
+async def websocket_play_imports(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            # Send an initial snapshot and periodic snapshots, including while
+            # one long-running file has no new progress. Reconnect is lossless.
+            await websocket.send_json(await run_in_threadpool(import_queue_snapshot))
+            await asyncio.sleep(2)
+    except (WebSocketDisconnect, OSError, RuntimeError):
+        pass
 
 @router.post("/api/ingest")
 async def ingest_files(req: IngestRequest):
@@ -20,9 +51,25 @@ async def ingest_files(req: IngestRequest):
     success = await ingestion_manager.start_ingestion(req.targets, req.force_update)
     
     if success:
-        return {"status": "success", "message": "Ingestion started"}
+        return {
+            "status": "success",
+            "message": "Ingestion started",
+            "state": jsonable_encoder(ingestion_manager.state),
+        }
     else:
-        raise HTTPException(status_code=400, detail="Failed to start ingestion")
+        owner = analysis_coordinator.owner
+        raise HTTPException(
+            status_code=409,
+            detail=f"{owner or '別の'}解析が実行中です。完了後に再試行してください",
+        )
+
+
+@router.get("/api/ingest/status")
+async def ingestion_status():
+    return jsonable_encoder({
+        **ingestion_manager.state,
+        "is_running": ingestion_manager.is_running,
+    })
 
 @router.post("/api/ingest/cancel")
 async def cancel_ingest():
@@ -30,7 +77,11 @@ async def cancel_ingest():
     Cancel running ingestion task.
     """
     await ingestion_manager.cancel_ingestion()
-    return {"status": "success", "message": "Ingestion cancelled"}
+    return {
+        "status": "success",
+        "message": "Ingestion cancelled",
+        "state": jsonable_encoder(ingestion_manager.state),
+    }
 
 @router.websocket("/ws/ingest")
 async def websocket_ingest(websocket: WebSocket):

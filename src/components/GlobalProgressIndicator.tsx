@@ -16,12 +16,23 @@ import {
   StopCircle,
   FileAudio,
   Music,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIngestion } from "@/contexts/IngestionContext";
 import { useMetadata } from "@/contexts/MetadataContext";
+import { ImportQueueProgress } from "./ImportQueueProgress";
 
 export function GlobalProgressIndicator() {
+  const ingestion = useIngestion();
+  const metadata = useMetadata();
+  return <>
+    <ImportQueueProgress raised={ingestion.isAnalyzing || ingestion.showComplete || metadata.isUpdating} />
+    <LegacyProgressIndicator />
+  </>;
+}
+
+function LegacyProgressIndicator() {
   const {
     isAnalyzing: isIngesting,
     progress: ingestProgress,
@@ -31,6 +42,7 @@ export function GlobalProgressIndicator() {
     showComplete: ingestComplete,
     cancelIngestion,
     dismissComplete: dismissIngestComplete,
+    lastError, elapsedSeconds, activeFiles, connectionError,
   } = useIngestion();
 
   const {
@@ -51,21 +63,23 @@ export function GlobalProgressIndicator() {
   // Derived values based on priority (Ingestion > Metadata)
   const activeType = isIngesting ? "ingestion" : isMetadataUpdating ? "metadata" : null;
   
-  const progress = isIngesting ? ingestProgress : metadataProgress;
-  const statusText = isIngesting ? ingestStatus : metadataStatus;
-  const currentItem = isIngesting ? ingestFile : metadataTrack;
-  const stats = isIngesting ? ingestStats : metadataStats;
+  const showIngestion = isIngesting || ingestComplete && !isMetadataUpdating;
+  const hasIngestionError = showIngestion && Boolean(lastError || ingestStats.errors);
+  const progress = showIngestion ? ingestProgress : metadataProgress;
+  const statusText = showIngestion ? ingestStatus : metadataStatus;
+  const currentItem = showIngestion ? ingestFile : metadataTrack;
+  const stats = showIngestion ? ingestStats : metadataStats;
 
   // Auto-close logic when complete
   useEffect(() => {
-    if (showComplete) {
+    if (showComplete && !lastError && !ingestStats.errors) {
       const timer = setTimeout(() => {
         setIsOpen(false);
         dismissIngestComplete();
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [showComplete, dismissIngestComplete]);
+  }, [showComplete, dismissIngestComplete, lastError, ingestStats.errors]);
 
   const getFileName = (path: string) => {
     if (!path) return "";
@@ -86,10 +100,10 @@ export function GlobalProgressIndicator() {
     return null;
   }
 
-  const title = isIngesting ? "Analyzing Library" : "Updating Metadata";
-  const description = isIngesting 
-    ? "Analyzing audio features, BPM, and generating embeddings."
-    : "Fetching and updating track metadata.";
+  const title = showIngestion ? "音源解析" : "メタデータ更新";
+  const description = showIngestion
+    ? "音源特徴、BPM、埋め込みを解析しています。"
+    : "曲のメタデータを更新しています。";
 
   return (
     <>
@@ -103,7 +117,9 @@ export function GlobalProgressIndicator() {
             isWorking
               ? "bg-background/80 backdrop-blur-md hover:bg-background/90 border-primary/20"
               : showComplete
-              ? "bg-green-500 hover:bg-green-600 text-white border-green-600"
+              ? hasIngestionError
+                ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground border-destructive"
+                : "bg-green-500 hover:bg-green-600 text-white border-green-600"
               : "bg-background"
           )}
         >
@@ -113,7 +129,9 @@ export function GlobalProgressIndicator() {
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
               </div>
               <div className="flex flex-col items-start text-xs leading-none gap-0.5">
-                <span className="font-semibold">{activeType === "ingestion" ? "Analyzing" : "Updating"}</span>
+                <span className="font-semibold">{activeType === "ingestion"
+                  ? stats.total > 0 ? `${Math.max(0, stats.total - stats.current)}曲の解析が進行中` : ingestStatus
+                  : "更新中"}</span>
                 <span className="text-muted-foreground tabular-nums">
                   {Math.round(progress)}% • {stats.current}/{stats.total}
                 </span>
@@ -121,8 +139,8 @@ export function GlobalProgressIndicator() {
             </>
           ) : showComplete ? (
             <>
-              <CheckCircle2 className="h-5 w-5" />
-              <span className="font-medium">Complete</span>
+              {hasIngestionError ? <AlertCircle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
+              <span className="font-medium">{lastError || ingestStats.errors ? "解析結果・エラーあり" : "解析完了"}</span>
             </>
           ) : (
             <Activity className="h-5 w-5" />
@@ -142,25 +160,33 @@ export function GlobalProgressIndicator() {
                 </>
               ) : showComplete ? (
                 <>
-                  <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  Analysis Complete
+                  {hasIngestionError
+                    ? <AlertCircle className="h-5 w-5 text-destructive" />
+                    : <CheckCircle2 className="h-5 w-5 text-green-500" />}
+                  {lastError || ingestStats.errors ? "解析結果・エラーあり" : "解析完了"}
                 </>
               ) : (
                 "Task Status"
               )}
             </DialogTitle>
             <DialogDescription>
-              {isWorking ? description : "Review the results."}
+              {isWorking ? description : "解析結果を確認できます。"}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-4">
+            {showIngestion && <div className="space-y-2 text-sm">
+              <p>経過 {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒 · 成功 {ingestStats.processed} · スキップ {ingestStats.skipped} · 失敗 {ingestStats.errors}</p>
+              {activeFiles.map(file => <p key={file.path} className="break-all">{getFileName(file.path)} · {file.seconds}秒</p>)}
+              {activeFiles.some(file => file.seconds > 120) && <p className="text-amber-600">解析に時間がかかっています。音源解析ワーカーにはタイムアウトがあり、失敗理由はここに表示されます。</p>}
+              {(connectionError || lastError) && <p role="alert" className="break-all text-destructive">{connectionError || lastError}</p>}
+            </div>}
             {/* Progress Bar */}
             <div className="space-y-2">
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Progress</span>
                 <span>
-                  {stats.current} / {stats.total} {activeType === "ingestion" ? "Files" : "Tracks"}
+                  {stats.current} / {stats.total} {showIngestion ? "曲" : "トラック"}
                 </span>
               </div>
               <Progress value={progress} className="h-2" />
@@ -173,12 +199,12 @@ export function GlobalProgressIndicator() {
                   {isWorking ? (
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                   ) : (
-                    activeType === "ingestion" ? <FileAudio className="h-4 w-4 text-muted-foreground" /> : <Music className="h-4 w-4 text-muted-foreground" />
+                    showIngestion ? <FileAudio className="h-4 w-4 text-muted-foreground" /> : <Music className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0 grid gap-0.5">
                   <p className="text-sm font-medium truncate" title={getFileName(currentItem)}>
-                    {getFileName(currentItem) || "Waiting..."}
+                    {getFileName(currentItem) || (showIngestion ? "解析対象を確認中" : "待機中")}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
                     {statusText}
@@ -195,7 +221,7 @@ export function GlobalProgressIndicator() {
               </div>
               <div className="p-3 border rounded-md text-center">
                 <div className="text-2xl font-bold">
-                  {stats.total - stats.current}
+                  {Math.max(0, stats.total - stats.current)}
                 </div>
                 <div className="text-xs text-muted-foreground">Remaining</div>
               </div>
@@ -210,11 +236,11 @@ export function GlobalProgressIndicator() {
                 className="w-full sm:w-auto"
               >
                 <StopCircle className="h-4 w-4 mr-2" />
-                Stop {activeType === "ingestion" ? "Analysis" : "Update"}
+                {activeType === "ingestion" ? "解析を停止" : "更新を停止"}
               </Button>
             ) : (
               <Button
-                onClick={() => setIsOpen(false)}
+                onClick={() => { setIsOpen(false); dismissIngestComplete(); }}
                 className="w-full sm:w-auto ml-auto"
               >
                 Close

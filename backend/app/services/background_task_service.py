@@ -1,12 +1,12 @@
 import asyncio
 import time
+import uuid
 import infra.database.connection as db_connection
 from typing import List, Dict, Any, Optional, Callable
-from fastapi import WebSocket
 
 class BackgroundTaskService:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: List[Any] = []
         self.is_running = False
         self.current_task: Optional[asyncio.Task] = None
         self.state = {
@@ -19,15 +19,17 @@ class BackgroundTaskService:
             "errors": 0,
             "start_time": 0,
             "estimated_remaining": 0,
+            "run_id": None,
+            "revision": 0,
             "details": {} # For extra fields like 'file' or 'current_track'
         }
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: Any):
         await websocket.accept()
         self.active_connections.append(websocket)
         await websocket.send_json(self.state)
 
-    def disconnect(self, websocket: WebSocket):
+    def disconnect(self, websocket: Any):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
@@ -39,7 +41,7 @@ class BackgroundTaskService:
         active = []
         for connection in self.active_connections:
             try:
-                await connection.send_json(message)
+                await asyncio.wait_for(connection.send_json(message), timeout=2)
                 active.append(connection)
             except Exception:
                 pass
@@ -55,46 +57,53 @@ class BackgroundTaskService:
                 task_coroutine.close()
                 return False
             self.is_running = True
+            self.state.update({
+                "type": "start",
+                "run_id": uuid.uuid4().hex,
+                "revision": 0,
+                "start_time": time.time(),
+                "processed": 0,
+                "skipped": 0,
+                "errors": 0,
+                "current": 0,
+                "total": 0,
+                "estimated_remaining": 0,
+                "message": "",
+                "details": {},
+            })
             self.current_task = asyncio.create_task(self._task_wrapper(task_coroutine))
-            return True
+        await self.broadcast()
+        return True
 
     async def cancel_task(self):
-        if self.current_task:
-            self.current_task.cancel()
+        task = self.current_task
+        if task:
+            task.cancel()
             try:
-                await self.current_task
+                await task
             except asyncio.CancelledError:
                 pass
-        
-        self.is_running = False
-        self.state["type"] = "idle"
-        await self.broadcast()
+            # _task_wrapper normally publishes this state. Keep this guard for
+            # implementations that finish between the cancel request and await.
+            if self.state["type"] != "cancelled":
+                self.update_state(type="cancelled")
+                await self.broadcast()
 
     async def _task_wrapper(self, task_coroutine):
         try:
-            self.state["type"] = "start"
-            self.state["start_time"] = time.time()
-            self.state["processed"] = 0
-            self.state["skipped"] = 0
-            self.state["errors"] = 0
-            self.state["current"] = 0
-            self.state["total"] = 0
-            self.state["estimated_remaining"] = 0
-            await self.broadcast()
-
             await task_coroutine
 
-            self.state["type"] = "complete"
-            self.state["message"] = "Task completed"
-            await self.broadcast()
+            # The task may already have reported an error or cancellation.
+            if self.state["type"] not in {"error", "cancelled", "complete"}:
+                self.update_state(type="complete", message="Task completed")
+                await self.broadcast()
         except asyncio.CancelledError:
             print("Task cancelled.")
-            self.state["type"] = "cancelled"
+            self.update_state(type="cancelled")
             await self.broadcast()
         except Exception as e:
             print(f"CRITICAL ERROR in background task: {e}")
-            self.state["type"] = "error"
-            self.state["message"] = str(e)
+            self.update_state(type="error", message=str(e))
             await self.broadcast()
         finally:
             self.is_running = False
@@ -109,6 +118,7 @@ class BackgroundTaskService:
                 self.state[key] = value
             else:
                 self.state["details"][key] = value
+        self.state["revision"] = int(self.state.get("revision", 0)) + 1
 
         # Auto-calculate ETA if processed/skipped/errors changed
         if "processed" in kwargs or "skipped" in kwargs or "errors" in kwargs:
@@ -117,7 +127,7 @@ class BackgroundTaskService:
             if self.state["start_time"] > 0 and done > 0 and self.state["total"] > 0:
                 elapsed = time.time() - self.state["start_time"]
                 avg_time = elapsed / done
-                remaining = self.state["total"] - done
+                remaining = max(0, self.state["total"] - done)
                 self.state["estimated_remaining"] = avg_time * remaining
 
     async def emit_state(self):

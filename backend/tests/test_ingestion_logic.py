@@ -26,7 +26,10 @@ async def test_process_track_ingestion_imports_lrc(tmp_path, mocker):
     mocker.patch("domain.services.ingestion_domain_service.extract_metadata_smart", return_value={
         "title": "Title", "artist": "Artist", "album": "Album", "genre": "Genre"
     })
-    mocker.patch("domain.services.ingestion_domain_service.analyze_track_file", return_value={})
+    mocker.patch("domain.services.ingestion_domain_service.analyze_track_file", return_value={
+        "filepath": str(mp3_path), "title": "Title", "artist": "Artist",
+        "duration": 60, "bpm": 120, "embedding": [0.1] * 200,
+    })
     mocker.patch("domain.services.ingestion_domain_service.has_valid_metadata", return_value=True)
     
     service = IngestionDomainService()
@@ -67,7 +70,11 @@ async def test_process_track_ingestion_lyrics_priority(tmp_path, mocker):
     mocker.patch("domain.services.ingestion_domain_service.analyze_track_file", return_value={
         "lyrics": "Embedded Lyrics",
         "title": "Title",
-        "artist": "Artist"
+        "artist": "Artist",
+        "filepath": str(mp3_path),
+        "duration": 60,
+        "bpm": 120,
+        "embedding": [0.1] * 200,
     })
     
     service = IngestionDomainService()
@@ -108,6 +115,8 @@ async def test_process_track_ingestion_embedded_lyrics_fallback(tmp_path, mocker
         "title": "Title",
         "artist": "Artist",
         "bpm": 120,
+        "duration": 60,
+        "embedding": [0.1] * 200,
         "filepath": str(mp3_path)
     })
     

@@ -3,7 +3,6 @@ import os
 import multiprocessing
 from domain.services.analysis.process_runner import AnalysisExecutor
 from typing import List, Dict, Any, Optional
-from fastapi import WebSocket
 from sqlmodel import Session, select
 from config import settings
 from domain.models.track import Track, TrackEmbedding
@@ -11,6 +10,7 @@ from domain.services.ingestion_domain_service import IngestionDomainService
 from infra.repositories.ingestion_repository import IngestionRepository
 from utils.ingestion import expand_targets, filter_and_prioritize_files
 from app.services.background_task_service import BackgroundTaskService
+from app.services.analysis_coordinator import analysis_coordinator
 import sys
 import time
 
@@ -30,7 +30,10 @@ def worker_init():
     except (ValueError, AttributeError, OSError):
         sys.stderr = open(os.devnull, 'w')
 
-ANALYSIS_TIMEOUT = 600.0
+# Windows decoder/native hangs must become visible failures in a useful amount
+# of time. Keep the established macOS allowance unchanged.
+ANALYSIS_TIMEOUT = 180.0 if sys.platform == "win32" else 600.0
+WORKER_TIMEOUT = 165.0 if sys.platform == "win32" else 570.0
 
 class IngestionAppService(BackgroundTaskService):
     def __init__(self):
@@ -44,26 +47,53 @@ class IngestionAppService(BackgroundTaskService):
         self.repository = IngestionRepository()
 
     async def start_ingestion(self, targets: List[str], force_update: bool = False) -> bool:
-        return await self.start_task(self._run_ingestion(targets, force_update))
+        token = analysis_coordinator.acquire("Explorer解析")
+        if token is None:
+            return False
+
+        async def run_with_token():
+            try:
+                await self._run_ingestion(targets, force_update)
+            finally:
+                analysis_coordinator.release(token)
+
+        started = await self.start_task(run_with_token())
+        if not started:
+            analysis_coordinator.release(token)
+            return False
+        return True
 
     async def cancel_ingestion(self):
         await self.cancel_task()
 
     async def _run_ingestion(self, targets: List[str], force_update: bool):
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(3)
+                await self.emit_state()
+
+        pulse = asyncio.create_task(heartbeat())
         try:
             # Notify start immediately to show loading state
             self.update_state(
                 type="start",
                 total=0,
                 current=0,
+                file="",
                 processed=0,
                 skipped=0,
-                errors=0
+                errors=0,
+                stage="音源ファイルを検索中",
+                active_files={},
+                failed_files=[],
+                last_error=""
             )
             await self.emit_state()
 
-            expanded_files = expand_targets(targets)
-            files_to_process, _ = filter_and_prioritize_files(expanded_files, force_update)
+            expanded_files = await asyncio.to_thread(expand_targets, targets)
+            self.update_state(stage="解析が必要な音源を確認中")
+            await self.emit_state()
+            files_to_process, _ = await asyncio.to_thread(filter_and_prioritize_files, expanded_files, force_update)
             
             total_files = len(files_to_process)
             if total_files == 0:
@@ -80,7 +110,8 @@ class IngestionAppService(BackgroundTaskService):
                 skipped=0,
                 errors=0,
                 start_time=time.time(),
-                estimated_remaining=0
+                estimated_remaining=0,
+                stage="音源を解析中"
             )
             await self.emit_state()
 
@@ -96,12 +127,14 @@ class IngestionAppService(BackgroundTaskService):
                     current_count = self.state["processed"] + self.state["skipped"] + self.state["errors"] + 1
                     self.update_state(
                         file=os.path.basename(filepath),
-                        current=current_count
+                        current=current_count,
+                        type="processing"
                     )
+                    self.state["details"]["active_files"][filepath] = time.time()
                     await self.emit_state()
 
                     try:
-                        result = await self.domain_service.process_track_ingestion(
+                        result = await asyncio.wait_for(self.domain_service.process_track_ingestion(
                             filepath, 
                             force_update, 
                             loop, 
@@ -109,7 +142,7 @@ class IngestionAppService(BackgroundTaskService):
                             ANALYSIS_TIMEOUT, 
                             self.db_lock, 
                             save_to_db=True
-                        )
+                        ), timeout=ANALYSIS_TIMEOUT + 30)
                         
                         if result:
                             self.state["processed"] += 1
@@ -119,12 +152,18 @@ class IngestionAppService(BackgroundTaskService):
                     except Exception as e:
                         print(f"ERROR: Ingestion failed for {filepath}: {e}")
                         self.state["errors"] += 1
+                        self.state["details"]["failed_files"].append(filepath)
+                        self.update_state(last_error=f"{os.path.basename(filepath)}: {type(e).__name__}: {e}")
+                    finally:
+                        self.state["details"]["active_files"].pop(filepath, None)
                     
                     # Update progress estimation
-                    self.update_state() # Recalculate ETA
+                    self.update_state(type="progress", processed=self.state["processed"],
+                                      current=self.state["processed"] + self.state["skipped"] + self.state["errors"])
                     await self.emit_state()
 
-            with AnalysisExecutor(max_workers=max_workers) as executor:
+            executor = AnalysisExecutor(max_workers=max_workers, task_timeout=WORKER_TIMEOUT)
+            try:
                 self.executor = executor
                 
                 # Create tasks for all files
@@ -136,7 +175,10 @@ class IngestionAppService(BackgroundTaskService):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    print(f"Error in batch processing: {e}")
+                    raise
+            finally:
+                # Waiting for a native worker must not freeze HTTP/WebSocket.
+                await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
 
             self.update_state(type="complete", file="")
             await self.emit_state()
@@ -150,6 +192,8 @@ class IngestionAppService(BackgroundTaskService):
             self.update_state(type="error", message=str(e))
             await self.emit_state()
         finally:
+            pulse.cancel()
+            await asyncio.gather(pulse, return_exceptions=True)
             self.executor = None
 
 # Global Instance

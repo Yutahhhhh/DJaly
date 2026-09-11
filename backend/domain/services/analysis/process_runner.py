@@ -4,6 +4,7 @@ import time
 import os
 import sys
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -16,7 +17,7 @@ def _worker(send, function, args):
         send.close()
 
 
-def run_isolated(function, args=(), timeout=600):
+def run_isolated(function, args=(), timeout=600, cancel_event=None):
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
     process = context.Process(target=_worker, args=(send, function, args), daemon=True)
@@ -25,6 +26,8 @@ def run_isolated(function, args=(), timeout=600):
         send.close()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("Analysis cancelled")
             if receive.poll(min(.1, max(0, deadline - time.monotonic()))):
                 try:
                     ok, result = receive.recv()
@@ -62,7 +65,17 @@ def run_isolated(function, args=(), timeout=600):
 
 class AnalysisExecutor(ThreadPoolExecutor):
     """A stuck native call cannot occupy a pool slot indefinitely."""
+    def __init__(self, *args, task_timeout=570, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.task_timeout = task_timeout
+        self._cancel_event = threading.Event()
+
     def submit(self, fn, /, *args, **kwargs):
         if kwargs:
             raise TypeError("Analysis workers accept positional arguments only")
-        return super().submit(run_isolated, fn, args, 570)
+        return super().submit(run_isolated, fn, args, self.task_timeout, self._cancel_event)
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        if cancel_futures:
+            self._cancel_event.set()
+        return super().shutdown(wait=wait, cancel_futures=cancel_futures)

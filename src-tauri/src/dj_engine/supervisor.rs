@@ -191,7 +191,7 @@ impl EngineSupervisor {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        command.env("PLUMDECK_WAVEFORM_CACHE", crate::waveform::cache_root()?);
+        command.env("PLUMDECK_WAVEFORM_CACHE", crate::waveform::cache_root(app)?);
         command
             .arg(format!("--tick-ms={TICK_MS}"))
             .stdin(Stdio::piped())
