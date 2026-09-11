@@ -30,6 +30,11 @@ export function coordinatorCanSelect(state: RosterVisualState): boolean {
   return state === 'ready' || state === 'requested';
 }
 
+/** Only the coordinator withdraws a pending (not yet committed) turn. */
+export function handoffCancelAvailable(state: RosterVisualState, coordinator: boolean): boolean {
+  return coordinator && state === 'next';
+}
+
 export function turnRequestAvailable(state: RosterVisualState, coordinator: boolean, self: boolean): boolean {
   return !coordinator && self && state === 'ready';
 }

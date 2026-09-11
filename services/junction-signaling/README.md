@@ -1,5 +1,7 @@
 # Junction signaling
 
+Optional development service. The default plumdeck UI connects DJs without it: the coordinator creates per-DJ invitation text, the DJ returns response text, and the coordinator imports and approves it in the roster. That invitation/response text never passes through this service. Media connections use public STUN for candidate discovery by default, and TURN only as an optional fallback when direct media fails. This service is used only when a native client explicitly requests `exchangeMode: "server"`.
+
 Node 22+: `npm ci && npm test && npm start` in this directory. Listens on `127.0.0.1:8787`; `/healthz` and `/readyz` expose health, `/` and `/ws` accept WebSockets. This service carries admission and SDP/ICE only. No media is stored or mixed.
 
 Configuration is validated by `src/config.ts`: `HOST`, `PORT`, `ROOM_TTL_SECONDS` (21600), `MAX_PEERS_PER_ROOM` (8, includes host and pending guests), `MAX_FRAME_BYTES` (65536 maximum), `MAX_CONNECTIONS` (1024), `MAX_ROOMS` (1024), `MAX_BUFFERED_BYTES` (262144), `FRAME_RATE_PER_SECOND`, `RELAY_RATE_PER_SECOND`, `JOIN_ATTEMPTS_PER_MINUTE`, `ALLOWED_ORIGINS` (comma separated; unset permits native clients), `TRUST_PROXY` (false), `LOG_LEVEL`. Enable proxy trust only behind a trusted proxy inaccessible to clients directly.

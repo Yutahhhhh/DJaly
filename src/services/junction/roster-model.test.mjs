@@ -15,6 +15,7 @@ import {
   safeAvatarDataUrl,
   stableThemeColor,
   turnRequestAvailable,
+  handoffCancelAvailable,
 } from './roster-model.ts';
 
 const participant = (peerId, overrides = {}) => ({
@@ -159,4 +160,10 @@ test('blocking readiness and serious connection reasons stay concise and visible
   assert.equal(compactReadinessReasons([]), undefined);
   assert.equal(connectionAlert(snapshot([], {connection: {state: 'interrupted', detail: '相手との通信が中断しました'}})), '相手との通信が中断しました');
   assert.equal(connectionAlert(snapshot([], {connection: {state: 'connected', detail: 'internal detail'}})), undefined);
+});
+
+test('only the coordinator can withdraw a pending next DJ, never a performer', () => {
+  assert.equal(handoffCancelAvailable('next', true), true);
+  assert.equal(handoffCancelAvailable('next', false), false);
+  for (const state of ['playing', 'finished', 'requested', 'ready', 'invited']) assert.equal(handoffCancelAvailable(state, true), false);
 });

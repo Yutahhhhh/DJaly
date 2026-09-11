@@ -100,6 +100,62 @@ def test_fast_explorer_job_releases_global_analysis_slot(monkeypatch):
     assert analysis_coordinator.owner is None
 
 
+def test_explorer_job_waits_for_play_import_instead_of_being_rejected(monkeypatch):
+    from app.services.analysis_coordinator import analysis_coordinator
+    from app.services.ingestion_app_service import IngestionAppService
+
+    service = IngestionAppService()
+    ran = []
+
+    async def record(_targets, _force_update, _analysis_profile="auto"):
+        ran.append(analysis_coordinator.owner)
+        service.update_state(type="complete")
+
+    monkeypatch.setattr(service, "_run_ingestion", record)
+    held = analysis_coordinator.acquire("Play取り込み")
+    assert held is not None
+
+    async def run():
+        assert await service.start_ingestion(["/music"], False)
+        await asyncio.sleep(0.05)
+        assert service.state["details"]["stage"] == "Play取り込みの完了を待っています"
+        assert service.state["details"]["queued"] is True
+        assert ran == []
+        analysis_coordinator.release(held)
+        await asyncio.wait_for(service.current_task, 5)
+
+    asyncio.run(run())
+    assert ran == ["Explorer解析"]
+    assert service.state["details"]["queued"] is False
+    assert analysis_coordinator.owner is None
+
+
+def test_cancelling_a_queued_explorer_job_never_takes_the_analysis_slot(monkeypatch):
+    from app.services.analysis_coordinator import analysis_coordinator
+    from app.services.ingestion_app_service import IngestionAppService
+
+    service = IngestionAppService()
+
+    async def unexpected(*_args):
+        raise AssertionError("cancelled queued job must not run")
+
+    monkeypatch.setattr(service, "_run_ingestion", unexpected)
+    held = analysis_coordinator.acquire("Play取り込み")
+
+    async def run():
+        assert await service.start_ingestion(["/music"], False)
+        await asyncio.sleep(0.05)
+        await service.cancel_ingestion()
+
+    try:
+        asyncio.run(run())
+        assert service.state["type"] == "cancelled"
+        assert analysis_coordinator.owner == "Play取り込み"
+    finally:
+        analysis_coordinator.release(held)
+    assert analysis_coordinator.owner is None
+
+
 @pytest.mark.parametrize("result,message", [
     (None, "produced no result"),
     ({"title": "Partial", "artist": "DJ", "duration": 60, "bpm": 120}, "incomplete"),

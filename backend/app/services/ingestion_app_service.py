@@ -61,18 +61,35 @@ class IngestionAppService(BackgroundTaskService):
         if analysis_profile not in {"auto", "light", "full"}:
             raise ValueError("Unknown analysis profile")
         token = analysis_coordinator.acquire("Explorer解析")
-        if token is None:
-            return False
 
         async def run_with_token():
+            nonlocal token
             try:
+                if token is None:
+                    # Queue behind a Play import (or other analysis) instead of
+                    # rejecting the request. Non-blocking polls keep cancel safe:
+                    # a cancelled wait never leaves an acquired slot behind.
+                    self.update_state(
+                        type="start", total=0, current=0, file="",
+                        processed=0, skipped=0, errors=0,
+                        stage=f"{analysis_coordinator.owner or '別の解析'}の完了を待っています",
+                        active_files={}, failed_files=[], last_error="",
+                        analysis_profile=analysis_profile, queued=True,
+                    )
+                    await self.emit_state()
+                    while token is None:
+                        await asyncio.sleep(1.0)
+                        token = analysis_coordinator.acquire("Explorer解析")
+                    self.update_state(start_time=time.time(), queued=False)
                 await self._run_ingestion(targets, force_update, analysis_profile)
             finally:
-                analysis_coordinator.release(token)
+                if token is not None:
+                    analysis_coordinator.release(token)
 
         started = await self.start_task(run_with_token())
         if not started:
-            analysis_coordinator.release(token)
+            if token is not None:
+                analysis_coordinator.release(token)
             return False
         return True
 
@@ -101,6 +118,7 @@ class IngestionAppService(BackgroundTaskService):
                 active_files={},
                 failed_files=[],
                 last_error="",
+                queued=False,
                 analysis_profile=analysis_profile,
                 effective_analysis_profile=(
                     "full" if sys.platform != "win32" or analysis_profile == "auto"

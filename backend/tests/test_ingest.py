@@ -15,7 +15,7 @@ async def test_ingest_start(client: TestClient, mocker):
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     
-    mock_start.assert_called_once_with(["/music"], False)
+    mock_start.assert_called_once_with(["/music"], False, "auto")
 
 @pytest.mark.asyncio
 async def test_ingest_already_running(client: TestClient, mocker):
