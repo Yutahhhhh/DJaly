@@ -32,8 +32,18 @@ def worker_init():
 
 # Windows decoder/native hangs must become visible failures in a useful amount
 # of time. Keep the established macOS allowance unchanged.
-ANALYSIS_TIMEOUT = 180.0 if sys.platform == "win32" else 600.0
 WORKER_TIMEOUT = 165.0 if sys.platform == "win32" else 570.0
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, TimeoutError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return "timed out" in str(exc).lower()
 
 class IngestionAppService(BackgroundTaskService):
     def __init__(self):
@@ -46,14 +56,17 @@ class IngestionAppService(BackgroundTaskService):
         self.domain_service = IngestionDomainService()
         self.repository = IngestionRepository()
 
-    async def start_ingestion(self, targets: List[str], force_update: bool = False) -> bool:
+    async def start_ingestion(self, targets: List[str], force_update: bool = False,
+                              analysis_profile: str = "auto") -> bool:
+        if analysis_profile not in {"auto", "light", "full"}:
+            raise ValueError("Unknown analysis profile")
         token = analysis_coordinator.acquire("Explorer解析")
         if token is None:
             return False
 
         async def run_with_token():
             try:
-                await self._run_ingestion(targets, force_update)
+                await self._run_ingestion(targets, force_update, analysis_profile)
             finally:
                 analysis_coordinator.release(token)
 
@@ -66,7 +79,8 @@ class IngestionAppService(BackgroundTaskService):
     async def cancel_ingestion(self):
         await self.cancel_task()
 
-    async def _run_ingestion(self, targets: List[str], force_update: bool):
+    async def _run_ingestion(self, targets: List[str], force_update: bool,
+                             analysis_profile: str = "auto"):
         async def heartbeat():
             while True:
                 await asyncio.sleep(3)
@@ -86,14 +100,25 @@ class IngestionAppService(BackgroundTaskService):
                 stage="音源ファイルを検索中",
                 active_files={},
                 failed_files=[],
-                last_error=""
+                last_error="",
+                analysis_profile=analysis_profile,
+                effective_analysis_profile=(
+                    "full" if sys.platform != "win32" or analysis_profile == "auto"
+                    else analysis_profile
+                ),
             )
             await self.emit_state()
 
             expanded_files = await asyncio.to_thread(expand_targets, targets)
             self.update_state(stage="解析が必要な音源を確認中")
             await self.emit_state()
-            files_to_process, _ = await asyncio.to_thread(filter_and_prioritize_files, expanded_files, force_update)
+            filter_profile = (
+                "full" if sys.platform != "win32" or analysis_profile == "full"
+                else analysis_profile
+            )
+            files_to_process, _ = await asyncio.to_thread(
+                filter_and_prioritize_files, expanded_files, force_update, filter_profile
+            )
             
             total_files = len(files_to_process)
             if total_files == 0:
@@ -117,11 +142,16 @@ class IngestionAppService(BackgroundTaskService):
 
             max_workers = 1 if sys.platform == "win32" else min(4, max(1, multiprocessing.cpu_count() - 1))
             loop = asyncio.get_running_loop()
+            effective_profile = (
+                "full" if sys.platform != "win32" or analysis_profile == "auto"
+                else analysis_profile
+            )
             
             # Concurrency control
             sem = asyncio.Semaphore(max_workers)
 
             async def process_single_file(filepath: str):
+                nonlocal effective_profile
                 async with sem:
                     # Update UI state (Best effort)
                     current_count = self.state["processed"] + self.state["skipped"] + self.state["errors"] + 1
@@ -134,15 +164,34 @@ class IngestionAppService(BackgroundTaskService):
                     await self.emit_state()
 
                     try:
-                        result = await asyncio.wait_for(self.domain_service.process_track_ingestion(
-                            filepath, 
-                            force_update, 
-                            loop, 
-                            executor, 
-                            ANALYSIS_TIMEOUT, 
-                            self.db_lock, 
-                            save_to_db=True
-                        ), timeout=ANALYSIS_TIMEOUT + 30)
+                        async def analyze(profile: str):
+                            timeout = 600.0 if profile == "full" else 210.0
+                            return await asyncio.wait_for(
+                                self.domain_service.process_track_ingestion(
+                                    filepath, force_update, loop, executor, timeout,
+                                    self.db_lock, save_to_db=True,
+                                    analysis_profile=profile,
+                                ),
+                                timeout=timeout + 30,
+                            )
+
+                        try:
+                            result = await analyze(effective_profile)
+                        except Exception as exc:
+                            if not (
+                                sys.platform == "win32"
+                                and analysis_profile == "auto"
+                                and effective_profile == "full"
+                                and _is_timeout(exc)
+                            ):
+                                raise
+                            effective_profile = "light"
+                            self.update_state(
+                                stage="詳細解析に時間がかかったため軽量解析へ切り替えています",
+                                effective_analysis_profile="light",
+                            )
+                            await self.emit_state()
+                            result = await analyze("light")
                         
                         if result:
                             self.state["processed"] += 1
@@ -162,7 +211,8 @@ class IngestionAppService(BackgroundTaskService):
                                       current=self.state["processed"] + self.state["skipped"] + self.state["errors"])
                     await self.emit_state()
 
-            executor = AnalysisExecutor(max_workers=max_workers, task_timeout=WORKER_TIMEOUT)
+            worker_timeout = 570.0 if analysis_profile == "full" else WORKER_TIMEOUT
+            executor = AnalysisExecutor(max_workers=max_workers, task_timeout=worker_timeout)
             try:
                 self.executor = executor
                 

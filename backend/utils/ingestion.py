@@ -32,20 +32,46 @@ def has_valid_embedding(embedding: Any) -> bool:
         return False
 
 
-def has_completed_analysis(track: Any, embedding: Any) -> bool:
-    """The single definition used by filtering, Explorer badges and imports."""
+def _has_playable_core(track: Any) -> bool:
     return bool(
         track
         and isinstance(getattr(track, "bpm", None), (int, float))
         and not isinstance(track.bpm, bool)
         and track.bpm > 0
-        and has_valid_embedding(embedding)
+        and isinstance(getattr(track, "duration", None), (int, float))
+        and not isinstance(track.duration, bool)
+        and math.isfinite(track.duration)
+        and track.duration > 0
         and has_valid_metadata(track)
     )
 
 
+def has_full_analysis(track: Any, embedding: Any) -> bool:
+    """Detailed analysis is never inferred from placeholder vectors."""
+    return (
+        _has_playable_core(track)
+        and getattr(track, "analysis_level", None) != "light"
+        and has_valid_embedding(embedding)
+    )
+
+
+def has_completed_analysis(track: Any, embedding: Any) -> bool:
+    """The single definition used by filtering, Explorer badges and imports."""
+    return _has_playable_core(track) and (
+        getattr(track, "analysis_level", None) == "light"
+        or has_valid_embedding(embedding)
+    )
+
+
+def has_completed_analysis_for_profile(track: Any, embedding: Any, profile: str) -> bool:
+    """A detailed request upgrades light tracks instead of silently reusing them."""
+    if profile == "full":
+        return has_full_analysis(track, embedding)
+    return has_completed_analysis(track, embedding)
+
+
 def has_completed_analysis_result(result: Dict[str, Any], existing_embedding: Any = None) -> bool:
-    """Validate a fresh full-analysis result before it is reported or saved."""
+    """Validate a fresh light or full result before it is reported or saved."""
     bpm = result.get("bpm")
     duration = result.get("duration")
     embedding = result.get("embedding", existing_embedding)
@@ -53,7 +79,7 @@ def has_completed_analysis_result(result: Dict[str, Any], existing_embedding: An
     return bool(
         isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and math.isfinite(bpm) and bpm > 0
         and isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0
-        and has_valid_embedding(embedding)
+        and (result.get("analysis_level") == "light" or has_valid_embedding(embedding))
         and has_valid_metadata(metadata)
     )
 
@@ -86,7 +112,8 @@ def expand_targets(targets: List[str]) -> List[str]:
             all_files.extend(files)
     return all_files
 
-def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple[List[str], int]:
+def filter_and_prioritize_files(targets: List[str], force_update: bool,
+                                analysis_profile: str = "auto") -> tuple[List[str], int]:
     """
     ターゲットファイルリストを展開し、DBの状態に基づいてフィルタリングと優先順位付けを行う。
     """
@@ -126,7 +153,7 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
                 lrc_path = os.path.splitext(fp)[0] + ".lrc"
                 has_lrc_file = os.path.exists(lrc_path)
                 
-                if has_completed_analysis(existing_track, embedding):
+                if has_completed_analysis_for_profile(existing_track, embedding, analysis_profile):
                     # .lrcファイルがある場合、内容が変更されている可能性があるため処理する
                     # （実際の差分チェックはingestion_domain_serviceで行われる）
                     if has_lrc_file:
@@ -145,7 +172,7 @@ def filter_and_prioritize_files(targets: List[str], force_update: bool) -> tuple
         norm_fp = normalize_path(filepath)
         track = track_map.get(norm_fp)
         if track:
-            if not has_completed_analysis(track, embedding_map.get(track.id)):
+            if not has_completed_analysis_for_profile(track, embedding_map.get(track.id), analysis_profile):
                 return 0 # 高優先
             return 1 # メタデータ更新のみ等
         return 1 # 完全な新規ファイル

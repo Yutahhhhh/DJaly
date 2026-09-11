@@ -1,4 +1,5 @@
 import { apiClient } from "./api-client";
+import { currentAnalysisProfile, type AnalysisProfile } from "./analysis-profile";
 
 export type RepairItem = {
   track_id: number; title?: string; artist?: string; old_path: string;
@@ -11,7 +12,7 @@ export type AudioPreset = { id: string; name: string; config: Record<string, unk
 export type ControllerProfile = { id: string; name: string; adapterId: "generic-midi" | "ddj400" | "ddj1000"; bindings: Array<Record<string, unknown>>; builtIn?: boolean; revision?: number; [key: string]: unknown };
 export type UsbExport = { id: string; setlist_id: number; state: string; handoff_path: string; snapshot_hash: string; stale?: boolean; verification_json?: string; limitations?: string[] };
 export type UsbDevice = { id: string; label: string; mount_path: string; filesystem?: string; capacity_bytes?: number; free_bytes?: number; read_only: boolean; connected: boolean };
-export type ImportBatch = { id: string; request_id: string; state: string; total_items: number; succeeded_items: number; failed_items: number; skipped_items: number; queued_items?: number; current_file?: string | null; target_name_snapshot?: string; target_kind: string; target_id?: number; created_at?: string; updated_at?: string; items?: Array<Record<string, unknown>> };
+export type ImportBatch = { id: string; request_id: string; state: string; analysis_profile?: AnalysisProfile; effective_analysis_profile?: "light" | "full" | null; total_items: number; succeeded_items: number; failed_items: number; skipped_items: number; queued_items?: number; current_file?: string | null; target_name_snapshot?: string; target_kind: string; target_id?: number; created_at?: string; updated_at?: string; items?: Array<Record<string, unknown>> };
 export type TimelineSegment = { id?: number; track_id?: number | null; deck?: string | null; start_ms: number; end_ms?: number | null; title_snapshot?: string; artist_snapshot?: string; version_snapshot?: string | null; source?: string };
 
 export const workflowsService = {
@@ -37,7 +38,18 @@ export const workflowsService = {
   usbHandoffs: () => apiClient.get<UsbExport[]>("/workflows/usb/handoffs"),
   duplicateUsbHandoff: (id: string, usbDeviceId?: string) => apiClient.post<UsbExport>(`/workflows/usb/handoffs/${id}/duplicate`, { usb_device_id: usbDeviceId }),
   verifyUsbHandoff: (id: string, evidence: Record<string, unknown>) => apiClient.post(`/workflows/usb/handoffs/${id}/verify`, evidence),
-  createImport: (paths: string[], target: { kind: "collection" | "local_playlist"; id?: number }, origin: "native_file_drop" | "file_picker" = "file_picker") => apiClient.post<ImportBatch>("/workflows/play/imports", { request_id: crypto.randomUUID(), paths, target, origin }, 30 * 60_000),
+  createImport: (
+    paths: string[],
+    target: { kind: "collection" | "local_playlist"; id?: number },
+    origin: "native_file_drop" | "file_picker" = "file_picker",
+    analysisProfile: AnalysisProfile = currentAnalysisProfile(),
+  ) => apiClient.post<ImportBatch>("/workflows/play/imports", {
+    request_id: crypto.randomUUID(),
+    paths,
+    target,
+    origin,
+    analysis_profile: analysisProfile,
+  }, 30 * 60_000),
   imports: (active = false) => apiClient.get<ImportBatch[]>("/workflows/play/imports", { active }, 5000),
   importStatus: (id: string) => apiClient.get<ImportBatch>(`/workflows/play/imports/${id}`),
   controlImport: (id: string, action: "pause" | "resume" | "cancel" | "retry") => apiClient.post<ImportBatch>(`/workflows/play/imports/${id}/${action}`, {}),

@@ -3,4 +3,5 @@ export interface FileItem {
   path: string;
   is_dir: boolean;
   is_analyzed?: boolean;
+  analysis_level?: "light" | "full" | null;
 }

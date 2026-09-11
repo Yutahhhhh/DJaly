@@ -14,6 +14,9 @@ from . import constants
 from utils.executables import find_ffmpeg
 
 
+LIGHT_ANALYSIS_SECONDS = 90
+
+
 def musicnn_bands(audio: np.ndarray) -> np.ndarray:
     import librosa
     # Essentia TensorflowInputMusiCNN: centered 512-sample symmetric Hann,
@@ -57,6 +60,146 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         if not audio.size or not np.isfinite(audio).all():
             raise ValueError("Audio is empty or contains non-finite samples")
         return audio
+
+    def _load_audio_segment(self, filepath, start_seconds=0.0, duration_seconds=LIGHT_ANALYSIS_SECONDS):
+        """Decode only a representative window for latency-bounded analysis.
+
+        Placing ``-ss`` before the input lets FFmpeg seek without decoding the
+        preceding audio.  This is deliberately separate from ``_load_audio``:
+        detailed analysis keeps its existing whole-track behaviour.
+        """
+        converter = find_ffmpeg()
+        if not converter:
+            raise RuntimeError("同梱の音声デコーダーが見つかりません")
+        command = [converter, "-nostdin", "-v", "error", "-threads", "1"]
+        if start_seconds > 0:
+            command.extend(["-ss", f"{start_seconds:.3f}"])
+        command.extend([
+            "-i", str(filepath), "-t", str(duration_seconds), "-vn", "-ac", "1",
+            "-ar", str(constants.SAMPLE_RATE), "-f", "f32le", "pipe:1",
+        ])
+        decoded = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+            check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if decoded.returncode:
+            raise RuntimeError(
+                "音声をデコードできません: "
+                + decoded.stderr.decode("utf-8", errors="replace")[-2000:]
+            )
+        audio = np.frombuffer(decoded.stdout, dtype="<f4").copy()
+        maximum = int(duration_seconds * constants.SAMPLE_RATE)
+        if audio.size > maximum:
+            audio = audio[:maximum]
+        if not audio.size or not np.isfinite(audio).all():
+            raise ValueError("Audio is empty or contains non-finite samples")
+        return audio
+
+    def _extract_light_features(self, audio):
+        """Return inexpensive, finite descriptors from a bounded audio window."""
+        rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
+        loudness = float(20 * np.log10(max(rms, 1e-7)))
+        if len(audio) > 1:
+            noisiness = float(np.mean(np.signbit(audio[1:]) != np.signbit(audio[:-1])))
+        else:
+            noisiness = 0.0
+
+        # A short FFT slice is enough for an approximate brightness/rolloff
+        # indicator and avoids constructing a full-track STFT matrix.
+        fft_samples = min(len(audio), constants.SAMPLE_RATE * 10)
+        sample = audio[(len(audio) - fft_samples) // 2:][:fft_samples]
+        frame_size, hop = 2048, 1024
+        if len(sample) < frame_size:
+            sample = np.pad(sample, (0, frame_size - len(sample)))
+        frames = np.lib.stride_tricks.sliding_window_view(sample, frame_size)[::hop]
+        spectra = np.abs(np.fft.rfft(frames * np.hanning(frame_size), axis=1))
+        spectrum = np.mean(spectra, axis=0)
+        frequencies = np.fft.rfftfreq(frame_size, 1 / constants.SAMPLE_RATE)
+        total = float(np.sum(spectrum))
+        brightness = float(np.dot(spectrum, frequencies) / total) if total > 0 else 0.0
+        if total > 0:
+            rolloff_index = int(np.searchsorted(np.cumsum(spectrum), total * .85))
+            rolloff = float(frequencies[min(rolloff_index, len(frequencies) - 1)])
+        else:
+            rolloff = 0.0
+
+        frame_rms = np.sqrt(np.mean(np.square(frames, dtype=np.float64), axis=1))
+        frame_db = 20 * np.log10(np.maximum(frame_rms, 1e-7))
+        active_db = frame_db[frame_db > max(-70, float(np.max(frame_db)) - 20)]
+        loudness_range = float(np.percentile(active_db, 95) - np.percentile(active_db, 10)) if active_db.size else 0.0
+        normalized_spectra = spectra / np.maximum(np.sum(spectra, axis=1, keepdims=True), 1e-8)
+        flux = float(np.median(np.sqrt(np.sum(np.diff(normalized_spectra, axis=0) ** 2, axis=1)))) if len(normalized_spectra) > 1 else 0.0
+        contrast = float(np.clip((flux / constants.NORM_FLUX[1]
+                                  + loudness_range / constants.NORM_LOUDNESS_RANGE[1]) / 2, 0, 1))
+        return {
+            "energy": float(np.clip(rms / constants.NORM_ENERGY[1], 0, 1)),
+            "brightness": float(np.clip(
+                (brightness - constants.NORM_BRIGHTNESS[0])
+                / (constants.NORM_BRIGHTNESS[1] - constants.NORM_BRIGHTNESS[0]), 0, 1,
+            )),
+            "noisiness": float(np.clip(noisiness / constants.NORM_NOISINESS[1], 0, 1)),
+            "loudness": round(loudness, 1),
+            "loudness_range": loudness_range,
+            "spectral_flux": flux,
+            "spectral_rolloff": rolloff,
+            "contrast": contrast,
+        }
+
+    def analyze_light(self, filepath, external_lyrics=None):
+        """Windows speed-first analysis without full decode or MusiCNN."""
+        tag = self._extract_metadata(filepath)
+        duration = float(getattr(tag, "duration", 0) or 0)
+        start = max(0.0, (duration - LIGHT_ANALYSIS_SECONDS) / 2) if duration else 0.0
+        audio = self._load_audio_segment(filepath, start, LIGHT_ANALYSIS_SECONDS)
+        bpm, _ticks, confidence, _, _ = self._rhythm(audio)
+        key, scale, key_strength = self._key(audio)
+        if not np.isfinite(bpm) or bpm <= 0:
+            raise ValueError("軽量解析でBPMを取得できませんでした")
+
+        extra = {
+            "analysis_level": "light",
+            "analysis_profile": "light",
+            "analysis_window_start_seconds": round(start, 3),
+            "analysis_window_seconds": round(len(audio) / constants.SAMPLE_RATE, 3),
+            "analysis_components": {
+                "rhythm": "librosa-rhythm-light-v1",
+                "key": "librosa-key-light-v1",
+                "timbre": "bounded-summary-v1",
+            },
+            "bpm_confidence": round(float(confidence), 2),
+            "key_strength": round(float(key_strength), 2),
+            # Beat timestamps from a middle excerpt are not a valid whole-track
+            # playback grid.  Keep the estimate explicit instead of faking one.
+            "playback_grid_estimated": True,
+        }
+        metadata = tag
+        result = {
+            "filepath": str(filepath),
+            "title": ((getattr(metadata, "title", None) or "").strip()
+                      or Path(filepath).stem),
+            "artist": (getattr(metadata, "artist", None) or "Unknown").strip(),
+            "album": (getattr(metadata, "album", None) or "Unknown").strip(),
+            "genre": (getattr(metadata, "genre", None) or "Unknown").strip(),
+            "year": None,
+            "lyrics": external_lyrics or (
+                metadata.extra.get("lyrics") if metadata and hasattr(metadata, "extra") else None
+            ),
+            "duration": duration,
+            "bpm": round(float(bpm), 2),
+            "key": f"{key} {scale}",
+            "scale": scale,
+            # A bounded beat-stability estimate is safer than storing an
+            # unknown value as the genuine minimum of the feature.
+            "danceability": float(np.clip(confidence, 0, 1)),
+            "analysis_level": "light",
+            "features_extra": extra,
+            **self._extract_light_features(audio),
+        }
+        raw_year = getattr(metadata, "year", None)
+        year_prefix = str(raw_year).strip()[:4] if raw_year else ""
+        if year_prefix.isdigit():
+            result["year"] = int(year_prefix)
+        return result
 
     def _rhythm(self, audio):
         y = self.librosa.resample(audio, orig_sr=constants.SAMPLE_RATE, target_sr=22050)

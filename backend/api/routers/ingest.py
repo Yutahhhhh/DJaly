@@ -48,7 +48,9 @@ async def ingest_files(req: IngestRequest):
         return {"status": "error", "message": "Ingestion already running"}
     
     # バックグラウンドタスク開始
-    success = await ingestion_manager.start_ingestion(req.targets, req.force_update)
+    success = await ingestion_manager.start_ingestion(
+        req.targets, req.force_update, req.analysis_profile
+    )
     
     if success:
         return {

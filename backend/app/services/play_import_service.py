@@ -14,7 +14,10 @@ from sqlmodel import Session, select
 
 from domain.constants import SUPPORTED_EXTENSIONS
 from domain.models.track import Track, TrackEmbedding
-from utils.ingestion import has_completed_analysis, has_completed_analysis_result
+from utils.ingestion import (
+    has_completed_analysis_for_profile,
+    has_completed_analysis_result,
+)
 from app.services.analysis_coordinator import analysis_coordinator
 from infra.repositories.ingestion_repository import IngestionRepository
 from infra.repositories.setlist_repository import SetlistRepository
@@ -31,6 +34,16 @@ def _sha(path: Path) -> str:
         while chunk := source.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _exception_chain(exc: BaseException):
+    """Yield wrapped errors without trusting translated message text alone."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
 
 
 def _expand(paths: list[str]) -> list[Path]:
@@ -69,12 +82,15 @@ class PlayImportService:
         self.session = session
 
     def create(self, request_id: str, target_kind: str, target_id: int | None,
-               paths: list[str], origin: str = "native_file_drop") -> dict[str, Any]:
+               paths: list[str], origin: str = "native_file_drop",
+               analysis_profile: str = "auto") -> dict[str, Any]:
         duplicate = self.session.exec(text("SELECT id FROM import_batches WHERE request_id=:id"), params={"id": request_id}).first()
         if duplicate:
             return self.get(str(duplicate[0]))
         if target_kind not in {"collection", "local_playlist"}:
             raise ValueError("この場所には音源を取り込めません")
+        if analysis_profile not in {"auto", "light", "full"}:
+            raise ValueError("解析方法が不正です")
         target_name = "Collection"
         if target_kind == "local_playlist":
             target = self.session.exec(text("SELECT name FROM setlists WHERE id=:id"), params={"id": target_id}).first()
@@ -86,10 +102,12 @@ class PlayImportService:
             raise ValueError("対応する読み取り可能な音源がありません")
         batch_id = f"import-{uuid.uuid4()}"
         self.session.exec(text("""
-            INSERT INTO import_batches (id,request_id,target_kind,target_id,target_name_snapshot,origin,state)
-            VALUES (:id,:request,:kind,:target,:name,:origin,'queued')
+            INSERT INTO import_batches
+              (id,request_id,target_kind,target_id,target_name_snapshot,origin,analysis_profile,state)
+            VALUES (:id,:request,:kind,:target,:name,:origin,:profile,'queued')
         """), params={"id": batch_id, "request": request_id, "kind": target_kind,
-                        "target": target_id, "name": target_name, "origin": origin})
+                        "target": target_id, "name": target_name, "origin": origin,
+                        "profile": analysis_profile})
         for index, path in enumerate(expanded):
             item_id = f"item-{uuid.uuid4()}"
             stat = path.stat()
@@ -147,7 +165,7 @@ class PlayImportService:
             self.session.exec(text("UPDATE import_batches SET cancel_requested=true,state='canceled',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
             self.session.exec(text("UPDATE import_target_intents SET state='cancelled' WHERE batch_id=:id AND state='pending'"), params={"id": batch_id})
         else:
-            self.session.exec(text("UPDATE import_items SET state='queued',error_code=NULL,error_message=NULL WHERE batch_id=:id AND state IN ('failed','probing','analyzing')"), params={"id": batch_id})
+            self.session.exec(text("UPDATE import_items SET state='queued',analysis_level=NULL,error_code=NULL,error_message=NULL WHERE batch_id=:id AND state IN ('failed','probing','analyzing')"), params={"id": batch_id})
             self.session.exec(text("UPDATE import_target_intents SET state='pending' WHERE batch_id=:id AND state='cancelled'"), params={"id": batch_id})
             self.session.exec(text("UPDATE import_batches SET paused=false,cancel_requested=false,state='queued',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
         self.session.commit()
@@ -168,7 +186,7 @@ def process_batch(batch_id: str) -> None:
             with db_connection.database_activity, Session(db_connection.engine) as session:
                 message = f"{type(exc).__name__}: {exc}"[:1000]
                 session.exec(text("""
-                    UPDATE import_items SET state='failed',error_code='batch_failed',error_message=:error
+                    UPDATE import_items SET state='failed',analysis_level='failed',error_code='batch_failed',error_message=:error
                     WHERE batch_id=:id AND state IN ('queued','probing','analyzing')
                 """), params={"id": batch_id, "error": message})
                 session.exec(text("""
@@ -193,6 +211,27 @@ def _process_batch(batch_id: str) -> None:
             return
         if batch["cancel_requested"] or batch["paused"]:
             return
+        requested_profile = batch.get("analysis_profile") or "auto"
+        effective_profile = batch.get("effective_analysis_profile")
+        if sys.platform != "win32":
+            # Keep the established macOS/Essentia path untouched.
+            effective_profile = "full"
+        elif requested_profile == "auto":
+            effective_profile = effective_profile or "full"
+        else:
+            effective_profile = requested_profile
+        # ``auto`` prefers a detailed result for new Windows imports, but an
+        # already-playable light result is still a completed automatic import.
+        # Requiring ``effective_profile`` here would retry the known-slow full
+        # path for up to 180 seconds every time that track is added again.
+        # macOS and an explicit full request continue to require full analysis.
+        reuse_profile = (
+            "full"
+            if sys.platform != "win32" or requested_profile == "full"
+            else requested_profile
+        )
+        if requested_profile == "full":
+            executor.task_timeout = 570
         session.exec(text("UPDATE import_batches SET state='processing',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
         session.commit()
         for item in batch["items"]:
@@ -216,8 +255,8 @@ def _process_batch(batch_id: str) -> None:
                     known = session.exec(text("SELECT sha256 FROM track_media WHERE track_id=:id"), params={"id": track.id}).first()
                     if known and known[0] and known[0] != identity:
                         raise ValueError("登録済み音源の内容が変化しています。参照修復または再解析を行ってください")
-                reused = bool(track and has_completed_analysis(
-                    track, existing_embedding
+                reused = bool(track and has_completed_analysis_for_profile(
+                    track, existing_embedding, reuse_profile
                 ))
                 if not track:
                     matches = _rows(session.exec(text("""
@@ -227,8 +266,8 @@ def _process_batch(batch_id: str) -> None:
                     if len(matches) == 1 and Path(matches[0]["filepath"]).is_file() and _sha(Path(matches[0]["filepath"])) == identity:
                         track = session.get(Track, matches[0]["id"])
                         existing_embedding = session.get(TrackEmbedding, track.id) if track else None
-                        reused = bool(track and has_completed_analysis(
-                            track, existing_embedding
+                        reused = bool(track and has_completed_analysis_for_profile(
+                            track, existing_embedding, reuse_profile
                         ))
                     elif len(matches) > 1:
                         raise ValueError("同じ内容の既存曲が複数あり、選択が必要です")
@@ -238,16 +277,43 @@ def _process_batch(batch_id: str) -> None:
                     from domain.services.ingestion_domain_service import IngestionDomainService
                     domain = IngestionDomainService()
 
-                    async def analyze():
+                    async def analyze(profile: str):
                         loop = asyncio.get_running_loop()
                         return await domain.process_track_ingestion(
-                            str(path), bool(track), loop, executor=executor, timeout=600,
+                            str(path), bool(track), loop, executor=executor,
+                            timeout=600 if profile == "full" else 210,
                             save_to_db=False, write_source_metadata=False,
+                            analysis_profile=profile,
                         )
 
-                    result = asyncio.run(analyze())
+                    try:
+                        result = asyncio.run(analyze(effective_profile))
+                    except Exception as exc:
+                        timed_out = any(
+                            isinstance(error, TimeoutError)
+                            for error in _exception_chain(exc)
+                        ) or "timed out" in str(exc).lower()
+                        if not (
+                            sys.platform == "win32"
+                            and requested_profile == "auto"
+                            and effective_profile == "full"
+                            and timed_out
+                        ):
+                            raise
+                        # Remember the fallback durably so the rest of this
+                        # batch (and a resumed batch) does not repeat a known
+                        # over-budget detailed analysis.
+                        effective_profile = "light"
+                        executor.task_timeout = 180
+                        session.exec(text("""
+                            UPDATE import_batches
+                            SET effective_analysis_profile='light',updated_at=CURRENT_TIMESTAMP
+                            WHERE id=:id
+                        """), params={"id": batch_id})
+                        session.commit()
+                        result = asyncio.run(analyze("light"))
                     if not result or not has_completed_analysis_result(result, existing_embedding):
-                        raise ValueError("BPM・長さ・メタデータ・埋め込みの完全な解析結果を取得できませんでした")
+                        raise ValueError("再生に必要なBPM・長さ・メタデータを取得できませんでした")
                     after = path.stat()
                     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or _sha(path) != identity:
                         raise ValueError("解析中に音源が変更されました。再試行してください")
@@ -294,14 +360,18 @@ def _process_batch(batch_id: str) -> None:
                             entry_id = SetlistRepository(session).insert_track(int(target_id), int(track.id), None, commit=False)
                             membership = "applied"
                 session.exec(text("""
-                    UPDATE import_items SET track_id=:track,state=:state,load_ready=true,error_code=NULL,error_message=NULL WHERE id=:id
-                """), params={"track": track.id, "state": "existing" if reused else "completed", "id": item["id"]})
+                    UPDATE import_items SET track_id=:track,state=:state,load_ready=true,
+                      analysis_level=:level,error_code=NULL,error_message=NULL WHERE id=:id
+                """), params={
+                    "track": track.id, "state": "existing" if reused else "completed",
+                    "level": track.analysis_level or "full", "id": item["id"],
+                })
                 session.exec(text("UPDATE import_target_intents SET state=:state,setlist_track_id=:entry WHERE item_id=:id"),
                              params={"state": membership, "entry": entry_id, "id": item["id"]})
                 session.commit()
             except Exception as exc:
                 session.rollback()
-                session.exec(text("UPDATE import_items SET state='failed',error_code='processing_failed',error_message=:error WHERE id=:id"),
+                session.exec(text("UPDATE import_items SET state='failed',analysis_level='failed',error_code='processing_failed',error_message=:error WHERE id=:id"),
                              params={"id": item["id"], "error": str(exc)[:1000]})
                 session.commit()
         failed = int(session.exec(text("SELECT count(*) FROM import_items WHERE batch_id=:id AND state='failed'"), params={"id": batch_id}).one()[0])

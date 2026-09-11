@@ -43,6 +43,7 @@ function LegacyProgressIndicator() {
     cancelIngestion,
     dismissComplete: dismissIngestComplete,
     lastError, elapsedSeconds, activeFiles, connectionError,
+    analysisProfile, effectiveAnalysisProfile,
   } = useIngestion();
 
   const {
@@ -102,7 +103,9 @@ function LegacyProgressIndicator() {
 
   const title = showIngestion ? "音源解析" : "メタデータ更新";
   const description = showIngestion
-    ? "音源特徴、BPM、埋め込みを解析しています。"
+    ? effectiveAnalysisProfile === "light"
+      ? "再生に必要なBPM、キー、基本情報を軽量解析しています。"
+      : "音源特徴、BPM、埋め込みを解析しています。"
     : "曲のメタデータを更新しています。";
 
   return (
@@ -176,6 +179,9 @@ function LegacyProgressIndicator() {
 
           <div className="space-y-6 py-4">
             {showIngestion && <div className="space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                解析方法：{effectiveAnalysisProfile === "light" ? "軽量（プレイ優先）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
+              </p>
               <p>経過 {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒 · 成功 {ingestStats.processed} · スキップ {ingestStats.skipped} · 失敗 {ingestStats.errors}</p>
               {activeFiles.map(file => <p key={file.path} className="break-all">{getFileName(file.path)} · {file.seconds}秒</p>)}
               {activeFiles.some(file => file.seconds > 120) && <p className="text-amber-600">解析に時間がかかっています。音源解析ワーカーにはタイムアウトがあり、失敗理由はここに表示されます。</p>}

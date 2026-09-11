@@ -8,7 +8,11 @@ from tinytag import TinyTag
 from ingest import analyze_track_file
 from domain.constants import SUPPORTED_EXTENSIONS
 from utils.metadata import extract_metadata_smart, check_metadata_changed, update_file_metadata, extract_full_metadata
-from utils.ingestion import has_completed_analysis, has_completed_analysis_result, has_valid_metadata
+from utils.ingestion import (
+    has_completed_analysis_for_profile,
+    has_completed_analysis_result,
+    has_valid_metadata,
+)
 import infra.database.connection as db_connection
 from domain.models.track import Track, TrackEmbedding
 from domain.models.lyrics import Lyrics
@@ -62,6 +66,7 @@ class IngestionDomainService:
         db_lock: Optional[asyncio.Lock] = None,
         save_to_db: bool = True,
         write_source_metadata: bool = True,
+        analysis_profile: str = "full",
     ) -> Optional[Dict[str, Any]]:
         """1曲のインポート処理のメインロジック。"""
         filename = os.path.basename(filepath)
@@ -114,7 +119,7 @@ class IngestionDomainService:
 
                     if not force_update:
                         is_metadata_incomplete = not has_valid_metadata(track)
-                        if not has_completed_analysis(track, embedding):
+                        if not has_completed_analysis_for_profile(track, embedding, analysis_profile):
                             if is_metadata_incomplete:
                                 try:
                                     tag_check = TinyTag.get(filepath)
@@ -154,10 +159,16 @@ class IngestionDomainService:
             return result
 
         try:
-            # analyzer expects external lyrics only when provided; skip the arg to stay compatible with tests/mocks
+            if analysis_profile not in {"light", "full"}:
+                raise ValueError(f"Unknown analysis profile: {analysis_profile}")
+            # Positional args are required by AnalysisExecutor's isolated worker.
+            # Keep the established full-profile arity for integrations and
+            # tests that wrap the legacy function.
             run_args = (filepath, force_update, skip_basic, skip_waveform)
-            if lyrics_content is not None:
+            if lyrics_content is not None or analysis_profile == "light":
                 run_args += (lyrics_content,)
+            if analysis_profile == "light":
+                run_args += (analysis_profile,)
 
             result = await asyncio.wait_for(
                 loop.run_in_executor(executor, analyze_track_file, *run_args),
@@ -186,11 +197,15 @@ class IngestionDomainService:
             missing_artist = not result.get("artist") or str(result.get("artist")).lower() == "unknown"
             if missing_artist or not result.get("title") or str(result.get("title")).lower() == "unknown":
                 meta_smart = extract_metadata_smart(filepath)
-                if missing_artist: result["artist"] = meta_smart["artist"]
+                smart_artist = meta_smart.get("artist")
+                if missing_artist and isinstance(smart_artist, str) and smart_artist.strip():
+                    result["artist"] = smart_artist
                 missing_title = not result.get("title") or str(result.get("title")).lower() == "unknown"
                 filename_title = result.get("title") in {os.path.basename(filepath), os.path.splitext(filename)[0]}
-                if missing_title or filename_title and meta_smart.get("artist") != "Unknown":
-                    result["title"] = meta_smart["title"]
+                smart_title = meta_smart.get("title")
+                smart_has_artist = isinstance(smart_artist, str) and smart_artist.lower() != "unknown"
+                if (missing_title or filename_title and smart_has_artist) and isinstance(smart_title, str) and smart_title.strip():
+                    result["title"] = smart_title
                 elif filename_title and existing_data_cache.get("title"):
                     result["title"] = existing_data_cache["title"]
 
@@ -211,8 +226,9 @@ class IngestionDomainService:
                         result[key] = db_val
 
             if not has_completed_analysis_result(result, existing_embedding):
+                requirement = "BPM, duration or metadata" if result.get("analysis_level") == "light" else "BPM, duration, metadata or embedding"
                 raise RuntimeError(
-                    f"Audio analysis returned incomplete BPM, duration, metadata or embedding for {filename}"
+                    f"Audio analysis returned incomplete {requirement} for {filename}"
                 )
             
             if save_to_db:

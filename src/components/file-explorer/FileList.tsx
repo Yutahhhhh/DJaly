@@ -74,7 +74,7 @@ const FileRow = memo(
               variant="secondary"
               className="text-[10px] h-4 px-1 shrink-0"
             >
-              Analyzed
+              {item.analysis_level === "light" ? "軽量" : "解析済み"}
             </Badge>
           )}
         </div>

@@ -83,7 +83,7 @@ class FilesystemAppService:
             
             file_paths = [item['path'] for item in items if not item['is_dir']]
             
-            analyzed_files = set()
+            analyzed_files: Dict[str, str] = {}
             if file_paths:
                 # A Track row can be created before expensive audio analysis starts
                 # (for example by Play mode's fast import).  Its mere presence does
@@ -92,11 +92,11 @@ class FilesystemAppService:
                 # and failed tracks remain visible and can be retried.
                 statement = (
                     select(Track, TrackEmbedding)
-                    .join(TrackEmbedding, Track.id == TrackEmbedding.track_id)
+                    .outerjoin(TrackEmbedding, Track.id == TrackEmbedding.track_id)
                     .where(Track.filepath.in_(file_paths), Track.bpm > 0)
                 )
                 analyzed_files = {
-                    track.filepath
+                    track.filepath: (track.analysis_level or "full")
                     for track, embedding in self.session.exec(statement).all()
                     if has_completed_analysis(track, embedding)
                 }
@@ -105,6 +105,7 @@ class FilesystemAppService:
             for item in items:
                 if not item['is_dir']:
                     item['is_analyzed'] = item['path'] in analyzed_files
+                    item['analysis_level'] = analyzed_files.get(item['path'])
                 final_result.append(item)
                 
             return final_result

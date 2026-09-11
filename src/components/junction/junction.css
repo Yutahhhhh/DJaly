@@ -42,7 +42,7 @@
   top: 40px;
   right: 0;
   bottom: 0;
-  width: min(420px, 92vw);
+  width: min(520px, 96vw);
   z-index: 70;
   display: flex;
   flex-direction: column;
@@ -75,7 +75,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
 }
+.junction-panel-body::-webkit-scrollbar { display: none; }
 
 .junction-statusbar {
   display: flex;
@@ -180,6 +183,7 @@
 .junction-btn:disabled { opacity: 0.4; cursor: default; }
 .junction-btn:focus-visible { outline: 2px solid #67e8ce; outline-offset: 2px; }
 .junction-btn-primary { border-color: #2f6f63; background: #143b36; color: #b8f3e6; }
+.junction-btn-quiet { border-color: transparent; background: transparent; color: #91a5b4; }
 .junction-btn-danger { border-color: #7f1d1d; background: #2a1416; color: #fca5a5; }
 
 .junction-peer {
@@ -201,3 +205,251 @@
 .junction-panel label, .junction-card-note { font-size: 13px; line-height: 1.65; }
 .junction-panel .junction-card-headline { font-size: 14px; line-height: 1.6; }
 @media (max-width: 1000px) { .junction-root-dim { display: inline; } .junction-root { max-width: 46vw; } }
+
+/* Goal-first session entry. */
+.junction-entry { display: grid; gap: 14px; }
+.junction-entry-lead { margin: 2px 0 0; color: #b9c7d2; font-size: 13px; }
+.junction-entry-actions { margin: 0; }
+.junction-entry-choice {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid #344353;
+  border-radius: 8px;
+  background: #0d1620;
+  color: #e1e9ef;
+  text-align: left;
+  cursor: pointer;
+}
+.junction-entry-choice:hover,
+.junction-entry-choice.is-selected { border-color: #2f8b7b; background: #102b2a; }
+.junction-entry-choice strong { font-size: 13px; }
+.junction-entry-choice span { color: #91a5b4; font-size: 11px; line-height: 1.4; }
+.junction-entry-form {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #2b3a49;
+  border-radius: 8px;
+  background: rgba(9, 16, 24, 0.52);
+}
+.junction-full-button { width: 100%; justify-content: center; }
+
+/* DJ identity is intentionally more prominent than technical connection IDs. */
+.junction-profile-editor {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid #344353;
+  border-radius: 8px;
+  background: #0d1620;
+}
+.junction-profile-editor.is-compact { margin-bottom: 8px; }
+.junction-profile-avatar,
+.junction-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.junction-profile-avatar { width: 54px; height: 54px; border-radius: 12px; }
+.junction-avatar { width: 38px; height: 38px; border-radius: 10px; }
+.junction-profile-avatar img,
+.junction-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.junction-profile-fields { min-width: 0; }
+.junction-profile-fields label { margin-top: 0; }
+.junction-profile-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.junction-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+.junction-profile-editor > .junction-card-error { grid-column: 1 / -1; }
+
+/* Compact session header and serverless invitation composer. */
+.junction-session-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #344353;
+  border-radius: 9px;
+  background: #0d1620;
+}
+.junction-session-title { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.junction-session-title > div { display: grid; min-width: 0; gap: 2px; }
+.junction-session-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.junction-session-title small { color: #91a5b4; font-size: 11px; }
+.junction-session-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 999px; background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12); }
+.junction-session-lobby { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.12); }
+.junction-session-starting { background: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12); }
+.junction-invite-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  align-items: end;
+  padding: 11px;
+  border: 1px solid #2f6f63;
+  border-radius: 9px;
+  background: #102523;
+}
+.junction-invite-composer > div { grid-column: 1 / -1; }
+.junction-invite-composer h3 { margin: 0; font-size: 13px; }
+.junction-invite-composer p { margin: 3px 0 0; color: #a9bac8; font-size: 11px; }
+.junction-invite-composer label { margin: 0; }
+.junction-invite-composer .junction-card-error { grid-column: 1 / -1; }
+.junction-lobby-guide { margin: 0; padding: 8px 10px; border-radius: 6px; background: #2b2512; color: #fde68a; font-size: 12px; }
+
+/* Ordered DJ roster. Invitation, approval, connection and handoff stay in-row. */
+.junction-roster {
+  overflow: visible;
+  border: 1px solid #344353;
+  border-radius: 10px;
+  background: #0b131c;
+}
+.junction-roster-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid #2b3a49;
+}
+.junction-roster-head h3 { margin: 0; font-size: 13px; }
+.junction-roster-head p,
+.junction-roster-head small { margin: 2px 0 0; color: #7f93a3; font-size: 10.5px; }
+.junction-roster-alert {
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid #7f1d1d;
+  background: #2a1416;
+  color: #fecaca;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.junction-roster-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.junction-roster-row {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px;
+  border-bottom: 1px solid #202e3b;
+  background: #0d1620;
+}
+.junction-roster-row:last-child { border-bottom: 0; }
+.junction-roster-row.is-dragging { z-index: 3; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.46); opacity: 0.92; }
+.junction-roster-playing { background: linear-gradient(90deg, rgba(14, 116, 144, 0.24), #0d1620 62%); }
+.junction-roster-next { background: linear-gradient(90deg, rgba(109, 40, 217, 0.22), #0d1620 62%); }
+.junction-roster-invited { border-left: 2px dashed #64748b; }
+.junction-roster-response { background: linear-gradient(90deg, rgba(180, 83, 9, 0.2), #0d1620 62%); }
+.junction-roster-disconnected,
+.junction-roster-problem { background: linear-gradient(90deg, rgba(127, 29, 29, 0.22), #0d1620 62%); }
+.junction-roster-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 26px 38px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.junction-roster-order { display: grid; place-items: center; color: #7f93a3; font-size: 11px; }
+.junction-drag-handle {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 1px;
+  align-items: center;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: #91a5b4;
+  cursor: grab;
+  touch-action: none;
+}
+.junction-drag-handle:active { cursor: grabbing; }
+.junction-roster-identity { min-width: 0; display: grid; gap: 4px; }
+.junction-roster-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.junction-roster-badges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.junction-badge,
+.junction-state { display: inline-flex; align-items: center; min-height: 17px; padding: 1px 5px; border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1.2; }
+.junction-badge { color: #a9bac8; background: #263746; }
+.junction-badge-self { color: #b8f3e6; background: #155e55; }
+.junction-state { color: #cbd5e1; background: #334155; }
+.junction-state-playing { color: #bae6fd; background: #075985; }
+.junction-state-next { color: #ddd6fe; background: #5b21b6; }
+.junction-state-ready { color: #bbf7d0; background: #166534; }
+.junction-state-requested { color: #e9d5ff; background: #7e22ce; }
+.junction-state-response { color: #fde68a; background: #92400e; }
+.junction-state-disconnected,
+.junction-state-problem { color: #fecaca; background: #991b1b; }
+.junction-quality { display: grid; grid-template-columns: repeat(3, 3px); align-items: end; gap: 2px; width: 42px; height: 32px; justify-content: center; color: #7f93a3; }
+.junction-quality i { width: 3px; border-radius: 1px; background: #354554; }
+.junction-quality i:nth-child(1) { height: 5px; }
+.junction-quality i:nth-child(2) { height: 8px; }
+.junction-quality i:nth-child(3) { height: 11px; }
+.junction-quality-good i.active { background: #34d399; }
+.junction-quality-fair i.active { background: #fbbf24; }
+.junction-quality-poor i.active { background: #fb7185; }
+.junction-quality small { grid-column: 1 / -1; width: 42px; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 8.5px; }
+.junction-roster-actions { display: flex; justify-content: flex-end; align-items: center; gap: 5px; padding-left: 72px; }
+.junction-row-primary { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.junction-row-more { position: relative; }
+.junction-row-more > summary { display: grid; place-items: center; width: 30px; height: 28px; border: 1px solid #405566; border-radius: 5px; color: #a9bac8; cursor: pointer; list-style: none; }
+.junction-row-more > summary::-webkit-details-marker { display: none; }
+.junction-row-menu {
+  position: absolute;
+  z-index: 6;
+  right: 0;
+  top: calc(100% + 4px);
+  width: min(260px, 78vw);
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #425262;
+  border-radius: 7px;
+  background: #121d28;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.52);
+}
+.junction-row-menu .junction-btn { width: 100%; text-align: left; }
+.junction-inline-exchange { margin-left: 72px; padding: 8px; border-radius: 6px; background: #101d28; }
+.junction-inline-exchange label { margin-top: 0; }
+.junction-row-note { margin: 0 0 0 72px; color: #91a5b4; font-size: 10.5px; line-height: 1.45; }
+.junction-row-warning { margin: 0 0 0 72px; color: #fde68a; font-size: 10.5px; line-height: 1.45; }
+
+.junction-settings { margin: 0; }
+.junction-settings > summary { padding: 3px 0; color: #b9c7d2; }
+.junction-settings-body { display: grid; gap: 7px; padding: 8px 0 2px; }
+.junction-settings-body h3 { margin: 8px 0 0; font-size: 12px; }
+.junction-session-exit { align-self: flex-start; margin-top: 4px; }
+.junction-invite-preview { display: grid; gap: 7px; padding: 10px; border: 1px solid #2f6f63; border-radius: 7px; background: #102523; }
+.junction-invite-preview .junction-state { justify-self: start; }
+.junction-invite-preview small { color: #a9bac8; }
+
+@media (max-width: 520px) {
+  .junction-panel-body { padding-inline: 10px; }
+  .junction-entry-actions { grid-template-columns: 1fr; }
+  .junction-invite-composer { grid-template-columns: 1fr; }
+  .junction-invite-composer > div { grid-column: auto; }
+  .junction-session-summary { align-items: stretch; }
+  .junction-session-summary > .junction-btn { flex: 0 0 auto; }
+  .junction-roster-main { grid-template-columns: 23px 34px minmax(0, 1fr) 37px; gap: 6px; }
+  .junction-avatar { width: 34px; height: 34px; border-radius: 8px; }
+  .junction-roster-actions,
+  .junction-inline-exchange { padding-left: 0; margin-left: 63px; }
+  .junction-row-note { margin-left: 63px; }
+  .junction-row-warning { margin-left: 63px; }
+  .junction-row-primary { max-width: calc(100vw - 145px); }
+}

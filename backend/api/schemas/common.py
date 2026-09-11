@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Literal
 
 class ListPathRequest(BaseModel):
     path: str
@@ -8,6 +8,7 @@ class ListPathRequest(BaseModel):
 class IngestRequest(BaseModel):
     targets: List[str]
     force_update: bool = False
+    analysis_profile: Literal["auto", "light", "full"] = "auto"
 
 class SettingUpdate(BaseModel):
     key: str

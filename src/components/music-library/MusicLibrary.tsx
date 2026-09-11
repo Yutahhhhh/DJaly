@@ -91,13 +91,17 @@ export function MusicLibrary({
 
     try {
       // バックグラウンド解析を開始し、WebSocket の完了通知を待ってからリストを更新する
-      await startIngestion([track.filepath], true);
+      const upgradingLightAnalysis = track.analysis_level === "light";
+      await startIngestion([track.filepath], true, upgradingLightAnalysis ? "full" : undefined);
       const outcome = await waitForIngestionComplete();
       if (outcome.type !== "complete" || outcome.errors > 0) {
         throw new Error(outcome.lastError || outcome.message || "解析に失敗しました");
       }
       search(true);
-      toast.success("解析が完了しました", `${track.title || track.filepath}`);
+      toast.success(
+        upgradingLightAnalysis ? "詳細解析が完了しました" : "解析が完了しました",
+        `${track.title || track.filepath}`,
+      );
     } catch (error) {
       console.error("Error calling analyze API", error);
       toast.error("解析に失敗しました", getErrorDetail(error));

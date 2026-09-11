@@ -43,10 +43,34 @@ export interface ParticipantExchange {
 }
 export interface JunctionParticipant {
   peerId: string;
+  /** User-facing identity. displayName remains for older native runtimes. */
+  djName?: string;
   displayName: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
+  slotId?: string;
+  invitationId?: string;
+  isPlaceholder?: boolean;
+  orderIndex?: number;
+  rosterStatus?: string;
+  /** The DJ asked to be considered next; only the coordinator starts handoff. */
+  turnRequested?: boolean;
+  connectionQuality?: JunctionConnectionQuality;
+  isHost?: boolean;
+  /** Session coordinator; independent from the current performer. */
+  isCoordinator?: boolean;
+  isPerformer?: boolean;
+  isNextUp?: boolean;
   status?: string;
   approved?: boolean;
   exchange?: ParticipantExchange;
+}
+export type JunctionConnectionLevel = 'unknown' | 'good' | 'fair' | 'poor' | 'offline';
+export interface JunctionConnectionQuality {
+  level: JunctionConnectionLevel;
+  rttMs?: number;
+  jitterMs?: number;
+  packetLossPct?: number;
 }
 export interface JunctionSnapshot {
   active: boolean;
@@ -55,13 +79,16 @@ export interface JunctionSnapshot {
   revision: number | string;
   localPeerId: string;
   hostPeerId: string;
+  /** Alias that describes the role without implying performance order. */
+  coordinatorPeerId?: string;
   performerPeerId: string;
   nextPeerId?: string;
+  lifecycle?: 'lobby' | 'starting' | 'live';
   epoch: string;
   handoffState: string;
   participants: JunctionParticipant[];
   readiness: { ready: boolean; reasons: string[] };
-  program: { state: string; localMonitor?: 'direct' | 'program-delayed'; meter?: number; outputDevice?: string; recording?: boolean };
+  program: { state: string; captureActive?: boolean; localMonitor?: 'direct' | 'program-delayed'; meter?: number; outputDevice?: string; recording?: boolean };
   connection: { state: string; detail?: string };
   /** Legacy single server invite. Manual mode uses per-participant exchange.inviteText. */
   invite?: string;
@@ -80,6 +107,9 @@ export type JunctionOp =
   | 'exchange.import'
   | 'peer.approve'
   | 'peer.retry'
+  | 'profile.update'
+  | 'roster.reorder'
+  | 'session.start'
   | 'handoff.request'
   | 'handoff.cancel'
   | 'handoff.accept'

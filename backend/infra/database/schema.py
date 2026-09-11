@@ -84,6 +84,10 @@ COMPATIBILITY_STATEMENTS = [
     "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS overlap_next_ms DOUBLE DEFAULT 0",
     "ALTER TABLE setlist_tracks ADD COLUMN IF NOT EXISTS revision INTEGER DEFAULT 1",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT 'native_file_drop'",
+    "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS analysis_profile VARCHAR DEFAULT 'auto'",
+    "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS effective_analysis_profile VARCHAR",
+    "ALTER TABLE import_items ADD COLUMN IF NOT EXISTS analysis_level VARCHAR",
+    "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS analysis_level VARCHAR",
 ]
 
 
@@ -121,6 +125,7 @@ def get_table_ddl() -> Dict[str, str]:
                 key VARCHAR,
                 scale VARCHAR,
                 duration FLOAT,
+                analysis_level VARCHAR,
                 energy FLOAT DEFAULT 0.0,
                 danceability FLOAT DEFAULT 0.0,
                 loudness FLOAT DEFAULT -60.0,
@@ -459,6 +464,8 @@ def get_table_ddl() -> Dict[str, str]:
                 target_id INTEGER,
                 target_name_snapshot VARCHAR,
                 origin VARCHAR NOT NULL DEFAULT 'native_file_drop',
+                analysis_profile VARCHAR NOT NULL DEFAULT 'auto',
+                effective_analysis_profile VARCHAR,
                 state VARCHAR NOT NULL,
                 paused BOOLEAN NOT NULL DEFAULT FALSE,
                 cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
@@ -479,6 +486,7 @@ def get_table_ddl() -> Dict[str, str]:
                 track_id INTEGER,
                 state VARCHAR NOT NULL,
                 load_ready BOOLEAN NOT NULL DEFAULT FALSE,
+                analysis_level VARCHAR,
                 error_code VARCHAR,
                 error_message VARCHAR,
                 attempts INTEGER NOT NULL DEFAULT 0,

@@ -37,6 +37,11 @@ export function TrackTitle({ track, className }: { track: Track; className?: str
         <span className="font-medium truncate text-sm" title={track.title}>
           {track.title}
         </span>
+        {track.analysis_level === "light" && (
+          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:text-amber-300" title="再生に必要な情報だけを解析済み">
+            軽量
+          </span>
+        )}
       </div>
       <span className="text-xs text-muted-foreground truncate" title={track.artist}>
         {track.artist}

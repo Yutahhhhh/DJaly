@@ -80,7 +80,7 @@ export function TrackList({
                           <Button
                             variant="ghost"
                             size="icon"
-                            title="Re-analyze"
+                            title={track.analysis_level === "light" ? "詳細解析する" : "再解析"}
                             onClick={(e) => {
                               e.stopPropagation();
                               onAnalyze(track);

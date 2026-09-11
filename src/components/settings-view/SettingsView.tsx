@@ -35,6 +35,12 @@ import { LibraryImportDialog } from "./LibraryImportDialog";
 import { MetadataImportDialog } from "./MetadataImportDialog";
 import { useTheme } from "@/components/theme-provider";
 import { downloadFile } from "@/lib/download";
+import {
+  normalizeAnalysisProfile,
+  rememberAnalysisProfile,
+} from "@/services/analysis-profile";
+
+const supportsLightAnalysis = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
@@ -65,6 +71,14 @@ export function SettingsView() {
   const fetchSettings = async () => {
     try {
       const data = await settingsService.getAll();
+      const requestedProfile = normalizeAnalysisProfile(data.analysis_profile);
+      const analysisProfile = rememberAnalysisProfile(
+        !supportsLightAnalysis && requestedProfile === "light" ? "auto" : requestedProfile,
+      );
+      if (analysisProfile !== requestedProfile) {
+        await settingsService.save("analysis_profile", analysisProfile);
+      }
+      data.analysis_profile = analysisProfile;
       setSettings(data);
     } catch (e: any) {
       console.error("Failed to fetch settings", e);
@@ -78,6 +92,7 @@ export function SettingsView() {
     setIsError(false);
     try {
       await settingsService.save(key, value);
+      if (key === "analysis_profile") rememberAnalysisProfile(value);
       setSettings((prev) => ({ ...prev, [key]: value }));
       setStatus(`Saved ${key}`);
       setTimeout(() => setStatus(""), 2000);
@@ -271,6 +286,31 @@ export function SettingsView() {
                   <SelectItem value="system">System</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-profile">解析方法</Label>
+              <Select
+                value={normalizeAnalysisProfile(settings.analysis_profile)}
+                onValueChange={(value) =>
+                  void saveSetting(
+                    "analysis_profile",
+                    !supportsLightAnalysis && value === "light" ? "auto" : normalizeAnalysisProfile(value),
+                  )
+                }
+              >
+                <SelectTrigger id="analysis-profile">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">自動（推奨）</SelectItem>
+                  <SelectItem value="light" disabled={!supportsLightAnalysis}>軽量（Windowsのみ・プレイ優先）</SelectItem>
+                  <SelectItem value="full">詳細</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Macでは従来の詳細解析を維持します。Windowsの自動解析は時間がかかる場合だけ軽量へ切り替わります。軽量解析はすぐ再生できますが、類似曲やジャンル推定の精度が下がります。
+              </p>
             </div>
 
             <div className="space-y-2">
