@@ -1,6 +1,11 @@
 import numpy as np
 import pytest
 
+# The portable analyzer's librosa is installed only on Windows (requirements.txt).
+# The Essentia reference comparison below therefore needs both: on macOS, run it with
+# `uv pip install --target <dir> librosa==0.11.0` and PYTHONPATH=<dir>:backend.
+pytest.importorskip("librosa", reason="portable analyzer requires librosa (Windows dependency)")
+
 from domain.services.analysis.portable import PortableAudioAnalyzer, musicnn_bands
 
 
