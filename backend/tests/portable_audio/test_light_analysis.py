@@ -1,4 +1,7 @@
 import numpy as np
+import pytest
+
+pytest.importorskip("librosa", reason="portable analyzer requires librosa (Windows dependency)")
 
 from domain.services.analysis.portable import PortableAudioAnalyzer
 
