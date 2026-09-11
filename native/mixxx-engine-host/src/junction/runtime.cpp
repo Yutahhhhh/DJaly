@@ -871,7 +871,7 @@ struct Runtime::Impl {
         std::function<void(QJsonValue)> walk=[&](QJsonValue v){if(v.isArray()){for(const auto& x:v.toArray())walk(x);return;}if(!v.isObject())return;auto o=v.toObject();auto hash=o["assetId"].toString();if(o["format"]=="plumdeck-ddj-dsp-v1"||o["format"]=="plumdeck-keylock-v1"||o["format"]=="plumdeck-fx-v1")assetKinds[hash]=o["format"].toString();if(!hash.isEmpty() && assets.find(hash)==assets.end()){auto path=cache.resolve(hash);if(path.isEmpty()){if(!requestedAssets.contains(hash)){requestedAssets.insert(hash);queue(source,"asset.request",{{"assetId",hash}});}}else assets[hash]=path;}for(auto it=o.begin();it!=o.end();++it)walk(it.value());};walk(preparedGraph);tryPrepare();
     }
     void tryPrepare() {
-        if(preparedGraph.isEmpty() || prepared || auth.next!=auth.local)return;
+        if(preparedGraph.isEmpty() || prepared || auth.next!=auth.local || (bootstrapStart&&lifecycle=="starting"))return;
         bool missing=false;std::function<QJsonValue(QJsonValue)> visit=[&](QJsonValue v)->QJsonValue{if(v.isArray()){QJsonArray a;for(const auto& x:v.toArray())a.append(visit(x));return a;}if(!v.isObject())return v;auto o=v.toObject();o.remove("path");auto hash=o["assetId"].toString();if(!hash.isEmpty()){auto it=assets.find(hash);if(it==assets.end())missing=true;else{o["path"]=it->second;}}for(auto it=o.begin();it!=o.end();++it)if(it.key()!="path")it.value()=visit(it.value());return o;};
         auto local=visit(preparedGraph).toObject();if(missing){reasons={"音源を受信しています"};return;}
         const auto nextPins=references(preparedGraph);for(const auto& hash:nextPins)cache.pin(hash,true);
@@ -1091,9 +1091,11 @@ struct Runtime::Impl {
                 if(hosting&&auth.phase=="fenced"&&!validationStart){beginValidation(now()+24000);requestValidationCapture(validationStart);}
             }
         }
-        if(auth.phase=="preparing"&&auth.owner==auth.local&&graphDirty&&monotonicNanos()-lastSharedChange>=250000000&&!exportJob.valid()){graphDirty=false;graph={};startExport();}
-        if((auth.phase=="preparing"||(auth.phase=="fenced"&&finalCheckpoint))&&auth.owner==auth.local&&graph.isEmpty()&&!exportJob.valid())startExport();
-        if(auth.phase=="fenced"&&auth.owner==auth.local&&now()>=auth.fenceFrame+960&&!finalCheckpoint){
+        // A remote first DJ starts from their own decks: the coordinator never exports its graph for that bootstrap.
+        const bool remoteBootstrap=bootstrapStart&&lifecycle=="starting";
+        if(!remoteBootstrap&&auth.phase=="preparing"&&auth.owner==auth.local&&graphDirty&&monotonicNanos()-lastSharedChange>=250000000&&!exportJob.valid()){graphDirty=false;graph={};startExport();}
+        if(!remoteBootstrap&&(auth.phase=="preparing"||(auth.phase=="fenced"&&finalCheckpoint))&&auth.owner==auth.local&&graph.isEmpty()&&!exportJob.valid())startExport();
+        if(!remoteBootstrap&&auth.phase=="fenced"&&auth.owner==auth.local&&now()>=auth.fenceFrame+960&&!finalCheckpoint){
             auth.throughSeq=controlSeq;finalCheckpoint=true;graph={};startExport();broadcast("handoff.fenced",{{"fencedAtMediaFrame",u64(auth.fenceFrame)},{"lastAppliedSeq",u64(controlSeq)},{"handoffId",auth.handoffId}});
         }
         if(auth.phase=="fenced"&&fenceDeadline&&monotonicNanos()>fenceDeadline){if(hosting){broadcast("handoff.cancel",{{"handoffId",auth.handoffId},{"reason","timeout"}});auth.cancel();const bool firstStart=lifecycle=="starting";if(firstStart)restoreLobby();fail(firstStart?QStringLiteral("最初のDJとの同期が時間内に完了しませんでした。もう一度開始してください"):QStringLiteral("音声の照合が時間内に完了しませんでした。演奏は継続しています"));}validationStart=0;}
@@ -1308,12 +1310,16 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         if(!d->hosting)return reject("セッション管理者だけが開始できます");if(d->lifecycle!="lobby")return reject("このセッションはすでに開始しています");
         auto target=p["performerPeerId"].toString(p["targetPeerId"].toString());if(target.isEmpty())for(const auto& id:d->rosterOrder){if(id==d->auth.local){target=id;break;}auto peer=d->peers.find(id);if(peer!=d->peers.end()&&peer->second->approved&&peer->second->hello){target=id;break;}}
         if(target.isEmpty())return reject("最初にプレイするDJを選択してください");auto peer=d->peers.find(target);if(target!=d->auth.local&&(peer==d->peers.end()||!peer->second->approved||!peer->second->hello))return reject("最初のDJとの接続が完了していません");
-        d->rosterOrder.removeAll(target);d->rosterOrder.prepend(target);d->finishedOrder.clear();d->turnRequests.remove(target);d->openProgram();if(d->programState=="error")return reject(d->problem.isEmpty()?QStringLiteral("会場の音声出力を開けません"):d->problem);d->problem.clear();d->reasons.clear();
+        // Validate the venue output before mutating the shared order: a refused start leaves the lobby as it was.
+        if(d->programDevice<0)return reject("会場への音声出力が未選択です。「セッション設定」の「会場への音声出力」で出力先を反映してから開始してください");
+        d->openProgram();if(d->programState=="error")return reject(d->problem.isEmpty()?QStringLiteral("会場の音声出力を開けません"):d->problem);
+        const auto previousOrder=d->rosterOrder;const auto previousFinished=d->finishedOrder;const auto previousRequests=d->turnRequests;
+        d->rosterOrder.removeAll(target);d->rosterOrder.prepend(target);d->finishedOrder.clear();d->turnRequests.remove(target);d->problem.clear();d->reasons.clear();
         if(target==d->auth.local){d->captureEnabled.store(true);d->tap.enable(false,true);d->lifecycle="live";++d->auth.revision;d->broadcast("session.snapshot",d->wireState());return snapshot();}
         // A remote first DJ starts from their own prepared decks. This is a
         // bootstrap, not a host-to-guest graph handoff: only their stream and
         // synchronized clock are gated before ownership becomes live.
-        d->captureEnabled.store(false);d->tap.enable(false,false);peer->second->remoteStreamReady=false;d->lifecycle="starting";d->bootstrapStart=true;auto failure=d->auth.prepare(target);if(!failure.isEmpty()){d->restoreLobby();return reject(failure);}d->startDeadline=monotonicNanos()+120000000000LL;d->resetPreparation();d->broadcast("handoff.prepare",{{"targetPeerId",target},{"handoffId",d->auth.handoffId},{"bootstrap",true}});d->broadcast("session.snapshot",d->wireState());return snapshot();
+        d->captureEnabled.store(false);d->tap.enable(false,false);peer->second->remoteStreamReady=false;d->lifecycle="starting";d->bootstrapStart=true;auto failure=d->auth.prepare(target);if(!failure.isEmpty()){d->restoreLobby();d->rosterOrder=previousOrder;d->finishedOrder=previousFinished;d->turnRequests=previousRequests;return reject(failure);}d->startDeadline=monotonicNanos()+120000000000LL;d->resetPreparation();d->broadcast("handoff.prepare",{{"targetPeerId",target},{"handoffId",d->auth.handoffId},{"bootstrap",true}});d->broadcast("session.snapshot",d->wireState());return snapshot();
     }
     if(op.startsWith("private.")){const auto failure=d->backend->privatePreviewCommand(op,p);if(!failure.isEmpty())return reject(failure);return snapshot();}
     if(op=="leave"||op=="end"){

@@ -22,6 +22,7 @@ import {
   compactReadinessReasons,
   connectionAlert,
   coordinatorCanSelect,
+  handoffCancelAvailable,
   participantName,
   participantVisualState,
   qualityPresentation,
@@ -56,6 +57,7 @@ interface Props {
   onImportText: (peerId: string, text: string) => Promise<void>;
   onChooseParticipant: (peerId: string, first: boolean) => void;
   onAcceptHandoff: () => void;
+  onCancelHandoff: () => void;
   onRequestTurn: () => void;
   onReorder: (peerIds: string[]) => Promise<void>;
 }
@@ -71,6 +73,7 @@ export function JunctionRoster({
   onImportText,
   onChooseParticipant,
   onAcceptHandoff,
+  onCancelHandoff,
   onRequestTurn,
   onReorder,
 }: Props) {
@@ -140,6 +143,7 @@ export function JunctionRoster({
                 onImportText={onImportText}
                 onChooseParticipant={onChooseParticipant}
                 onAcceptHandoff={onAcceptHandoff}
+                onCancelHandoff={onCancelHandoff}
                 onRequestTurn={onRequestTurn}
               />
             ))}
@@ -165,6 +169,7 @@ interface RowProps {
   onImportText: (peerId: string, text: string) => Promise<void>;
   onChooseParticipant: (peerId: string, first: boolean) => void;
   onAcceptHandoff: () => void;
+  onCancelHandoff: () => void;
   onRequestTurn: () => void;
 }
 
@@ -180,6 +185,7 @@ function RosterRow({
   onImportText,
   onChooseParticipant,
   onAcceptHandoff,
+  onCancelHandoff,
   onRequestTurn,
 }: RowProps) {
   const state = participantVisualState(participant, snapshot);
@@ -194,6 +200,8 @@ function RosterRow({
   const guidance = exchangeGuidance(participant, snapshot, host);
   const primary = primaryAction(participant, snapshot, host, state, guidance);
   const secondary = guidance?.actions.filter((action) => action.id !== primary?.exchangeAction) ?? [];
+  // The coordinator can withdraw a pending turn before it is committed.
+  const cancellable = handoffCancelAvailable(state, host);
   const [textOpen, setTextOpen] = useState(false);
   const [text, setText] = useState('');
   const [textError, setTextError] = useState('');
@@ -248,7 +256,7 @@ function RosterRow({
         <ConnectionIndicator presentation={quality} />
       </div>
 
-      {(primary || secondary.length > 0) && (
+      {(primary || secondary.length > 0 || cancellable) && (
         <div className="junction-roster-actions">
           {primary && (
             <button
@@ -264,6 +272,11 @@ function RosterRow({
               }}
             >
               {primary.label}
+            </button>
+          )}
+          {cancellable && (
+            <button type="button" className="junction-btn junction-btn-default" disabled={busy} onClick={onCancelHandoff}>
+              引き継ぎを取消
             </button>
           )}
           {(secondary.length > 0 || guidance) && (

@@ -79,8 +79,9 @@ export function TrackList({
                         <div className="flex justify-center">
                           <Button
                             variant="ghost"
-                            size="icon"
+                            size={track.analysis_level === "light" ? "sm" : "icon"}
                             title={track.analysis_level === "light" ? "詳細解析する" : "再解析"}
+                            aria-label={track.analysis_level === "light" ? "詳細解析する" : "再解析"}
                             onClick={(e) => {
                               e.stopPropagation();
                               onAnalyze(track);
@@ -92,6 +93,7 @@ export function TrackList({
                             ) : (
                               <RefreshCw className="h-4 w-4 text-muted-foreground" />
                             )}
+                            {track.analysis_level === "light" && <span className="text-xs">詳細</span>}
                           </Button>
                         </div>
                       }

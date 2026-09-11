@@ -85,7 +85,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
 
   useEffect(() => {
     if (!snapshot?.active) return;
-    if (snapshot.program.outputDevice && !programDevice) setProgramDevice(snapshot.program.outputDevice);
+    if (hasProgramDevice(snapshot) && !programDevice) setProgramDevice(snapshot.program.outputDevice!);
   }, [snapshot?.active, snapshot?.program.outputDevice, programDevice]);
 
   const outputOptions = devices.filter((device) => device.outputChannels >= 2);
@@ -305,7 +305,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
               <section className="junction-invite-composer">
                 <div>
                   <h3>DJを招待</h3>
-                  <p>中継サーバーは不要です。作成した文字をチャットなどで相手へ渡します。</p>
+                  <p>招待・返答の文字はサーバーを経由しません。作成した文字をチャットなどで相手へ直接渡します。</p>
                 </div>
                 <label>
                   招待するDJ名
@@ -331,7 +331,10 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
             )}
 
             {snapshot.lifecycle === 'lobby' && host && (
-              <p className="junction-lobby-guide">DJが揃ったら、一覧から最初にプレイするDJを選んでください。</p>
+              <p className="junction-lobby-guide">
+                DJが揃ったら、一覧から最初にプレイするDJを選んでください。
+                {!hasProgramDevice(snapshot) && <> 開始前に「セッション設定」の「会場への音声出力」で出力先を反映してください。</>}
+              </p>
             )}
 
             <JunctionRoster
@@ -344,6 +347,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
               onImportText={(peerId, text) => runCard(peerId, () => junctionCommand('exchange.import', {text}), true)}
               onChooseParticipant={(peerId, first) => void runCard('handoff', () => junctionCommand(first ? 'session.start' : 'handoff.request', first ? {performerPeerId: peerId} : {targetPeerId: peerId}))}
               onAcceptHandoff={() => void runCard('handoff', () => junctionCommand('handoff.accept'))}
+              onCancelHandoff={() => void runCard('handoff', () => junctionCommand('handoff.cancel'))}
               onRequestTurn={() => void runCard('handoff', () => junctionCommand('handoff.request', {targetPeerId: snapshot.localPeerId}))}
               onReorder={(peerIds) => runCard('roster', () => junctionCommand('roster.reorder', {peerIds}), true)}
             />
@@ -528,7 +532,7 @@ function EntrySection(props: EntryProps) {
 
       {choice === 'join' && (
         <section className="junction-entry-form">
-          <p className="junction-card-note">中継サーバーは不要です。管理者から届いた招待用の文字をそのまま貼り付けます。</p>
+          <p className="junction-card-note">招待・返答の文字はサーバーを経由しません。管理DJから届いた招待用の文字をそのまま貼り付けます。</p>
           <label>
             招待用の文字
             <textarea value={props.joinText} onChange={(event) => props.setJoinText(event.target.value)} rows={5} maxLength={131072} placeholder="PLUMDECK-JUNCTION-…" />
@@ -574,6 +578,12 @@ function sessionStatus(snapshot: JunctionSnapshot): string {
   if (snapshot.lifecycle === 'starting') return '演奏を開始しています';
   const performer = snapshot.participants.find((participant) => participant.peerId === snapshot.performerPeerId);
   return performer ? `${participantName(performer)}が演奏中` : `${snapshot.participants.length}人が参加`;
+}
+
+/** Native reports an unset venue output as "-1". */
+function hasProgramDevice(snapshot: JunctionSnapshot): boolean {
+  const device = snapshot.program.outputDevice;
+  return Boolean(device) && device !== '-1';
 }
 
 function programStatus(state: string): string {

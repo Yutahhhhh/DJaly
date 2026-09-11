@@ -122,9 +122,12 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
       const sampleTarget = dropNode?.closest<HTMLElement>("[data-sampler-collection]");
       if (sampleTarget) {
         if (payload.type === "enter" || payload.type === "over") sampleTarget.setAttribute("data-native-drop-active", "true");
-        if (payload.type === "drop" && payload.paths.length && !internalTrackDragRef.current) {
+        // A library row drag has no native paths; register its source file instead.
+        const internal = internalTrackDragRef.current;
+        const paths = internal ? internal.filepath ? [internal.filepath] : [] : payload.type === "drop" ? payload.paths : [];
+        if (payload.type === "drop" && paths.length) {
           try {
-            const result = samplerLibrary.add(payload.paths);
+            const result = samplerLibrary.add(paths);
             setNotice(`${result.accepted}音源を登録しました（解析なし）${result.skipped ? `・非対応${result.skipped}件をスキップ` : ""}`);
           } catch (error) { setNotice(String(error)); }
         }
@@ -254,7 +257,18 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const rightPage = rightMode === "recommend" ? rightRecommend : rightSearch;
   return <section className="dj-browser" aria-label="Play library">
     <aside className="dj-library-tree"><div className="dj-tree-heading"><Library /><strong>ブラウザ</strong></div><div className="dj-tree-scroll">
-      <button data-sampler-collection className={cn("dj-tree-row", source === "sampler" && "is-selected")} onClick={() => switchSource("sampler")}><Disc3 /><span>Sampler</span></button>
+      <button data-sampler-collection className={cn("dj-tree-row", source === "sampler" && "is-selected")} onClick={() => switchSource("sampler")} title="曲や音源ファイルをドロップしてサンプラー用に登録"
+        onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.types.includes("application/x-plumdeck-track")) return;
+          event.preventDefault();
+          try {
+            const track = JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track;
+            if (!track.filepath) throw new Error("音源ファイルの場所が分からない曲は登録できません。");
+            samplerLibrary.add([track.filepath]);
+            setNotice(`「${track.title || track.filepath.split(/[\\/]/).pop()}」をSamplerに登録しました（解析なし）`);
+          } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+        }}><Disc3 /><span>Sampler</span></button>
       <button data-import-target-kind="collection" className={cn("dj-tree-row", source === "collection" && "is-selected")} onClick={() => switchSource("collection")}><Library /><span>Collection</span><small>{collection.total || ""}</small></button>
       <div className="dj-tree-row dj-tree-section"><span>plumdeck PLAYLISTS · {playlists.total.toLocaleString()}</span><button title="新規プレイリスト" onClick={() => openPlaylistDialog({ kind: "create" })}><Plus /></button></div>
       <LocalPlaylistRows items={playlists.items} selectedId={source === "local" ? localPlaylistId : null} hasMore={playlists.hasMore} loading={playlists.loading} error={playlists.error} onLoadMore={playlists.loadMore} onRetry={playlists.retry} onSelect={(item) => { setLocalPlaylistId(item.id); switchSource("local"); }} onRename={(item) => openPlaylistDialog({ kind: "rename", item })} onDelete={(item) => openPlaylistDialog({ kind: "delete", item })} onDrop={addTrack} />

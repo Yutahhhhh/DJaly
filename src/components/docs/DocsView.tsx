@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, ChevronDown, Search, ZoomIn } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { docGroups, docTopics, type DocTopic } from './topics';
+import { docGroups, docTopics, figuresOf, type DocTopic } from './topics';
 import './docs.css';
 
 export function DocsView() {
@@ -10,10 +10,11 @@ export function DocsView() {
     const saved = sessionStorage.getItem('plumdeck.docs.topic');
     return docTopics.some(topic => topic.id === saved) ? saved : null;
   });
-  const [zoom, setZoom] = useState(false);
+  const [zoom, setZoom] = useState<number | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const topic = docTopics.find(item => item.id === topicId);
+  const zoomed = topic && zoom !== null ? figuresOf(topic)[zoom] : undefined;
   const results = useMemo(() => {
     const words = query.normalize('NFKC').toLocaleLowerCase('ja').trim().split(/\s+/).filter(Boolean);
     return docTopics.filter(item => {
@@ -21,7 +22,7 @@ export function DocsView() {
       return words.every(word => text.includes(word));
     });
   }, [query]);
-  const navigate = (id: string | null) => { setTopicId(id); setQuery(''); setZoom(false); };
+  const navigate = (id: string | null) => { setTopicId(id); setQuery(''); setZoom(null); };
   useEffect(() => {
     if (topicId) sessionStorage.setItem('plumdeck.docs.topic', topicId);
     else sessionStorage.removeItem('plumdeck.docs.topic');
@@ -45,11 +46,11 @@ export function DocsView() {
         <button className="docs-back" onClick={() => navigate(null)}><ArrowLeft size={16} aria-hidden="true"/>トピック一覧</button>
         <p className="docs-eyebrow">{topic.group}</p><h1 ref={heading} tabIndex={-1}>{topic.title}</h1><p className="docs-lead">{topic.summary}</p>
         <p className="docs-location"><span>開く場所</span>{topic.location}</p>
-        <figure className="docs-figure"><button onClick={() => setZoom(true)} aria-label={`${topic.title}の画面を拡大`}><img src={`/docs/${topic.image}.png`} alt={topic.caption} loading="lazy"/><span className="docs-zoom"><ZoomIn size={15} aria-hidden="true"/>拡大</span></button><figcaption>{topic.caption}<span>説明用データを表示した画面です。</span></figcaption></figure>
+        {figuresOf(topic).map((figure, index) => <figure key={figure.image} className="docs-figure"><button onClick={() => setZoom(index)} aria-label={`${topic.title}の画面を拡大（${index + 1}枚目）`}><img src={`/docs/${figure.image}.png`} alt={figure.caption} loading="lazy"/><span className="docs-zoom"><ZoomIn size={15} aria-hidden="true"/>拡大</span></button><figcaption>{figure.caption}<span>説明用データを表示した画面です。</span></figcaption></figure>)}
         <section aria-label="基本の手順"><h2>基本の手順</h2><ol className="docs-steps">{topic.steps.map((step, index) => <li key={step}><span aria-hidden="true">{index + 1}</span><p>{step}</p></li>)}</ol></section>
         <section className="docs-details" aria-label="詳しい使い方"><h2>もう少し詳しく</h2>{topic.details.map(detail => <details key={detail.title}><summary>{detail.title}<ChevronDown size={16} aria-hidden="true"/></summary><div>{detail.body.map(body => <p key={body}>{body}</p>)}</div></details>)}</section>
         <nav aria-label="関連トピック" className="docs-related"><h2>あわせて読む</h2><div className="docs-grid">{docTopics.filter(item => topic.related.includes(item.id)).map(card)}</div></nav>
-        <Dialog open={zoom} onOpenChange={setZoom}><DialogContent className="docs-image-dialog"><DialogTitle>{topic.title}</DialogTitle><DialogDescription>{topic.caption} 説明用データを表示しています。</DialogDescription><div><img src={`/docs/${topic.image}.png`} alt={topic.caption}/></div></DialogContent></Dialog>
+        {zoomed && <Dialog open onOpenChange={open => { if (!open) setZoom(null); }}><DialogContent className="docs-image-dialog"><DialogTitle>{topic.title}</DialogTitle><DialogDescription>{zoomed.caption} 説明用データを表示しています。</DialogDescription><div><img src={`/docs/${zoomed.image}.png`} alt={zoomed.caption}/></div></DialogContent></Dialog>}
       </article> : <>
         <p className="docs-eyebrow">plumdeck GUIDE</p><h1 ref={heading} tabIndex={-1}>やりたいことから、探す。</h1><p className="docs-lead">楽曲の整理からDJプレイ、Junctionでの交代まで。<br/>必要な操作を、画面と手順で確認できます。</p>
         <div className="docs-start"><BookOpen aria-hidden="true" size={24}/><div><strong>初めて使う方へ</strong><p>取り込みからプレイまでの流れを確認しましょう。</p></div><button className="docs-link" onClick={() => navigate('start')}>はじめる<ArrowRight size={16} aria-hidden="true"/></button></div>

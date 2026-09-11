@@ -118,7 +118,7 @@ export function SetlistEditor({
                     onRemove={() => onRemoveTrack(index)}
                   />
                   {showTiming && <div className="ml-7 flex flex-wrap items-center gap-2 rounded border bg-background/70 p-2 text-xs">
-                    <label className="flex items-center gap-2">使用時間（分）
+                    <label className="flex items-center gap-2 whitespace-nowrap">使用時間（分）
                       <input className="w-20 rounded border bg-background px-2 py-1" type="number" min="0.01" step="0.1"
                         defaultValue={Number(((entryDurations[index] ?? 120_000) / 60_000).toFixed(2))}
                         key={`duration-${track.setlist_track_id}-${track.revision}`}

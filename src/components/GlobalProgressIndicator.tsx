@@ -43,7 +43,7 @@ function LegacyProgressIndicator() {
     cancelIngestion,
     dismissComplete: dismissIngestComplete,
     lastError, elapsedSeconds, activeFiles, connectionError,
-    analysisProfile, effectiveAnalysisProfile,
+    analysisProfile, effectiveAnalysisProfile, queued,
   } = useIngestion();
 
   const {
@@ -103,7 +103,9 @@ function LegacyProgressIndicator() {
 
   const title = showIngestion ? "音源解析" : "メタデータ更新";
   const description = showIngestion
-    ? effectiveAnalysisProfile === "light"
+    ? queued
+      ? "別の解析が終わるまで待機しています。完了すると自動で開始します。"
+      : effectiveAnalysisProfile === "light"
       ? "再生に必要なBPM、キー、基本情報を軽量解析しています。"
       : "音源特徴、BPM、埋め込みを解析しています。"
     : "曲のメタデータを更新しています。";
@@ -180,7 +182,7 @@ function LegacyProgressIndicator() {
           <div className="space-y-6 py-4">
             {showIngestion && <div className="space-y-2 text-sm">
               <p className="text-xs text-muted-foreground">
-                解析方法：{effectiveAnalysisProfile === "light" ? "軽量（プレイ優先）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
+                解析方法：{queued ? "開始待ち" : effectiveAnalysisProfile === "light" ? "軽量（プレイ優先）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
               </p>
               <p>経過 {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒 · 成功 {ingestStats.processed} · スキップ {ingestStats.skipped} · 失敗 {ingestStats.errors}</p>
               {activeFiles.map(file => <p key={file.path} className="break-all">{getFileName(file.path)} · {file.seconds}秒</p>)}
@@ -210,7 +212,7 @@ function LegacyProgressIndicator() {
                 </div>
                 <div className="flex-1 min-w-0 grid gap-0.5">
                   <p className="text-sm font-medium truncate" title={getFileName(currentItem)}>
-                    {getFileName(currentItem) || (showIngestion ? "解析対象を確認中" : "待機中")}
+                    {getFileName(currentItem) || (showIngestion ? queued ? "開始待ち" : "解析対象を確認中" : "待機中")}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
                     {statusText}

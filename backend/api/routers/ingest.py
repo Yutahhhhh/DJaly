@@ -4,7 +4,6 @@ from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from api.schemas.common import IngestRequest
 from app.services.ingestion_app_service import ingestion_app_service as ingestion_manager
-from app.services.analysis_coordinator import analysis_coordinator
 
 router = APIRouter()
 
@@ -59,10 +58,10 @@ async def ingest_files(req: IngestRequest):
             "state": jsonable_encoder(ingestion_manager.state),
         }
     else:
-        owner = analysis_coordinator.owner
+        # Busy analysis slots now queue; only maintenance (backup/restore) refuses a start.
         raise HTTPException(
             status_code=409,
-            detail=f"{owner or '別の'}解析が実行中です。完了後に再試行してください",
+            detail="バックアップ・復元などの処理中のため解析を開始できません。完了後に再試行してください",
         )
 
 

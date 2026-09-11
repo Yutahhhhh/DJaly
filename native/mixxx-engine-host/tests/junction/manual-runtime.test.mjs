@@ -36,6 +36,13 @@ test('periodic roster snapshots keep avatar blobs off the heartbeat control path
  assert.match(source,/void abortBootstrap[\s\S]*broadcast\("handoff\.cancel"[\s\S]*auth\.cancel\(\)[\s\S]*restoreLobby\(\);resetPreparation\(\);fail\(failure\)/);
  assert.equal(source.match(/abortBootstrap\(failure\);return;/g)?.length,2,'fence and durable-commit failures both return to a retryable lobby');
 });
+test('a refused first start validates the venue output before touching the shared order',async()=>{
+ const source=await readFile(path.resolve(import.meta.dirname,'../../src/junction/runtime.cpp'),'utf8');
+ const start=source.slice(source.indexOf('if(op=="session.start")'));const body=start.slice(0,start.indexOf('if(op.startsWith("private."))'));
+ const reorder=body.indexOf('d->rosterOrder.prepend(target)');
+ assert(reorder>0);assert(body.indexOf('d->programDevice<0')>=0&&body.indexOf('d->programDevice<0')<reorder,'unset output is refused first');
+ assert(body.indexOf('d->openProgram()')<reorder,'output open failure is refused before reordering');
+});
 test('manual multi-DJ admission, cancellation, handoff and same-peer re-exchange without a signaling server',{timeout:420000},async()=>{
  const relay=Boolean(process.env.JUNCTION_TURN_ADDRESS);
  const directory=await mkdtemp('/tmp/plumdeck-manual-runtime-');const host=native(directory),first=native(directory),second=native(directory);const peers=[host,first,second];

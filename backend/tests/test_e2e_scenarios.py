@@ -55,7 +55,12 @@ async def test_e2e_ingestion_flow(client: TestClient, session: Session, tmp_path
     
     mocker.patch("domain.services.ingestion_domain_service.analyze_track_file", side_effect=mock_analyze)
     # Use ThreadPoolExecutor instead of ProcessPoolExecutor for tests (mocks work in threads)
-    mocker.patch("app.services.ingestion_app_service.AnalysisExecutor", ThreadPoolExecutor)
+    class ThreadAnalysisExecutor(ThreadPoolExecutor):
+        """Accepts AnalysisExecutor's timeout argument; timeouts are not exercised here."""
+        def __init__(self, max_workers=None, task_timeout=None):
+            super().__init__(max_workers=max_workers)
+
+    mocker.patch("app.services.ingestion_app_service.AnalysisExecutor", ThreadAnalysisExecutor)
     
     # Mock TinyTag to return metadata for dummy files
     mock_tag = mocker.Mock()

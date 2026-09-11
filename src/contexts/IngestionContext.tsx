@@ -32,6 +32,8 @@ interface IngestionContextType {
   connectionError: string;
   analysisProfile: AnalysisProfile;
   effectiveAnalysisProfile: "light" | "full";
+  /** Waiting for a Play import or another analysis to release the shared slot. */
+  queued: boolean;
   cancelIngestion: () => Promise<void>;
   dismissComplete: () => void;
   waitForIngestionComplete: () => Promise<IngestionOutcome>;
@@ -166,6 +168,7 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     : snapshot.type === "idle" ? "停止中"
     : String(snapshot.details?.stage || "解析を準備中");
   const analysisProfile = normalizeAnalysisProfile(snapshot.details?.analysis_profile);
+  const queued = isAnalyzing && snapshot.details?.queued === true;
   const effectiveAnalysisProfile = snapshot.details?.effective_analysis_profile === "light"
     ? "light"
     : "full";
@@ -209,6 +212,7 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     connectionError,
     analysisProfile,
     effectiveAnalysisProfile,
+    queued,
     elapsedSeconds: snapshot.start_time ? Math.max(0, Math.floor(now / 1000 - Number(snapshot.start_time))) : 0,
     cancelIngestion,
     dismissComplete,

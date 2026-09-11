@@ -322,7 +322,7 @@ export function SetlistCreator() {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div data-resize-scope className="analysis-panels setlist-panels h-full flex overflow-hidden w-full bg-background border-t">
+      <div className="setlist-layout h-full w-full"><div data-resize-scope className="analysis-panels setlist-panels h-full flex overflow-hidden w-full bg-background border-t">
         <SetlistSidebar
           setlists={setlists}
           activeSetlistId={activeSetlist?.id || null}
@@ -430,7 +430,7 @@ export function SetlistCreator() {
             Select a setlist to start editing
           </div>
         )}
-      </div>
+      </div></div>
 
       <DragOverlay dropAnimation={null}>
         {activeDragItem ? (
