@@ -11,7 +11,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-windows-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: restore verified Windows inference model
+        id: musicnn-model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: backend/models/msd-musicnn-1.onnx
+          key: musicnn-onnx-49668ffec47e52e94b96f45930bb46a28a1368d4bdfb5c05378fa834aca616e1
+      - name: fetch and verify Windows inference model
+        run: python backend/fetch_musicnn_onnx.py
+      - name: cache verified Windows inference model
+        if: steps.musicnn-model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: backend/models/msd-musicnn-1.onnx
+          key: ${{ steps.musicnn-model-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-inference-model
+          path: backend/models/msd-musicnn-1.onnx
+          if-no-files-found: error
+
   release:
+    needs: prepare-windows-model
     permissions:
       contents: write
     strategy:
@@ -85,9 +116,16 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
 
-      - name: fetch verified Windows inference model
+      - name: download verified Windows inference model
         if: matrix.platform == 'windows-2022'
-        run: python backend/fetch_musicnn_onnx.py
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-inference-model
+          path: backend/models
+
+      - name: verify downloaded Windows inference model
+        if: matrix.platform == 'windows-2022'
+        run: python backend/fetch_musicnn_onnx.py --verify-only
 
       - name: verify FFmpeg packaging requirements
         shell: bash

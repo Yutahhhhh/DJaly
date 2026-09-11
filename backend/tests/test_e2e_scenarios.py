@@ -49,7 +49,7 @@ async def test_e2e_ingestion_flow(client: TestClient, session: Session, tmp_path
             "spectral_flux": 1.0,
             "spectral_rolloff": 1000.0,
             "features_extra": {},
-            "embedding": [0.1] * 50,
+            "embedding": [0.1] * 200,
             "embedding_model": "test"
         }
     

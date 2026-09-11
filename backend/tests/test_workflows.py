@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from models import Setlist, Track
+from models import Setlist, Track, TrackEmbedding
 from app.services.play_import_service import PlayImportService, process_batch
 from domain.services.set_duration import SetTimingError, calculate_set_duration
 
@@ -17,6 +17,8 @@ def _track(session: Session, path: Path, title: str, duration: float = 300, bpm:
     path.write_bytes((title.encode("utf-8") + b"\0") * 20)
     track = Track(filepath=str(path), title=title, artist="DJ", album="", genre="House", bpm=bpm, duration=duration)
     session.add(track)
+    session.flush()
+    session.add(TrackEmbedding(track_id=track.id, embedding_json=json.dumps([0.1] * 200)))
     session.commit()
     session.refresh(track)
     return track

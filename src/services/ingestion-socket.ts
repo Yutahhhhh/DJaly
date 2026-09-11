@@ -1,12 +1,15 @@
 import { WS_BASE_URL } from "./api-client";
 
 export type IngestEventType = 
+  | "idle"
   | "start" 
   | "processing" 
   | "cancelled" 
   | "progress" 
   | "complete" 
   | "error";
+
+export type IngestTerminalType = "idle" | "complete" | "cancelled" | "error";
 
 export interface IngestMessage {
   type: IngestEventType;
@@ -17,6 +20,19 @@ export interface IngestMessage {
   key?: string;
   processed?: number;
   warningCount?: number;
+  skipped?: number;
+  errors?: number;
+  start_time?: number;
+  estimated_remaining?: number;
+  run_id?: string | null;
+  revision?: number;
+  details?: {
+    stage?: string;
+    last_error?: string;
+    active_files?: Record<string, number>;
+    failed_files?: string[];
+    [key: string]: unknown;
+  };
   message?: string;
   [key: string]: any;
 }
@@ -46,13 +62,15 @@ class IngestionSocketManager {
 
     this.isExplicitlyClosed = false;
     console.info(`Connecting to WebSocket: ${WS_BASE_URL}/ingest`);
-    this.ws = new WebSocket(`${WS_BASE_URL}/ingest`);
+    const socket = new WebSocket(`${WS_BASE_URL}/ingest`);
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
       console.info("Ingestion WebSocket Connected");
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return;
       try {
         const data = JSON.parse(event.data) as IngestMessage;
         this.notify(data);
@@ -61,16 +79,18 @@ class IngestionSocketManager {
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
       if (!this.isExplicitlyClosed) {
         this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectInterval);
       }
     };
 
-    this.ws.onerror = (error) => {
+    socket.onerror = (error) => {
       console.error("Ingestion WebSocket Error", error);
       // Closing will trigger onclose, which handles reconnection
-      this.ws?.close();
+      socket.close();
     };
   }
 
@@ -84,8 +104,9 @@ class IngestionSocketManager {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      this.ws.close();
+      const socket = this.ws;
       this.ws = null;
+      socket.close();
     }
   }
 

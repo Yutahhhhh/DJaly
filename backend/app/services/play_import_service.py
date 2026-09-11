@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import sys
 import uuid
 from domain.services.analysis.process_runner import AnalysisExecutor
 from pathlib import Path
@@ -12,7 +13,9 @@ from sqlalchemy import text
 from sqlmodel import Session, select
 
 from domain.constants import SUPPORTED_EXTENSIONS
-from domain.models.track import Track
+from domain.models.track import Track, TrackEmbedding
+from utils.ingestion import has_completed_analysis, has_completed_analysis_result
+from app.services.analysis_coordinator import analysis_coordinator
 from infra.repositories.ingestion_repository import IngestionRepository
 from infra.repositories.setlist_repository import SetlistRepository
 import infra.database.connection as db_connection
@@ -125,10 +128,12 @@ class PlayImportService:
               count(i.id) AS total_items,
               count(i.id) FILTER (WHERE i.state IN ('completed','existing')) AS succeeded_items,
               count(i.id) FILTER (WHERE i.state='failed') AS failed_items,
-              count(i.id) FILTER (WHERE i.state='skipped') AS skipped_items
+              count(i.id) FILTER (WHERE i.state='skipped') AS skipped_items,
+              count(i.id) FILTER (WHERE i.state='queued') AS queued_items,
+              max(i.canonical_path) FILTER (WHERE i.state IN ('probing','analyzing')) AS current_file
             FROM import_batches b LEFT JOIN import_items i ON i.batch_id=b.id
             {qualified_where}
-            GROUP BY ALL ORDER BY b.created_at DESC LIMIT 100
+            GROUP BY ALL ORDER BY b.created_at DESC {" " if active else "LIMIT 100"}
         """)))
 
     def set_state(self, batch_id: str, action: str) -> dict[str, Any]:
@@ -150,8 +155,37 @@ class PlayImportService:
 
 
 def process_batch(batch_id: str) -> None:
+    """Run durable import batches one at a time across every analysis entrypoint."""
+    token = analysis_coordinator.acquire("Play取り込み", wait=True)
+    if token is None:  # blocking acquisition only returns None defensively
+        return
+    try:
+        _process_batch(batch_id)
+    except Exception as exc:
+        # Never leave a batch permanently spinning because setup, teardown, or
+        # a transaction outside the per-item handler failed.
+        try:
+            with db_connection.database_activity, Session(db_connection.engine) as session:
+                message = f"{type(exc).__name__}: {exc}"[:1000]
+                session.exec(text("""
+                    UPDATE import_items SET state='failed',error_code='batch_failed',error_message=:error
+                    WHERE batch_id=:id AND state IN ('queued','probing','analyzing')
+                """), params={"id": batch_id, "error": message})
+                session.exec(text("""
+                    UPDATE import_batches SET state='completed_with_errors',updated_at=CURRENT_TIMESTAMP
+                    WHERE id=:id AND state NOT IN ('paused','canceled')
+                """), params={"id": batch_id})
+                session.commit()
+        except Exception as cleanup_error:
+            print(f"CRITICAL: could not finalize failed import {batch_id}: {cleanup_error}", flush=True)
+    finally:
+        analysis_coordinator.release(token)
+
+
+def _process_batch(batch_id: str) -> None:
     """Single-worker processor. Re-fetches state at every commit boundary."""
-    with db_connection.database_activity, AnalysisExecutor(max_workers=1) as executor, Session(db_connection.engine) as session:
+    worker_timeout = 180 if sys.platform == "win32" else 570
+    with db_connection.database_activity, AnalysisExecutor(max_workers=1, task_timeout=worker_timeout) as executor, Session(db_connection.engine) as session:
         service = PlayImportService(session)
         try:
             batch = service.get(batch_id)
@@ -177,11 +211,14 @@ def process_batch(batch_id: str) -> None:
                              params={"id": item["id"], "hash": identity})
                 session.commit()
                 track = session.exec(select(Track).where(Track.filepath == str(path))).first()
+                existing_embedding = session.get(TrackEmbedding, track.id) if track else None
                 if track:
                     known = session.exec(text("SELECT sha256 FROM track_media WHERE track_id=:id"), params={"id": track.id}).first()
                     if known and known[0] and known[0] != identity:
                         raise ValueError("登録済み音源の内容が変化しています。参照修復または再解析を行ってください")
-                reused = bool(track)
+                reused = bool(track and has_completed_analysis(
+                    track, existing_embedding
+                ))
                 if not track:
                     matches = _rows(session.exec(text("""
                         SELECT t.* FROM track_media m JOIN tracks t ON t.id=m.track_id
@@ -189,10 +226,13 @@ def process_batch(batch_id: str) -> None:
                     """), params={"hash": identity}))
                     if len(matches) == 1 and Path(matches[0]["filepath"]).is_file() and _sha(Path(matches[0]["filepath"])) == identity:
                         track = session.get(Track, matches[0]["id"])
-                        reused = True
+                        existing_embedding = session.get(TrackEmbedding, track.id) if track else None
+                        reused = bool(track and has_completed_analysis(
+                            track, existing_embedding
+                        ))
                     elif len(matches) > 1:
                         raise ValueError("同じ内容の既存曲が複数あり、選択が必要です")
-                if not track:
+                if not reused:
                     session.exec(text("UPDATE import_items SET state='analyzing' WHERE id=:id"), params={"id": item["id"]})
                     session.commit()
                     from domain.services.ingestion_domain_service import IngestionDomainService
@@ -201,15 +241,13 @@ def process_batch(batch_id: str) -> None:
                     async def analyze():
                         loop = asyncio.get_running_loop()
                         return await domain.process_track_ingestion(
-                            str(path), False, loop, executor=executor, timeout=600,
+                            str(path), bool(track), loop, executor=executor, timeout=600,
                             save_to_db=False, write_source_metadata=False,
                         )
 
                     result = asyncio.run(analyze())
-                    if not result or not result.get("duration"):
-                        raise ValueError("音源の基本解析に失敗しました")
-                    if not isinstance(result.get("bpm"), (int, float)) or result.get("bpm", 0) <= 0:
-                        result["bpm"] = None
+                    if not result or not has_completed_analysis_result(result, existing_embedding):
+                        raise ValueError("BPM・長さ・メタデータ・埋め込みの完全な解析結果を取得できませんでした")
                     after = path.stat()
                     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or _sha(path) != identity:
                         raise ValueError("解析中に音源が変更されました。再試行してください")

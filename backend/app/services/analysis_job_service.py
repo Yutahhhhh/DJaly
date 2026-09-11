@@ -18,6 +18,7 @@ from domain.models.setlist import SetlistTrack
 from domain.services.analysis.constants import COMPONENT_VERSIONS, EMBEDDING_MODEL
 from infra.database import connection
 from infra.repositories.analysis_job_repository import AnalysisJobRepository
+from app.services.analysis_coordinator import analysis_coordinator
 
 
 def analyze_components(filepath, features):
@@ -47,6 +48,7 @@ class AnalysisJobService:
         self._job_id = None
         self._stop = threading.Event()
         self._lock = threading.RLock()
+        self._admission_token = None
 
     @property
     def engine(self):
@@ -126,10 +128,17 @@ class AnalysisJobService:
             workers = 1
         with connection.database_activity, self._lock:
             self._check_available(workers)
-            features, _, tracks = self._select(track_ids, genres, features, only_outdated, limit)
-            config = {"features": features, "only_outdated": only_outdated, "workers": workers}
-            job_id = self.repository.create(config, tracks)
-            self._launch(job_id)
+            token = analysis_coordinator.acquire("選択解析")
+            if token is None:
+                raise ValueError(f"{analysis_coordinator.owner or '別の'}解析が実行中です")
+            try:
+                features, _, tracks = self._select(track_ids, genres, features, only_outdated, limit)
+                config = {"features": features, "only_outdated": only_outdated, "workers": workers}
+                job_id = self.repository.create(config, tracks)
+                self._launch(job_id, token)
+            except Exception:
+                analysis_coordinator.release(token)
+                raise
             return self.repository.get(job_id)
 
     def _check_available(self, workers):
@@ -141,7 +150,8 @@ class AnalysisJobService:
         if ingestion_app_service.is_running:
             raise ValueError("Library import is running; wait for it to finish")
 
-    def _launch(self, job_id):
+    def _launch(self, job_id, token):
+        self._admission_token = token
         self._job_id = job_id
         self._stop.clear()
         self.repository.update_job(job_id, "running")
@@ -163,8 +173,15 @@ class AnalysisJobService:
             if sys.platform == "win32":
                 workers = 1
             self._check_available(workers)
-            self.repository.prepare_resume(job_id, workers, retry_failed)
-            self._launch(job_id)
+            token = analysis_coordinator.acquire("選択解析")
+            if token is None:
+                raise ValueError(f"{analysis_coordinator.owner or '別の'}解析が実行中です")
+            try:
+                self.repository.prepare_resume(job_id, workers, retry_failed)
+                self._launch(job_id, token)
+            except Exception:
+                analysis_coordinator.release(token)
+                raise
             return self.repository.get(job_id)
 
     def status(self, job_id=None):
@@ -225,12 +242,13 @@ class AnalysisJobService:
             session.commit()
 
     def _run(self, job_id):
-        job = self.repository.get(job_id)
-        config = job["config"]
         started = time.monotonic()
-        initial_elapsed = job["elapsed"]
+        initial_elapsed = 0
         futures = {}
         try:
+            job = self.repository.get(job_id)
+            config = job["config"]
+            initial_elapsed = job["elapsed"]
             executor = (ThreadPoolExecutor(max_workers=config["workers"]) if self._test_executor else
                         AnalysisExecutor(max_workers=1 if sys.platform == "win32" else config["workers"]))
             with executor as pool:
@@ -266,7 +284,14 @@ class AnalysisJobService:
             status = "paused" if latest["remaining"] else ("completed_with_errors" if latest["counts"]["failed"] else "completed")
             self.repository.update_job(job_id, status, initial_elapsed + time.monotonic() - started)
         except Exception as exc:
-            self.repository.update_job(job_id, "failed", initial_elapsed + time.monotonic() - started, str(exc))
+            try:
+                self.repository.update_job(job_id, "failed", initial_elapsed + time.monotonic() - started, str(exc))
+            except Exception as update_error:
+                print(f"CRITICAL: analysis job {job_id} could not be finalized: {update_error}", flush=True)
+        finally:
+            token, self._admission_token = self._admission_token, None
+            if token:
+                analysis_coordinator.release(token)
 
 
 analysis_job_service = AnalysisJobService()

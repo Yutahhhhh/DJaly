@@ -1,6 +1,5 @@
 import os
 import re
-import requests
 import urllib.parse
 import base64
 from typing import List, Set, Dict, Any, Optional
@@ -8,7 +7,8 @@ from sqlmodel import Session, select
 from domain.constants import SUPPORTED_EXTENSIONS
 from utils.filesystem import resolve_path
 from utils.metadata import extract_full_metadata, update_file_metadata
-from domain.models.track import Track, TrackAnalysis
+from utils.ingestion import has_completed_analysis
+from domain.models.track import Track, TrackAnalysis, TrackEmbedding
 
 def _is_supported_file(filename: str) -> bool:
     return filename.lower().endswith(SUPPORTED_EXTENSIONS)
@@ -85,8 +85,21 @@ class FilesystemAppService:
             
             analyzed_files = set()
             if file_paths:
-                statement = select(Track.filepath).where(Track.filepath.in_(file_paths))
-                analyzed_files = set(self.session.exec(statement).all())
+                # A Track row can be created before expensive audio analysis starts
+                # (for example by Play mode's fast import).  Its mere presence does
+                # not mean analysis succeeded.  Keep this definition aligned with
+                # utils.ingestion.filter_and_prioritize_files so partially imported
+                # and failed tracks remain visible and can be retried.
+                statement = (
+                    select(Track, TrackEmbedding)
+                    .join(TrackEmbedding, Track.id == TrackEmbedding.track_id)
+                    .where(Track.filepath.in_(file_paths), Track.bpm > 0)
+                )
+                analyzed_files = {
+                    track.filepath
+                    for track, embedding in self.session.exec(statement).all()
+                    if has_completed_analysis(track, embedding)
+                }
 
             final_result = []
             for item in items:
@@ -117,6 +130,8 @@ class FilesystemAppService:
         return re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
 
     def fetch_artwork_info(self, track_id: int) -> str:
+        import requests
+
         track = self.session.get(Track, track_id)
         if not track:
             raise ValueError("Track not found")

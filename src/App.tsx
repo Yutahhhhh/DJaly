@@ -187,7 +187,6 @@ function App() {
         </main>
 
         {/* Global Components */}
-        <GlobalProgressIndicator />
 
         {!releasingPerformanceAudio && (
           <MusicPlayer onLoadingChange={setIsPlayerLoading} />
@@ -195,6 +194,7 @@ function App() {
         <Toaster />
       </div>}
         </div>
+        <GlobalProgressIndicator />
         </div>
       </MetadataProvider>
     </IngestionProvider>

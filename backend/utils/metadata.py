@@ -58,6 +58,13 @@ def extract_metadata_smart(filepath: str, tag: Optional[TinyTag] = None) -> Dict
             tag = TinyTag(None, 0)
 
     filename_fallback = os.path.splitext(os.path.basename(filepath))[0]
+    filename_artist = "Unknown"
+    filename_title = filename_fallback
+    if " - " in filename_fallback:
+        possible_artist, possible_title = filename_fallback.split(" - ", 1)
+        if possible_artist.strip() and possible_title.strip():
+            filename_artist = possible_artist.strip()
+            filename_title = possible_title.strip()
 
     year = None
     if tag.year:
@@ -67,8 +74,8 @@ def extract_metadata_smart(filepath: str, tag: Optional[TinyTag] = None) -> Dict
             pass
 
     res = {
-        "title": (tag.title or filename_fallback).strip(),
-        "artist": (tag.artist or "Unknown").strip(),
+        "title": (tag.title or filename_title).strip(),
+        "artist": (tag.artist or filename_artist).strip(),
         "album": (tag.album or "Unknown").strip(),
         "genre": (tag.genre or "Unknown").strip(),
         "year": year

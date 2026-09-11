@@ -42,6 +42,16 @@ def test_metadata_smart_fallback(tmp_path, mocker):
     assert meta["title"] == "song"
     assert meta["artist"] == "Unknown"
 
+
+def test_metadata_smart_uses_artist_title_filename(tmp_path, mocker):
+    path = str(tmp_path / "Artist - Song.mp3")
+    mock_tag = mocker.Mock(title=None, artist=None, album=None, genre=None, year=None)
+    mocker.patch("tinytag.TinyTag.get", return_value=mock_tag)
+
+    meta = metadata.extract_metadata_smart(path)
+    assert meta["title"] == "Song"
+    assert meta["artist"] == "Artist"
+
 def test_update_file_metadata_unsupported(tmp_path):
     f = tmp_path / "test.txt"
     f.touch()

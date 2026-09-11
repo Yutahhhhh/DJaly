@@ -1,19 +1,21 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  ReactNode,
-} from "react";
-import { ingestionSocket, IngestMessage } from "@/services/ingestion-socket";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
+import { ingestionSocket, IngestMessage, IngestTerminalType } from "@/services/ingestion-socket";
 import { ingestService } from "@/services/ingest";
+import { apiClient } from "@/services/api-client";
 
 interface IngestionStats {
   current: number;
   total: number;
   processed: number;
+  skipped: number;
+  errors: number;
+}
+
+export interface IngestionOutcome extends IngestionStats {
+  type: IngestTerminalType;
+  message: string;
+  lastError: string;
+  failedFiles: string[];
 }
 
 interface IngestionContextType {
@@ -23,190 +25,191 @@ interface IngestionContextType {
   currentFile: string;
   stats: IngestionStats;
   showComplete: boolean;
+  lastError: string;
+  elapsedSeconds: number;
+  activeFiles: Array<{ path: string; seconds: number }>;
+  connectionError: string;
   cancelIngestion: () => Promise<void>;
   dismissComplete: () => void;
-  waitForIngestionComplete: () => Promise<void>;
+  waitForIngestionComplete: () => Promise<IngestionOutcome>;
   startIngestion: (targets: string[], forceUpdate: boolean) => Promise<void>;
 }
 
-const IngestionContext = createContext<IngestionContextType | undefined>(
-  undefined
-);
+const IngestionContext = createContext<IngestionContextType | undefined>(undefined);
+const terminal = new Set<IngestMessage["type"]>(["complete", "cancelled", "error", "idle"]);
+
+function statsOf(snapshot: IngestMessage): IngestionStats {
+  const processed = Number(snapshot.processed ?? 0);
+  const skipped = Number(snapshot.skipped ?? 0);
+  const errors = Number(snapshot.errors ?? 0);
+  return {
+    total: Number(snapshot.total ?? 0),
+    processed,
+    skipped,
+    errors,
+    current: processed + skipped + errors,
+  };
+}
+
+function outcomeOf(snapshot: IngestMessage): IngestionOutcome {
+  const type = terminal.has(snapshot.type) ? snapshot.type as IngestTerminalType : "idle";
+  const lastError = String(
+    snapshot.details?.last_error ||
+    (snapshot.type === "error" ? snapshot.message || "解析に失敗しました" : ""),
+  );
+  const failedFiles = Array.isArray(snapshot.details?.failed_files)
+    ? snapshot.details.failed_files.filter((path: unknown): path is string => typeof path === "string")
+    : [];
+  return { type, ...statsOf(snapshot), message: String(snapshot.message || ""), lastError, failedFiles };
+}
 
 export function IngestionProvider({ children }: { children: ReactNode }) {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const isAnalyzingRef = useRef(false);
-  const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState("");
-  const [currentFile, setCurrentFile] = useState("");
-  const [stats, setStats] = useState<IngestionStats>({
-    current: 0,
-    total: 0,
-    processed: 0,
-  });
+  const initial: IngestMessage = { type: "idle" };
+  const [snapshot, setSnapshot] = useState<IngestMessage>(initial);
   const [showComplete, setShowComplete] = useState(false);
-  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const completionResolvers = useRef<(() => void)[]>([]);
+  const [connectionError, setConnectionError] = useState("");
+  const [now, setNow] = useState(Date.now());
+  const snapshotRef = useRef<IngestMessage>(initial);
+  const isAnalyzingRef = useRef(false);
+  const clientGeneration = useRef(0);
+  const lastMessage = useRef(0);
+  const lastSignature = useRef("");
+  const completionResolvers = useRef<Array<(outcome: IngestionOutcome) => void>>([]);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Sync Ref with State
-  useEffect(() => {
-    isAnalyzingRef.current = isAnalyzing;
-  }, [isAnalyzing]);
+  const accept = useCallback((data: IngestMessage) => {
+    const current = snapshotRef.current;
+    const currentActive = !terminal.has(current.type);
+    const sameRun = Boolean(data.run_id && current.run_id && data.run_id === current.run_id);
+    if (sameRun && Number(data.revision ?? 0) < Number(current.revision ?? 0)) return;
+    // A previous socket/status request must not terminate a newly started run.
+    if (currentActive && current.run_id && data.run_id !== current.run_id) return;
 
-  const handleSocketMessage = useCallback((data: IngestMessage) => {
-    switch (data.type) {
-      case "start":
-        setIsAnalyzing(true);
-        // Ref will be updated by useEffect, but for safety in this callback if needed:
-        isAnalyzingRef.current = true;
-        setShowComplete(false);
-        setStats({
-          current: 0,
-          total: data.total || 0,
-          processed: 0,
-        });
-        setProgress(0);
-        setStatusText("Initializing analysis...");
-        break;
+    const signature = JSON.stringify(data);
+    setConnectionError("");
+    if (signature === lastSignature.current) return;
+    lastSignature.current = signature;
+    clientGeneration.current += 1;
+    snapshotRef.current = data;
+    setSnapshot(data);
 
-      case "processing":
-        setIsAnalyzing(true);
-        if (data.total) setStats((prev) => ({ ...prev, total: data.total! }));
-        if (data.current) {
-          setStats((prev) => ({ ...prev, current: data.current! }));
-          const percent = ((data.current - 1) / (data.total || 1)) * 100;
-          setProgress(percent);
-        }
-        if (data.file) setCurrentFile(data.file);
-        setStatusText("Analyzing audio features...");
-        break;
+    const wasRunning = isAnalyzingRef.current;
+    const running = !terminal.has(data.type);
+    isAnalyzingRef.current = running;
+    if (running) {
+      setShowComplete(false);
+      clearTimeout(timer.current);
+      return;
+    }
 
-      case "progress":
-        setIsAnalyzing(true);
-        if (data.total) setStats((prev) => ({ ...prev, total: data.total! }));
-        if (data.current) {
-          setStats((prev) => ({ ...prev, current: data.current! }));
-          const percent = (data.current / (data.total || 1)) * 100;
-          setProgress(percent);
-        }
-        if (data.file) setCurrentFile(data.file);
-
-        const bpmInfo = data.bpm ? `BPM: ${data.bpm.toFixed(1)}` : "";
-        const keyInfo = data.key ? `Key: ${data.key}` : "";
-        const extra = [bpmInfo, keyInfo].filter(Boolean).join(" | ");
-
-        setStatusText(extra ? `Processed: ${extra}` : "Processing...");
-        break;
-
-      case "complete":
-        setIsAnalyzing(false);
-        setProgress(100);
-        setStatusText("All files processed successfully.");
-        setShowComplete(true);
-        setStats((prev) => ({
-          ...prev,
-          processed: data.processed || prev.processed,
-        }));
-
-        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-        completeTimerRef.current = setTimeout(() => {
-          setShowComplete(false);
-        }, 5000);
-
-        // Resolve waiting promises
-        completionResolvers.current.forEach((resolve) => resolve());
-        completionResolvers.current = [];
-        break;
-
-      case "cancelled":
-        setIsAnalyzing(false);
-        setStatusText("Analysis cancelled.");
-        setShowComplete(false);
-        // Resolve waiting promises even on cancel? Or reject?
-        // For now, resolve so awaiters can proceed (maybe check status if needed)
-        completionResolvers.current.forEach((resolve) => resolve());
-        completionResolvers.current = [];
-        break;
-
-      case "error":
-        setIsAnalyzing(false);
-        setStatusText(`Error: ${data.message}`);
-        // Resolve on error too to unblock UI
-        completionResolvers.current.forEach((resolve) => resolve());
-        completionResolvers.current = [];
-        break;
+    const outcome = outcomeOf(data);
+    completionResolvers.current.splice(0).forEach(resolve => resolve(outcome));
+    if (data.type === "error" || data.type === "complete" && (wasRunning || outcome.errors > 0) || data.type === "cancelled" && wasRunning) {
+      setShowComplete(true);
+      clearTimeout(timer.current);
+      if (data.type === "complete" && outcome.errors === 0 || data.type === "cancelled") {
+        timer.current = setTimeout(() => setShowComplete(false), 5000);
+      }
     }
   }, []);
 
   useEffect(() => {
-    const unsubscribe = ingestionSocket.addMessageListener(handleSocketMessage);
-    return () => {
-      unsubscribe();
-      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    let live = true;
+    let pending = false;
+    const unsubscribe = ingestionSocket.addMessageListener(data => {
+      if (!live) return;
+      lastMessage.current = Date.now();
+      accept(data);
+    });
+    const restore = async () => {
+      if (pending || !live) return;
+      pending = true;
+      const generation = clientGeneration.current;
+      try {
+        const state = await apiClient.get<IngestMessage>("/ingest/status", undefined, 5000);
+        if (live && clientGeneration.current === generation) accept(state);
+      } catch {
+        if (live && Date.now() - lastMessage.current > 6000) {
+          setConnectionError("進捗への接続を再試行中です。解析処理は継続しています");
+        }
+      } finally {
+        pending = false;
+      }
     };
-  }, [handleSocketMessage]);
+    void restore();
+    const poll = setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() - lastMessage.current > 6000) void restore();
+    }, 3000);
+    return () => {
+      live = false;
+      unsubscribe();
+      clearInterval(poll);
+      clearTimeout(timer.current);
+    };
+  }, [accept]);
+
+  const stats = statsOf(snapshot);
+  const isAnalyzing = !terminal.has(snapshot.type);
+  const outcome = outcomeOf(snapshot);
+  const activeFiles = Object.entries(snapshot.details?.active_files ?? {}).map(([path, start]) => ({
+    path,
+    seconds: Math.max(0, Math.floor(now / 1000 - Number(start))),
+  }));
+  const statusText = snapshot.type === "complete"
+    ? `解析終了：成功 ${stats.processed}・スキップ ${stats.skipped}・失敗 ${stats.errors}`
+    : snapshot.type === "error" ? "解析を継続できませんでした"
+    : snapshot.type === "cancelled" ? "解析をキャンセルしました"
+    : snapshot.type === "idle" ? "停止中"
+    : String(snapshot.details?.stage || "解析を準備中");
+
+  const dismissComplete = useCallback(() => {
+    setShowComplete(false);
+    clearTimeout(timer.current);
+  }, []);
 
   const cancelIngestion = async () => {
     try {
-      await ingestService.cancel();
-    } catch (e) {
-      console.error(e);
+      const result = await ingestService.cancel();
+      if (result.state) accept(result.state);
+    } catch (cause) {
+      setConnectionError(String(cause));
+      throw cause;
     }
-  };
-
-  const dismissComplete = () => {
-    setShowComplete(false);
-    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
   };
 
   const startIngestion = async (targets: string[], forceUpdate: boolean) => {
-    isAnalyzingRef.current = true;
-    setIsAnalyzing(true);
-    setStatusText("Initializing ingestion...");
-    try {
-      await ingestService.ingest(targets, forceUpdate);
-    } catch (e) {
-      isAnalyzingRef.current = false;
-      setIsAnalyzing(false);
-      setStatusText("Failed to start ingestion");
-      throw e;
-    }
+    const result = await ingestService.ingest(targets, forceUpdate);
+    if (result.status === "error") throw new Error(result.message || "解析を開始できませんでした");
+    if (!result.state) throw new Error("解析の進捗情報を取得できませんでした");
+    accept(result.state);
   };
 
-  const waitForIngestionComplete = () => {
-    return new Promise<void>((resolve) => {
-      if (!isAnalyzingRef.current) {
-        resolve();
-        return;
-      }
-      completionResolvers.current.push(resolve);
-    });
-  };
+  const waitForIngestionComplete = () => new Promise<IngestionOutcome>(resolve => {
+    if (!isAnalyzingRef.current) resolve(outcomeOf(snapshotRef.current));
+    else completionResolvers.current.push(resolve);
+  });
 
-  return (
-    <IngestionContext.Provider
-      value={{
-        isAnalyzing,
-        progress,
-        statusText,
-        currentFile,
-        stats,
-        showComplete,
-        cancelIngestion,
-        dismissComplete,
-        waitForIngestionComplete,
-        startIngestion,
-      }}
-    >
-      {children}
-    </IngestionContext.Provider>
-  );
+  return <IngestionContext.Provider value={{
+    isAnalyzing,
+    stats,
+    progress: stats.total ? Math.min(100, stats.current / stats.total * 100) : 0,
+    statusText,
+    currentFile: String(snapshot.file || ""),
+    showComplete,
+    lastError: outcome.lastError,
+    activeFiles,
+    connectionError,
+    elapsedSeconds: snapshot.start_time ? Math.max(0, Math.floor(now / 1000 - Number(snapshot.start_time))) : 0,
+    cancelIngestion,
+    dismissComplete,
+    startIngestion,
+    waitForIngestionComplete,
+  }}>{children}</IngestionContext.Provider>;
 }
 
 export function useIngestion() {
   const context = useContext(IngestionContext);
-  if (context === undefined) {
-    throw new Error("useIngestion must be used within an IngestionProvider");
-  }
+  if (!context) throw new Error("useIngestion must be used within an IngestionProvider");
   return context;
 }
