@@ -1,7 +1,7 @@
 import asyncio
 import os
 import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+from domain.services.analysis.process_runner import AnalysisExecutor
 from typing import List, Dict, Any, Optional
 from fastapi import WebSocket
 from sqlmodel import Session, select
@@ -84,7 +84,7 @@ class IngestionAppService(BackgroundTaskService):
             )
             await self.emit_state()
 
-            max_workers = max(1, multiprocessing.cpu_count() - 1)
+            max_workers = 1 if sys.platform == "win32" else min(4, max(1, multiprocessing.cpu_count() - 1))
             loop = asyncio.get_running_loop()
             
             # Concurrency control
@@ -124,7 +124,7 @@ class IngestionAppService(BackgroundTaskService):
                     self.update_state() # Recalculate ETA
                     await self.emit_state()
 
-            with ProcessPoolExecutor(max_workers=max_workers, initializer=worker_init) as executor:
+            with AnalysisExecutor(max_workers=max_workers) as executor:
                 self.executor = executor
                 
                 # Create tasks for all files

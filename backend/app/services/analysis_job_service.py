@@ -3,8 +3,9 @@ import json
 import os
 import threading
 import time
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, wait, FIRST_COMPLETED
+import sys
+from domain.services.analysis.process_runner import AnalysisExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime
 
 import numpy as np
@@ -121,6 +122,8 @@ class AnalysisJobService:
         }
 
     def start(self, track_ids=None, genres=None, features=None, only_outdated=True, limit=None, workers=2):
+        if sys.platform == "win32":
+            workers = 1
         with connection.database_activity, self._lock:
             self._check_available(workers)
             features, _, tracks = self._select(track_ids, genres, features, only_outdated, limit)
@@ -157,6 +160,8 @@ class AnalysisJobService:
         with self._lock:
             job = self.repository.get(job_id)
             workers = workers if workers is not None else job["config"]["workers"]
+            if sys.platform == "win32":
+                workers = 1
             self._check_available(workers)
             self.repository.prepare_resume(job_id, workers, retry_failed)
             self._launch(job_id)
@@ -227,7 +232,7 @@ class AnalysisJobService:
         futures = {}
         try:
             executor = (ThreadPoolExecutor(max_workers=config["workers"]) if self._test_executor else
-                        ProcessPoolExecutor(max_workers=config["workers"], mp_context=multiprocessing.get_context("spawn"), max_tasks_per_child=256))
+                        AnalysisExecutor(max_workers=1 if sys.platform == "win32" else config["workers"]))
             with executor as pool:
                 exhausted = False
                 while futures or (not exhausted and not self._stop.is_set()):

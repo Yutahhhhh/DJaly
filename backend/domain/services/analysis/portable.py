@@ -5,6 +5,7 @@ No WSL, Python installation or model download is required on the user's PC.
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import numpy as np
 
@@ -33,19 +34,26 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         self.embedding_algo = True  # The model is loaded only when embedding is requested.
         self._embedding_session = None
 
-    def _load_audio(self, filepath):
+    def _load_audio(self, filepath, max_seconds=1800):
         converter = find_ffmpeg()
         if not converter:
             raise RuntimeError("同梱の音声デコーダーが見つかりません")
-        decoded = subprocess.run(
-            [converter, "-nostdin", "-v", "error", "-threads", "1", "-i", str(filepath),
-             "-vn", "-ac", "1", "-ar", str(constants.SAMPLE_RATE), "-f", "f32le", "pipe:1"],
-            capture_output=True, timeout=300, check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        # Spool decoded PCM to disk instead of keeping stdout plus a second
+        # NumPy copy in memory. Bound decoding before allocating the array.
+        with tempfile.TemporaryFile() as pcm:
+            decoded = subprocess.run(
+                [converter, "-nostdin", "-v", "error", "-threads", "1", "-i", str(filepath),
+                 "-t", str(max_seconds + 1), "-vn", "-ac", "1", "-ar", str(constants.SAMPLE_RATE),
+                 "-f", "f32le", "pipe:1"],
+                stdout=pcm, stderr=subprocess.PIPE, timeout=300, check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if pcm.tell() > max_seconds * constants.SAMPLE_RATE * 4:
+                raise ValueError("Audio analysis supports tracks up to 30 minutes")
+            pcm.seek(0)
+            audio = np.fromfile(pcm, dtype="<f4")
         if decoded.returncode:
             raise RuntimeError("音声をデコードできません: " + decoded.stderr.decode("utf-8", errors="replace")[-2000:])
-        audio = np.frombuffer(decoded.stdout, dtype="<f4").copy()
         if not audio.size or not np.isfinite(audio).all():
             raise ValueError("Audio is empty or contains non-finite samples")
         return audio

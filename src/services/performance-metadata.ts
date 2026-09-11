@@ -21,8 +21,23 @@ export interface RekordboxCueImportSummary {
 }
 
 
+// One global queue across decks/editor mounts. Share identical in-flight work.
+let gridQueue: Promise<unknown> = Promise.resolve();
+const gridRequests = new Map<string, Promise<PerformanceBeatGrid>>();
+function analyzeGrid(trackId: number, force = false): Promise<PerformanceBeatGrid> {
+  const key = `${trackId}:${force}`;
+  const pending = gridRequests.get(key);
+  if (pending) return pending;
+  const request = gridQueue.then(() => apiClient.post<PerformanceBeatGrid>(
+    `/tracks/${trackId}/grid-analysis`, { force }, 260_000,
+  ));
+  gridRequests.set(key, request);
+  gridQueue = request.then(() => { gridRequests.delete(key); }, () => { gridRequests.delete(key); });
+  return request;
+}
+
 export const performanceMetadataService = {
-  analyzeGrid: (trackId: number, force = false) => apiClient.post<PerformanceBeatGrid>(`/tracks/${trackId}/grid-analysis`, { force }),
+  analyzeGrid,
   rekordboxGrid: (trackId: number) => apiClient.post<PerformanceBeatGrid>(`/tracks/${trackId}/grid-rekordbox`, {}),
   importRekordboxCues: (trackId: number, revision: number) =>
     apiClient.post<PerformanceMetadata>(`/tracks/${trackId}/cues-rekordbox`, { revision }),

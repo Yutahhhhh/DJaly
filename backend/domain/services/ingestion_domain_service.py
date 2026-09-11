@@ -158,8 +158,8 @@ class IngestionDomainService:
                 loop.run_in_executor(executor, analyze_track_file, *run_args),
                 timeout=timeout
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            raise RuntimeError(f"Audio analysis failed for {filename}: {exc}") from exc
         
         if result:
             # 外部歌詞の反映
