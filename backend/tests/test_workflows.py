@@ -46,10 +46,10 @@ def test_setlist_entries_keep_identity_and_calculate_planned_duration(client: Te
 def test_set_duration_specification_vectors():
     assert calculate_set_duration([])["planned_duration_ms"] == 0
     assert calculate_set_duration([{"duration": 60}])["planned_duration_ms"] == 60_000
-    assert calculate_set_duration([{"duration": None}])["unknown_entries"] == 1
+    assert calculate_set_duration([{"duration": None}])["planned_duration_ms"] == 120_000
     assert calculate_set_duration([
         {"duration": 300, "overlap_next_ms": 30_000}, {"duration": 240},
-    ])["planned_duration_ms"] == 510_000
+    ])["planned_duration_ms"] == 210_000
     base = [
         {"duration": 300, "in_ms": 60_000, "out_ms": 300_000, "playback_rate": 1.25,
          "overlap_next_ms": 32_000},

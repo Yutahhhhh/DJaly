@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./components/analysis-layout.css";
 import { ThemeProvider } from "./components/theme-provider";
 
 class ErrorBoundary extends React.Component<

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Track } from "@/types";
 import type { SetlistTrack } from "@/services/setlists";
@@ -31,6 +32,7 @@ export function SetlistEditor({
   onTimingChange,
   targetDurationSeconds,
 }: SetlistEditorProps) {
+  const [showTiming, setShowTiming] = useState(false);
   const { setNodeRef } = useDroppable({ id: "setlist-editor-droppable" });
   const totalDuration = tracks.reduce(
     (acc: number, t: Track) => acc + (t.duration || 0),
@@ -41,7 +43,7 @@ export function SetlistEditor({
   let timingError: string | null = null;
   const entryDurations: Array<number | null> = [];
   tracks.forEach((track, index) => {
-    const out = track.out_ms ?? (track.duration == null ? null : track.duration * 1000);
+    const out = track.out_ms ?? Math.min(track.duration == null ? Infinity : track.duration * 1000, (track.in_ms ?? 0) + 120_000 * (track.playback_rate ?? 1));
     const input = track.in_ms ?? 0; const rate = track.playback_rate ?? 1; const extra = track.extra_duration_ms ?? 0;
     if (out == null) { unknownEntries += 1; entryDurations.push(null); }
     else if (![out, input, rate, extra].every(Number.isFinite) || input < 0 || out <= input || rate <= 0 || extra < 0 || track.duration != null && out > track.duration * 1000 + 0.5) {
@@ -62,18 +64,22 @@ export function SetlistEditor({
   return (
     <div
       ref={setNodeRef}
-      className="flex-1 flex flex-col bg-muted/10 border-r min-w-0"
+      className="setlist-editor flex-1 flex flex-col bg-muted/10 min-w-0 min-h-0"
     >
-      <div className="p-4 border-b bg-background flex justify-between items-center shadow-sm z-10">
-        <h3 className="font-semibold">Current Setlist</h3>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted px-2 py-1 rounded">
-          <Clock className="h-4 w-4" />
-          <span title="曲の全長合計">全長 {formatDuration(totalDuration)}</span>
-          <span className="opacity-30">|</span>
-          <span className={timingError ? "text-red-500" : ""} title={timingError ?? "IN/OUT・速度・重なりを反映"}>{timingError ? `予定 入力エラー: ${timingError}` : <>予定 {formatDuration(plannedDurationMs / 1000)}{unknownEntries ? ` + 未算出${unknownEntries}曲` : ""}</>}</span>
-          {!timingError && targetDelta != null && <><span className="opacity-30">|</span><span className={targetDelta < 0 ? "text-red-500" : ""}>目標まで {targetDelta < 0 ? "超過 " : ""}{formatDuration(Math.abs(targetDelta))}</span></>}
-          <span className="opacity-30">|</span><span>{tracks.length} tracks</span>
+      <div className="border-b bg-background px-3 py-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">Current Setlist <span className="text-xs font-normal text-muted-foreground">· {tracks.length}曲</span></h3>
+          <button type="button" className="rounded border px-2 py-1 text-xs" aria-expanded={showTiming} onClick={() => setShowTiming(value => !value)}>{showTiming ? "使用時間を閉じる" : "使用時間を編集"}</button>
         </div>
+        <div className="setlist-summary">
+          <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />予定 {formatDuration(plannedDurationMs / 1000)}</span>
+          {targetDurationSeconds != null && <span>目標 {formatDuration(targetDurationSeconds)}</span>}
+          {!timingError && targetDelta != null && <span className={targetDelta < 0 ? "text-red-500" : ""}>{targetDelta < 0 ? "超過" : "残り"} {formatDuration(Math.abs(targetDelta))}</span>}
+          <span title="音源の全長合計">全長 {formatDuration(totalDuration)}</span>
+        </div>
+        {showTiming && <p className="text-xs text-muted-foreground">未指定は1曲2分（短い曲は全長）。保存済みの指定は保持します。</p>}
+        {timingError && <p role="alert" className="text-xs text-red-500">{timingError}</p>}
+        {unknownEntries > 0 && <p className="text-xs text-muted-foreground">未算出 {unknownEntries}曲</p>}
       </div>
 
       <ScrollArea className="flex-1">
@@ -111,13 +117,19 @@ export function SetlistEditor({
                     onSelect={() => onTrackSelect(track)}
                     onRemove={() => onRemoveTrack(index)}
                   />
-                  <div className="ml-7 grid grid-cols-5 gap-2 rounded border bg-background/70 p-2 text-xs">
-                    <label>IN 秒<input className="mt-1 w-full rounded border bg-background px-1 py-1" type="number" min="0" step="0.1" defaultValue={(track.in_ms || 0) / 1000} key={`in-${track.revision}`} onBlur={(event) => onTimingChange(index, { in_ms: Number(event.currentTarget.value) * 1000 })} /></label>
-                    <label>OUT 秒<input className="mt-1 w-full rounded border bg-background px-1 py-1" type="number" min="0" step="0.1" placeholder={String(track.duration ?? "—")} defaultValue={track.out_ms == null ? "" : track.out_ms / 1000} key={`out-${track.revision}`} onBlur={(event) => onTimingChange(index, { out_ms: event.currentTarget.value === "" ? null : Number(event.currentTarget.value) * 1000 })} /></label>
-                    <label>速度倍率<input className="mt-1 w-full rounded border bg-background px-1 py-1" type="number" min="0.01" step="0.01" defaultValue={track.playback_rate || 1} key={`rate-${track.revision}`} onBlur={(event) => onTimingChange(index, { playback_rate: Number(event.currentTarget.value) })} /></label>
-                    <label>追加 秒<input className="mt-1 w-full rounded border bg-background px-1 py-1" type="number" min="0" step="0.1" defaultValue={(track.extra_duration_ms || 0) / 1000} key={`extra-${track.revision}`} onBlur={(event) => onTimingChange(index, { extra_duration_ms: Number(event.currentTarget.value) * 1000 })} /></label>
-                    <label>次曲と重ねる 秒<input className="mt-1 w-full rounded border bg-background px-1 py-1" type="number" min="0" step="0.1" disabled={index === tracks.length - 1} defaultValue={(track.overlap_next_ms || 0) / 1000} key={`overlap-${track.revision}`} onBlur={(event) => onTimingChange(index, { overlap_next_ms: Number(event.currentTarget.value) * 1000 })} /></label>
-                  </div>
+                  {showTiming && <div className="ml-7 flex flex-wrap items-center gap-2 rounded border bg-background/70 p-2 text-xs">
+                    <label className="flex items-center gap-2">使用時間（分）
+                      <input className="w-20 rounded border bg-background px-2 py-1" type="number" min="0.01" step="0.1"
+                        defaultValue={Number(((entryDurations[index] ?? 120_000) / 60_000).toFixed(2))}
+                        key={`duration-${track.setlist_track_id}-${track.revision}`}
+                        onBlur={(event) => {
+                          const minutes = Number(event.currentTarget.value);
+                          if (!event.currentTarget.value || !Number.isFinite(minutes) || minutes <= 0) { event.currentTarget.value = String(Number(((entryDurations[index] ?? 120_000) / 60_000).toFixed(2))); return; }
+                          if (Math.abs(minutes * 60_000 - (entryDurations[index] ?? 120_000)) < 600) return;
+                          onTimingChange(index, { out_ms: Math.min(track.duration == null ? Infinity : track.duration * 1000, (track.in_ms ?? 0) + minutes * 60_000 * (track.playback_rate ?? 1)), extra_duration_ms: 0 });
+                        }} />
+                    </label>
+                  </div>}
                 </Fragment>
               ))}
             </SortableContext>

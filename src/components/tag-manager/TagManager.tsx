@@ -1,3 +1,4 @@
+import { ResizeHandle } from "@/components/play/ResizeHandle";
 import { useState, useMemo, useEffect } from "react";
 import { TagSidebar } from "./TagSidebar";
 import { TagList } from "./TagList";
@@ -37,7 +38,7 @@ export function TagManager() {
   // Genre/Subgenre Mode: Use the original GenreManager component (Tabs UI)
   if (activeCategory === "genre" || activeCategory === "subgenre") {
     return (
-      <div className="h-full flex overflow-hidden w-full bg-background border-t">
+      <div data-resize-scope className="analysis-panels h-full flex overflow-hidden w-full bg-background border-t">
         <TagSidebar 
           activeCategory={activeCategory} 
           onSelectCategory={(cat) => {
@@ -47,6 +48,7 @@ export function TagManager() {
           trackSearch={trackSearch}
           extraParams={extraParams}
         />
+        <ResizeHandle variable="--tag-sidebar" storageKey="plumdeck.width.tags.sidebar" label="タグ分類の幅" min={140} max={400} />
         <div className="flex-1 min-w-0 bg-background">
           <GenreManager mode={activeCategory} onPlay={play} />
         </div>
@@ -56,7 +58,7 @@ export function TagManager() {
 
   // Track Info / Lyrics Mode
   return (
-    <div className="h-full flex overflow-hidden w-full bg-background border-t">
+    <div data-resize-scope className="analysis-panels h-full flex overflow-hidden w-full bg-background border-t">
       <TagSidebar 
         activeCategory={activeCategory} 
         onSelectCategory={(cat) => {
@@ -67,6 +69,7 @@ export function TagManager() {
         extraParams={extraParams}
       />
       
+      <ResizeHandle variable="--tag-sidebar" storageKey="plumdeck.width.tags.sidebar" label="タグ分類の幅" min={140} max={400} />
       <TagList 
         category={activeCategory}
         onSelectItem={setSelectedItem}
@@ -76,6 +79,7 @@ export function TagManager() {
         setStatusFilter={setStatusFilter}
       />
       
+      <ResizeHandle variable="--tag-list" storageKey="plumdeck.width.tags.list" label="タグ一覧の幅" min={160} max={600} />
       <TagEditor 
         category={activeCategory}
         selectedItem={selectedItem}

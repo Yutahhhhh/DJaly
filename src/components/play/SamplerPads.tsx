@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { sampler } from "@/services/dj-engine/sampler";
+import { SAMPLE_MIME, readSample, sampleDrag } from "@/services/sampler-library";
 
 /** Eight hardware-aligned pads, with sample management kept inside the deck. */
 export function SamplerPads({ offset, enabled, cueAvailable }: { offset: number; enabled: boolean; cueAvailable: boolean }) {
@@ -23,6 +24,9 @@ export function SamplerPads({ offset, enabled, cueAvailable }: { offset: number;
   return <>
     <div className="dj-pad-grid dj-sampler-pads" aria-label="SAMPLERパッド">
       {state.slots.slice(offset, offset + 8).map(s => <button key={s.slot} type="button"
+        data-sampler-slot={s.slot} data-sampler-enabled={enabled && !busy && s.status !== "loading" ? "true" : "false"}
+        onDragOver={event => { if (enabled && !busy && event.dataTransfer.types.includes(SAMPLE_MIME)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; } }}
+        onDrop={event => { const asset = readSample(event.dataTransfer); if (!asset) return; event.preventDefault(); event.stopPropagation(); if (!enabled || busy || s.status === "loading" || !sampleDrag.claim()) return; setSelected(s.slot); run(async () => { setBusy(true); try { await sampler.load(s.slot, asset.path); } finally { setBusy(false); } }); }}
         className={`dj-performance-pad${s.status === "playing" ? " is-on" : ""}`}
         disabled={!enabled || busy || s.status === "loading"} aria-pressed={s.status === "playing"}
         title={`${s.name || "クリックして音源を選択"} · SHIFTで停止`}

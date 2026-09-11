@@ -1,3 +1,4 @@
+import { ResizeHandle } from "@/components/play/ResizeHandle";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   DndContext,
@@ -321,7 +322,7 @@ export function SetlistCreator() {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="h-full flex overflow-hidden w-full bg-background border-t">
+      <div data-resize-scope className="analysis-panels setlist-panels h-full flex overflow-hidden w-full bg-background border-t">
         <SetlistSidebar
           setlists={setlists}
           activeSetlistId={activeSetlist?.id || null}
@@ -333,10 +334,11 @@ export function SetlistCreator() {
           onDelete={(id) => setlistsService.delete(id).then(loadSetlists)}
         />
 
+        <ResizeHandle variable="--setlist-sidebar" storageKey="plumdeck.width.setlists.sidebar" label="セットリスト一覧の幅" min={140} max={400} />
         {activeSetlist ? (
-          <div className="flex-1 flex min-w-0 divide-x divide-border relative">
+          <div className="setlist-columns flex-1 flex min-w-0 relative">
             {/* 保存状態インジケーター */}
-            <div className="absolute top-2 right-2 z-30 pointer-events-none">
+            <div className="absolute bottom-2 right-2 z-30 pointer-events-none">
               {isSaving ? (
                 <span className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground bg-background/90 border rounded-full px-2.5 py-1 shadow-sm">
                   <Loader2 className="h-3 w-3 animate-spin" /> Saving…
@@ -363,6 +365,7 @@ export function SetlistCreator() {
                 void commitTracksToDB(next);
               }}
             />
+            <ResizeHandle variable="--setlist-selector" storageKey="plumdeck.width.setlists.selector" label="選曲パネルの幅" min={220} max={800} invert />
             <TrackSelector
               referenceTrack={selectedTrack}
               onAddTrack={async (t: Track, wordplayData?: any) => {
