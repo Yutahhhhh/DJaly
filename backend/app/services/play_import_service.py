@@ -4,8 +4,7 @@ import asyncio
 import hashlib
 import os
 import uuid
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+from domain.services.analysis.process_runner import AnalysisExecutor
 from pathlib import Path
 from typing import Any
 
@@ -152,7 +151,7 @@ class PlayImportService:
 
 def process_batch(batch_id: str) -> None:
     """Single-worker processor. Re-fetches state at every commit boundary."""
-    with db_connection.database_activity, ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as executor, Session(db_connection.engine) as session:
+    with db_connection.database_activity, AnalysisExecutor(max_workers=1) as executor, Session(db_connection.engine) as session:
         service = PlayImportService(session)
         try:
             batch = service.get(batch_id)

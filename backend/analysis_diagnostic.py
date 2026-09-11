@@ -20,6 +20,10 @@ def run():
             output.setparams((1, 2, sr, 0, "NONE", "not compressed"))
             output.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
         result = AudioAnalyzer().analyze_selected(str(path), ["rhythm", "key", "timbre", "waveform", "embedding"])
+        from domain.services.analysis.rhythm_grid import analyze_grid
+        grid = analyze_grid(str(path))
+        assert abs(grid["bpm"] - 120) < 3, grid
+        assert len(grid["ticks"]) >= 16, grid
     assert abs(result["bpm"] - 120) < 3, result["bpm"]
     assert result["key"] == "C major", result["key"]
     assert len(result["embedding"]) == 200
@@ -30,4 +34,6 @@ def run():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     run()

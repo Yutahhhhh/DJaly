@@ -1,7 +1,7 @@
 """Rhythm-only analysis with bounded decode, process lifetime, and concurrency."""
-import multiprocessing
-import queue
+import sys
 import threading
+from .process_runner import run_isolated
 
 MAX_SECONDS = 1800
 TIMEOUT_SECONDS = 120
@@ -16,6 +16,16 @@ class GridAnalysisError(ValueError):
 
 def _extract(filepath: str) -> dict:
     import numpy as np
+    if sys.platform == "win32":
+        from .portable import PortableAudioAnalyzer
+        analyzer = PortableAudioAnalyzer()
+        audio = analyzer._load_audio(filepath, max_seconds=MAX_SECONDS)
+        if len(audio) < 5 * 44100 or float(np.max(np.abs(audio))) < 1e-6:
+            raise ValueError("Grid analysis needs at least five seconds of audible audio")
+        bpm, ticks, confidence, _, _ = analyzer.rhythm_extractor(audio)
+        if not np.isfinite(ticks).all() or len(ticks) < 2:
+            raise ValueError("The rhythm analyzer found no usable beats")
+        return {"bpm": float(bpm), "ticks": ticks.tolist(), "confidence": float(confidence)}
     import essentia.standard as es
 
     # EasyLoader limits decoding before allocating a whole, possibly hours-long file.
@@ -33,36 +43,15 @@ def _extract(filepath: str) -> dict:
     return {"bpm": float(bpm), "ticks": ticks.tolist(), "confidence": float(confidence)}
 
 
-def _worker(filepath: str, output) -> None:
-    try:
-        output.put((True, _extract(filepath)))
-    except Exception as exc:
-        output.put((False, str(exc)))
-
-
 def analyze_grid(filepath: str) -> dict:
-    if not _workers.acquire(blocking=False):
-        raise GridAnalysisError("Another grid analysis is running; retry when it completes", 429)
-    context = multiprocessing.get_context("spawn")
-    output = context.Queue(maxsize=1)
-    process = context.Process(target=_worker, args=(filepath, output), daemon=True)
+    if not _workers.acquire(timeout=TIMEOUT_SECONDS + 5):
+        raise GridAnalysisError("Grid analysis queue timed out; retry shortly", 503)
     try:
-        process.start()
         try:
-            ok, result = output.get(timeout=TIMEOUT_SECONDS)
-        except queue.Empty as exc:
+            return run_isolated(_extract, (filepath,), TIMEOUT_SECONDS)
+        except TimeoutError as exc:
             raise GridAnalysisError("Grid analysis timed out", 504) from exc
-        if not ok:
-            raise GridAnalysisError("Grid analysis failed: " + result)
-        return result
+        except RuntimeError as exc:
+            raise GridAnalysisError("Grid analysis failed: " + str(exc)) from exc
     finally:
-        if process.pid:
-            process.join(timeout=1)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=2)
-            if process.is_alive():
-                process.kill()
-                process.join(timeout=2)
-        output.close()
         _workers.release()
