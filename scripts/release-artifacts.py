@@ -25,8 +25,14 @@ def validate():
 def sign(path):
     env = {**os.environ, 'TAURI_PRIVATE_KEY': os.environ['TAURI_SIGNING_PRIVATE_KEY'],
         'TAURI_PRIVATE_KEY_PASSWORD': os.environ.get('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', '')}
-    subprocess.run(['node', str(ROOT / 'node_modules/@tauri-apps/cli/tauri.js'),
-        'signer', 'sign', str(path)], env=env, check=True, capture_output=True)
+    result = subprocess.run(['node', str(ROOT / 'node_modules/@tauri-apps/cli/tauri.js'),
+        'signer', 'sign', str(path)], env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        # The CLI's own message (e.g. "Wrong password for that key") never
+        # includes the key or password; surface it instead of a bare
+        # CalledProcessError so a bad TAURI_SIGNING_PRIVATE_KEY_PASSWORD is
+        # obvious from the workflow log.
+        raise RuntimeError(f"tauri signer sign failed: {(result.stderr or result.stdout).strip()}")
     signature = Path(str(path) + '.sig').read_text().strip()
     public = base64.b64decode(CONFIG['plugins']['updater']['pubkey']).decode().splitlines()[1]
     signed = base64.b64decode(signature).decode().splitlines()[1]

@@ -72,7 +72,7 @@ jobs:
 
       - name: install FFmpeg (macOS)
         if: matrix.platform == 'macos-latest'
-        run: brew install ffmpeg cmake ninja pkgconf qtbase qt5compat qtsvg qtdeclarative qttranslations portaudio libsndfile libsamplerate rubberband sound-touch chromaprint libebur128 taglib protobuf abseil opus libnice openssl@3 flac libogg libvorbis speex mpg123
+        run: brew install ffmpeg cmake ninja pkgconf qtbase qt5compat qtsvg qtdeclarative qttranslations portaudio libsndfile libsamplerate rubberband sound-touch chromaprint libebur128 taglib protobuf abseil opus libnice openssl@3 flac libogg libvorbis speex mpg123 googletest
 
       - name: install FFmpeg (Windows)
         if: matrix.platform == 'windows-2022'
