@@ -65,12 +65,16 @@ export function ImportQueueProgress({ raised = false }: { raised?: boolean }) {
         {(error || actionError) && <p role="alert" className="text-sm text-destructive">{actionError || error}</p>}
         {display.map(row => {
           const done = Number(row.succeeded_items) + Number(row.failed_items) + Number(row.skipped_items);
+          const effectiveProfile = row.effective_analysis_profile || (row.analysis_profile === "light" ? "light" : "full");
           return <section key={row.id} className="min-w-0 space-y-2 rounded border p-3 text-sm">
             <div className="flex flex-wrap justify-between gap-2">
               <strong>{row.target_name_snapshot || "Collection"}</strong><span>{labels[row.state] || row.state} · {done}/{row.total_items}曲</span>
             </div>
             <Progress value={Number(row.total_items) ? 100 * done / Number(row.total_items) : 0} />
             {row.current_file && <p className="truncate" title={row.current_file}>{row.current_file.split(/[/\\]/).pop()}</p>}
+            <p className="text-xs text-muted-foreground">
+              解析方法：{effectiveProfile === "light" ? "軽量（プレイ優先）" : row.analysis_profile === "auto" ? "自動・詳細解析中" : "詳細"}
+            </p>
             <p className="text-xs text-muted-foreground">成功 {row.succeeded_items} · 失敗 {row.failed_items} · スキップ {row.skipped_items} · 待機 {row.queued_items ?? 0}</p>
             <div className="flex flex-wrap gap-2">
               {!importFinished(row) && <>
@@ -82,7 +86,7 @@ export function ImportQueueProgress({ raised = false }: { raised?: boolean }) {
             </div>
             {details?.id === row.id && <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
               {details.items?.map(item => <li key={String(item.id)} className="break-all">
-                {String(item.canonical_path ?? "").split(/[/\\]/).pop()} · {String(item.error_message || item.state)}
+                {String(item.canonical_path ?? "").split(/[/\\]/).pop()} · {item.analysis_level === "light" ? "軽量解析で使用可能" : String(item.error_message || item.state)}
               </li>)}
             </ul>}
           </section>;

@@ -32,6 +32,9 @@ export interface PeerRecord {
   connectionId: string;
   role: Role;
   displayName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   peerFingerprint: string;
   accepted: boolean;
   admissionInviteHash?: string;
@@ -66,6 +69,9 @@ export interface RegisterHostInput {
   hostFingerprint: string;
   recoverySecret: string;
   sessionName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   maxPeers: number;
   connectionId: string;
   ttlSeconds: number;
@@ -92,6 +98,9 @@ export interface GuestJoinInput {
   roomLocator: string;
   inviteToken: string;
   displayName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   peerFingerprint: string;
   connectionId: string;
 }
@@ -109,6 +118,9 @@ export type GuestJoinResult =
 export interface RosterEntry {
   peerId: string;
   displayName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   role: Role;
   acceptedAt: number;
 }
@@ -181,7 +193,10 @@ export class RoomRegistry {
       const hostPeer = existing.peers.get(existing.hostPeerId);
       if (hostPeer) {
         hostPeer.connectionId = input.connectionId;
-        hostPeer.displayName = input.sessionName;
+        hostPeer.displayName = input.djName ?? input.sessionName;
+        hostPeer.djName = input.djName;
+        hostPeer.avatarDataUrl = input.avatarDataUrl;
+        hostPeer.themeColor = input.themeColor;
       }
       this.connections.set(input.connectionId, {
         roomLocator,
@@ -224,7 +239,10 @@ export class RoomRegistry {
             peerId: hostPeerId,
             connectionId: input.connectionId,
             role: "host",
-            displayName: input.sessionName,
+            displayName: input.djName ?? input.sessionName,
+            djName: input.djName,
+            avatarDataUrl: input.avatarDataUrl,
+            themeColor: input.themeColor,
             peerFingerprint: input.hostFingerprint,
             accepted: true,
             acceptedAtMs: nowMs,
@@ -305,6 +323,9 @@ export class RoomRegistry {
       connectionId: input.connectionId,
       role: "guest",
       displayName: input.displayName,
+      djName: input.djName,
+      avatarDataUrl: input.avatarDataUrl,
+      themeColor: input.themeColor,
       peerFingerprint: input.peerFingerprint,
       admissionInviteHash: room.inviteTokenHash,
       accepted: false,
@@ -381,6 +402,9 @@ export class RoomRegistry {
       out.push({
         peerId: peer.peerId,
         displayName: peer.displayName,
+        djName: peer.djName,
+        avatarDataUrl: peer.avatarDataUrl,
+        themeColor: peer.themeColor,
         role: peer.role,
         acceptedAt: peer.acceptedAtMs,
       });

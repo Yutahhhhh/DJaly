@@ -103,6 +103,13 @@ class AudioAnalyzer:
                 except Exception as e:
                     logger.warning(f"Embedding failed: {e}")
 
+            # Persist the intended result tier. Validation still requires a
+            # real embedding before a detailed result can be considered done.
+            result["analysis_level"] = "full"
+            result.setdefault("features_extra", {}).update(
+                analysis_level="full", analysis_profile="full"
+            )
+
             return result
         except Exception as e:
             print(f"ERROR processing {filepath}: {e}", flush=True)

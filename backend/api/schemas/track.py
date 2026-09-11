@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 from sqlmodel import SQLModel
 
@@ -13,6 +13,7 @@ class TrackRead(SQLModel):
     year: Optional[int] = None
     duration: float
     bpm: Optional[float] = None
+    analysis_level: Optional[Literal["light", "full"]] = None
     
     key: str
     scale: str

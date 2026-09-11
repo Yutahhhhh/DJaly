@@ -7,6 +7,8 @@ import {
   isPeerId,
   isInviteToken,
   isInviteTokenHash,
+  isAvatarDataUrl,
+  sanitizeThemeColor,
   PROTOCOL_VERSION,
 } from "../src/protocol.js";
 
@@ -87,6 +89,56 @@ test("guest.join sanitizes displayName through the full parse", () => {
   if (result.ok && result.frame.type === "guest.join") {
     assert.equal(result.frame.displayName, "DJ Test");
   }
+});
+
+test("DJ profile fields are normalized without requiring legacy displayName", () => {
+  const avatarDataUrl = "data:image/webp;base64,AAAA";
+  const result = parseClientFrame(
+    JSON.stringify({
+      v: 1,
+      type: "guest.join",
+      roomLocator: "a".repeat(32),
+      inviteToken: "b".repeat(22),
+      djName: "  DJ Profile  ",
+      avatarDataUrl,
+      themeColor: "#a1b2c3",
+      peerFingerprint: "fp-1",
+    }),
+  );
+  assert.equal(result.ok, true);
+  if (result.ok && result.frame.type === "guest.join") {
+    assert.equal(result.frame.displayName, "DJ Profile");
+    assert.equal(result.frame.djName, "DJ Profile");
+    assert.equal(result.frame.avatarDataUrl, avatarDataUrl);
+    assert.equal(result.frame.themeColor, "#A1B2C3");
+  }
+});
+
+test("DJ profile rejects oversized or unsafe avatar data and invalid colors", () => {
+  assert.equal(isAvatarDataUrl(""), true);
+  assert.equal(isAvatarDataUrl("data:image/png;base64,AAAA"), true);
+  assert.equal(isAvatarDataUrl("data:image/svg+xml;base64,AAAA"), false);
+  assert.equal(
+    isAvatarDataUrl(`data:image/png;base64,${"A".repeat(4096)}`),
+    false,
+  );
+  assert.equal(sanitizeThemeColor("#00aAfF"), "#00AAFF");
+  assert.equal(sanitizeThemeColor("red"), null);
+
+  const result = parseClientFrame(
+    JSON.stringify({
+      v: 1,
+      type: "host.register",
+      inviteTokenHash: "a".repeat(64),
+      inviteExpiresAt: Date.now() + 60_000,
+      recoverySecret: "test-recovery-secret-123456789",
+      hostFingerprint: "host-fingerprint-1234",
+      sessionName: "Session",
+      djName: "Host DJ",
+      avatarDataUrl: "data:image/svg+xml;base64,AAAA",
+    }),
+  );
+  assert.equal(result.ok, false);
 });
 
 test("validators accept only well-formed identifiers", () => {

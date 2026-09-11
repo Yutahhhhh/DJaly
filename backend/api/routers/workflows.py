@@ -103,6 +103,7 @@ class PlayImportRequest(BaseModel):
     target: ImportTarget
     paths: list[str] = Field(min_length=1, max_length=2000)
     origin: Literal["native_file_drop", "file_picker"] = "native_file_drop"
+    analysis_profile: Literal["auto", "light", "full"] = "auto"
 
 
 class ManualTimelineRequest(BaseModel):
@@ -290,6 +291,7 @@ def create_play_import(payload: PlayImportRequest, background: BackgroundTasks,
     try:
         result = PlayImportService(session).create(
             payload.request_id, payload.target.kind, payload.target.id, payload.paths, payload.origin,
+            payload.analysis_profile,
         )
         if result["state"] in {"queued", "paused"}:
             background.add_task(process_batch, result["id"])

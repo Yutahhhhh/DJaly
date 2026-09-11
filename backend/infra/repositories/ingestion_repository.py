@@ -7,6 +7,7 @@ from sqlmodel import Session, select, text
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
 from domain.models.lyrics import Lyrics
 from utils.array_codec import pack_f32, pack_u8_waveform
+from utils.ingestion import has_valid_embedding
 import infra.database.connection as db_connection
 
 class IngestionRepository:
@@ -20,7 +21,8 @@ class IngestionRepository:
             "title": result.get("title"), "artist": result.get("artist"),
             "album": result.get("album"), "genre": result.get("genre"), "year": result.get("year"),
             "bpm": result.get("bpm", 0), "key": result.get("key", ""), "scale": result.get("scale", ""),
-            "duration": result.get("duration", 0), "energy": result.get("energy", 0.0),
+            "duration": result.get("duration", 0), "analysis_level": result.get("analysis_level"),
+            "energy": result.get("energy", 0.0),
             "danceability": result.get("danceability", 0.0), "brightness": result.get("brightness", 0.0),
             "contrast": result.get("contrast", 0.0), "noisiness": result.get("noisiness", 0.0),
             "loudness": result.get("loudness", -60.0),
@@ -37,14 +39,31 @@ class IngestionRepository:
 
             if existing_track:
                 track_id = existing_track.id
+                existing_embedding = session.get(TrackEmbedding, track_id)
+                preserve_full_analysis = bool(
+                    result.get("analysis_level") == "light"
+                    and existing_track.analysis_level != "light"
+                    and isinstance(existing_track.bpm, (int, float))
+                    and existing_track.bpm > 0
+                    and has_valid_embedding(existing_embedding)
+                )
                 if update_metadata:
                     for k, v in track_update_data.items():
                         # Partial metadata updates must not erase absent audio features.
                         if k not in result:
                             continue
+                        if preserve_full_analysis and k in {
+                            "bpm", "key", "scale", "analysis_level", "energy",
+                            "danceability", "brightness", "contrast", "noisiness",
+                            "loudness", "loudness_range", "spectral_flux",
+                            "spectral_rolloff",
+                        }:
+                            continue
                         if isinstance(v, str) and v and v.lower() != "unknown":
                             setattr(existing_track, k, v)
                         elif k == "year" and isinstance(v, int) and v > 0:
+                            setattr(existing_track, k, v)
+                        elif k == "analysis_level" and v in {"light", "full"}:
                             setattr(existing_track, k, v)
                         elif k in {
                             "bpm", "duration", "energy", "danceability", "brightness",
@@ -78,17 +97,17 @@ class IngestionRepository:
             if analysis is None:
                 analysis = TrackAnalysis(track_id=track_id)
 
-            if extras:
+            if extras and not (existing_track and preserve_full_analysis):
                 new_fx = json.dumps(extras)
                 if new_fx != (analysis.features_extra_json or "{}"):
                     analysis.features_extra_json = new_fx
                     analysis_changed = True
-            if extras.get("waveform_peaks"):
+            if extras.get("waveform_peaks") and not (existing_track and preserve_full_analysis):
                 new_wave = pack_u8_waveform(extras["waveform_peaks"])
                 if new_wave != analysis.waveform_u8:
                     analysis.waveform_u8 = new_wave
                     analysis_changed = True
-            if extras.get("beat_positions"):
+            if extras.get("beat_positions") and not (existing_track and preserve_full_analysis):
                 new_beats = pack_f32(extras["beat_positions"])
                 if new_beats != analysis.beats_f32:
                     analysis.beats_f32 = new_beats

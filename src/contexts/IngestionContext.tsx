@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, Re
 import { ingestionSocket, IngestMessage, IngestTerminalType } from "@/services/ingestion-socket";
 import { ingestService } from "@/services/ingest";
 import { apiClient } from "@/services/api-client";
+import { normalizeAnalysisProfile, type AnalysisProfile } from "@/services/analysis-profile";
 
 interface IngestionStats {
   current: number;
@@ -29,10 +30,12 @@ interface IngestionContextType {
   elapsedSeconds: number;
   activeFiles: Array<{ path: string; seconds: number }>;
   connectionError: string;
+  analysisProfile: AnalysisProfile;
+  effectiveAnalysisProfile: "light" | "full";
   cancelIngestion: () => Promise<void>;
   dismissComplete: () => void;
   waitForIngestionComplete: () => Promise<IngestionOutcome>;
-  startIngestion: (targets: string[], forceUpdate: boolean) => Promise<void>;
+  startIngestion: (targets: string[], forceUpdate: boolean, analysisProfile?: AnalysisProfile) => Promise<void>;
 }
 
 const IngestionContext = createContext<IngestionContextType | undefined>(undefined);
@@ -162,6 +165,10 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     : snapshot.type === "cancelled" ? "解析をキャンセルしました"
     : snapshot.type === "idle" ? "停止中"
     : String(snapshot.details?.stage || "解析を準備中");
+  const analysisProfile = normalizeAnalysisProfile(snapshot.details?.analysis_profile);
+  const effectiveAnalysisProfile = snapshot.details?.effective_analysis_profile === "light"
+    ? "light"
+    : "full";
 
   const dismissComplete = useCallback(() => {
     setShowComplete(false);
@@ -178,8 +185,8 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const startIngestion = async (targets: string[], forceUpdate: boolean) => {
-    const result = await ingestService.ingest(targets, forceUpdate);
+  const startIngestion = async (targets: string[], forceUpdate: boolean, requestedProfile?: AnalysisProfile) => {
+    const result = await ingestService.ingest(targets, forceUpdate, requestedProfile);
     if (result.status === "error") throw new Error(result.message || "解析を開始できませんでした");
     if (!result.state) throw new Error("解析の進捗情報を取得できませんでした");
     accept(result.state);
@@ -200,6 +207,8 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
     lastError: outcome.lastError,
     activeFiles,
     connectionError,
+    analysisProfile,
+    effectiveAnalysisProfile,
     elapsedSeconds: snapshot.start_time ? Math.max(0, Math.floor(now / 1000 - Number(snapshot.start_time))) : 0,
     cancelIngestion,
     dismissComplete,

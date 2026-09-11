@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "plumdeck"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "core-foundation 0.10.1",
  "hidapi",

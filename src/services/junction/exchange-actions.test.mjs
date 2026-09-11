@@ -6,6 +6,7 @@ import {
   describeExchangeState,
   exchangeConnected,
   formatExpiry,
+  primaryExchangeAction,
 } from './exchange-actions.ts';
 
 const peer = (exchange) => ({peerId: 'g1', displayName: 'Guest', approved: false, exchange});
@@ -82,6 +83,13 @@ test('formatExpiry is coarse and never a fake percentage', () => {
   assert.equal(formatExpiry(now - 1, now), '有効期限切れ');
   assert.equal(formatExpiry(now + 30_000, now), '有効期限まで約30秒');
   assert.equal(formatExpiry(now + 600_000, now), '有効期限まで約10分');
+});
+
+test('a destructive-only exchange state has no highlighted primary action', () => {
+  const collecting = deriveHostCardGuidance(peer({state: 'collecting', waitingFor: 'guest'}));
+  assert.equal(primaryExchangeAction(collecting), undefined);
+  assert.equal(collecting.actions[0].id, 'cancel');
+  assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer({state: 'approval_pending', waitingFor: 'host'})))?.id, 'approve');
 });
 
 function peerSelf(state) {

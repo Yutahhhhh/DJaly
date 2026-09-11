@@ -222,3 +222,42 @@ def test_get_tracks_includes_year(client, session: Session):
     
     assert len(data) == 1
     assert data[0]["year"] == 1999
+
+
+def test_get_tracks_includes_analysis_level(client, session: Session):
+    """The library can distinguish light analysis from full and legacy rows."""
+    tracks = [
+        Track(
+            filepath="/path/light-analysis.mp3",
+            title="Light Analysis Track",
+            artist="Artist",
+            album="Album",
+            genre="House",
+            bpm=120,
+            duration=100,
+            analysis_level="light",
+        ),
+        Track(
+            filepath="/path/legacy-analysis.mp3",
+            title="Legacy Analysis Track",
+            artist="Artist",
+            album="Album",
+            genre="House",
+            bpm=120,
+            duration=100,
+            analysis_level=None,
+        ),
+    ]
+    session.add_all(tracks)
+    session.commit()
+
+    response = client.get("/api/tracks")
+
+    assert response.status_code == 200
+    levels_by_title = {
+        track["title"]: track["analysis_level"] for track in response.json()
+    }
+    assert levels_by_title == {
+        "Light Analysis Track": "light",
+        "Legacy Analysis Track": None,
+    }

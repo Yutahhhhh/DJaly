@@ -44,6 +44,10 @@ export interface HostRegisterFrame {
   hostFingerprint: string;
   recoverySecret: string;
   sessionName: string;
+  /** Optional v1 extension. Older clients identify the host by sessionName. */
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   maxPeers?: number;
 }
 
@@ -77,7 +81,11 @@ export interface GuestJoinFrame {
   type: "guest.join";
   roomLocator: string;
   inviteToken: string;
+  /** Kept for compatibility with clients predating DJ profiles. */
   displayName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   peerFingerprint: string;
 }
 
@@ -169,6 +177,9 @@ export interface RoomJoinRequestFrame {
   type: "room.join_request";
   guestPeerId: string;
   displayName: string;
+  djName: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   peerFingerprint: string;
 }
 
@@ -209,6 +220,9 @@ export interface RoomClosedFrame {
 export interface RoomRosterEntry {
   peerId: string;
   displayName: string;
+  djName?: string;
+  avatarDataUrl?: string;
+  themeColor?: string;
   role: Role;
   acceptedAt: number;
 }
@@ -258,6 +272,8 @@ const HOST_FINGERPRINT_RE = /^[A-Za-z0-9:_.\-]{16,128}$/;
 const INVITE_TOKEN_RE = /^[A-Za-z0-9_-]{22,128}$/;
 const INVITE_HASH_RE = /^[a-f0-9]{64}$/;
 const PEER_ID_RE = /^[a-f0-9]{24}$/;
+const AVATAR_DATA_URL_RE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+const THEME_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const CONTROL_CHARS_RE = buildControlCharsRegex();
 function buildControlCharsRegex(): RegExp {
   const ranges: string[] = [];
@@ -285,6 +301,21 @@ export function isInviteTokenHash(value: unknown): value is string {
 
 export function isPeerId(value: unknown): value is string {
   return typeof value === "string" && PEER_ID_RE.test(value);
+}
+
+/** Avatars are bounded because the signaling frame and roster are broadcast. */
+export function isAvatarDataUrl(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (value.length === 0 ||
+      (value.length <= 4096 && AVATAR_DATA_URL_RE.test(value)))
+  );
+}
+
+export function sanitizeThemeColor(raw: unknown): string | null {
+  return typeof raw === "string" && THEME_COLOR_RE.test(raw)
+    ? raw.toUpperCase()
+    : null;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -360,6 +391,24 @@ export function parseClientFrame(raw: string): ParseResult<ClientFrame> {
       ) {
         return { ok: false, error: "invalid sessionName" };
       }
+      const djName =
+        json.djName === undefined ? undefined : sanitizeDisplayName(json.djName);
+      if (json.djName !== undefined && djName === null) {
+        return { ok: false, error: "invalid djName" };
+      }
+      if (
+        json.avatarDataUrl !== undefined &&
+        !isAvatarDataUrl(json.avatarDataUrl)
+      ) {
+        return { ok: false, error: "invalid avatarDataUrl" };
+      }
+      const themeColor =
+        json.themeColor === undefined
+          ? undefined
+          : sanitizeThemeColor(json.themeColor);
+      if (json.themeColor !== undefined && themeColor === null) {
+        return { ok: false, error: "invalid themeColor" };
+      }
       if (
         json.maxPeers !== undefined &&
         (!isFiniteNumber(json.maxPeers) ||
@@ -380,6 +429,9 @@ export function parseClientFrame(raw: string): ParseResult<ClientFrame> {
           hostFingerprint: json.hostFingerprint,
           recoverySecret: json.recoverySecret,
           sessionName: json.sessionName,
+          djName: djName ?? undefined,
+          avatarDataUrl: json.avatarDataUrl as string | undefined,
+          themeColor: themeColor ?? undefined,
           maxPeers: json.maxPeers as number | undefined,
         },
       };
@@ -435,9 +487,28 @@ export function parseClientFrame(raw: string): ParseResult<ClientFrame> {
       if (!isInviteToken(json.inviteToken)) {
         return { ok: false, error: "invalid inviteToken" };
       }
-      const displayName = sanitizeDisplayName(json.displayName);
+      // djName is the user-facing identity. displayName remains accepted so
+      // deployed v1 clients continue to join unchanged.
+      const djName = sanitizeDisplayName(json.djName ?? json.displayName);
+      const displayName = sanitizeDisplayName(json.displayName ?? json.djName);
       if (displayName === null) {
         return { ok: false, error: "invalid displayName" };
+      }
+      if (djName === null) {
+        return { ok: false, error: "invalid djName" };
+      }
+      if (
+        json.avatarDataUrl !== undefined &&
+        !isAvatarDataUrl(json.avatarDataUrl)
+      ) {
+        return { ok: false, error: "invalid avatarDataUrl" };
+      }
+      const themeColor =
+        json.themeColor === undefined
+          ? undefined
+          : sanitizeThemeColor(json.themeColor);
+      if (json.themeColor !== undefined && themeColor === null) {
+        return { ok: false, error: "invalid themeColor" };
       }
       if (
         typeof json.peerFingerprint !== "string" ||
@@ -454,6 +525,9 @@ export function parseClientFrame(raw: string): ParseResult<ClientFrame> {
           roomLocator: json.roomLocator,
           inviteToken: json.inviteToken,
           displayName,
+          djName,
+          avatarDataUrl: json.avatarDataUrl as string | undefined,
+          themeColor: themeColor ?? undefined,
           peerFingerprint: json.peerFingerprint,
         },
       };

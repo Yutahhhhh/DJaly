@@ -85,7 +85,7 @@ def test_fast_explorer_job_releases_global_analysis_slot(monkeypatch):
 
     service = IngestionAppService()
 
-    async def finish_immediately(_targets, _force_update):
+    async def finish_immediately(_targets, _force_update, _analysis_profile="auto"):
         service.update_state(type="complete")
 
     monkeypatch.setattr(service, "_run_ingestion", finish_immediately)

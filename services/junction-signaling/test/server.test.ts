@@ -130,6 +130,9 @@ test("host register -> guest join -> host accepts -> bidirectional relay of opaq
       inviteExpiresAt: Date.now() + 60_000,
       recoverySecret: "test-recovery-secret-123456789", hostFingerprint: "host-fingerprint-e2e-1",
       sessionName: "E2E Session",
+      djName: "Host DJ",
+      avatarDataUrl: "data:image/png;base64,SE9TVA==",
+      themeColor: "#0ea5e9",
     });
     const registered = await host.next();
     assert.equal(registered.type, "host.registered");
@@ -142,6 +145,9 @@ test("host register -> guest join -> host accepts -> bidirectional relay of opaq
       roomLocator,
       inviteToken,
       displayName: "Guest E2E",
+      djName: "Guest DJ",
+      avatarDataUrl: "data:image/webp;base64,R1VFU1Q=",
+      themeColor: "#8b5cf6",
       peerFingerprint: "guest-fp-e2e-1",
     });
     const pending = await guest.next();
@@ -151,6 +157,9 @@ test("host register -> guest join -> host accepts -> bidirectional relay of opaq
     const joinRequest = await host.next();
     assert.equal(joinRequest.type, "room.join_request");
     assert.equal(joinRequest.guestPeerId, guestPeerId);
+    assert.equal(joinRequest.djName, "Guest DJ");
+    assert.equal(joinRequest.avatarDataUrl, "data:image/webp;base64,R1VFU1Q=");
+    assert.equal(joinRequest.themeColor, "#8B5CF6");
 
     host.send({ v: 1, type: "host.join_decision", guestPeerId, accept: true });
     const accepted = await guest.next();
@@ -160,6 +169,25 @@ test("host register -> guest join -> host accepts -> bidirectional relay of opaq
     const roster = await host.next();
     assert.equal(roster.type, "room.roster");
     assert.equal(roster.peers.length, 2);
+    assert.deepEqual(
+      roster.peers.map((peer: any) => ({
+        djName: peer.djName,
+        avatarDataUrl: peer.avatarDataUrl,
+        themeColor: peer.themeColor,
+      })),
+      [
+        {
+          djName: "Host DJ",
+          avatarDataUrl: "data:image/png;base64,SE9TVA==",
+          themeColor: "#0EA5E9",
+        },
+        {
+          djName: "Guest DJ",
+          avatarDataUrl: "data:image/webp;base64,R1VFU1Q=",
+          themeColor: "#8B5CF6",
+        },
+      ],
+    );
 
     const opaquePayload = { sdp: "opaque-sdp-blob", candidates: [1, 2, 3] };
     host.send({ v: 1, type: "signal.relay", toPeerId: guestPeerId, payload: opaquePayload });

@@ -40,6 +40,11 @@ export interface ExchangeGuidance {
   actions: ExchangeAction[];
 }
 
+/** Destructive/default recovery actions never become the row's highlighted CTA. */
+export function primaryExchangeAction(guidance: ExchangeGuidance): ExchangeAction | undefined {
+  return guidance.actions.find((action) => action.intent === 'primary');
+}
+
 const A: Record<ExchangeActionId, ExchangeAction> = {
   copy_invite: {id: 'copy_invite', label: '招待をコピー', intent: 'primary'},
   save_invite_file: {id: 'save_invite_file', label: '招待をファイルに保存', intent: 'default'},
@@ -67,7 +72,7 @@ const STATE_LABEL: Record<ExchangeState, string> = {
   awaiting_answer: '返答の取り込み待ち',
   approval_pending: '承認待ち',
   response_ready: '返答の受け渡し待ち',
-  awaiting_host: 'ホストの確認待ち',
+  awaiting_host: 'セッション管理者の確認待ち',
   connecting: '接続中',
   connected: '接続済み',
   interrupted: '接続が中断',
@@ -169,15 +174,15 @@ export function deriveGuestGuidance(snapshot: JunctionSnapshot): ExchangeGuidanc
       return {headline: '音声・操作と楽曲転送の接続情報を収集しています。', waiting: true, actions: [A.cancel]};
     case 'response_ready':
       return {
-        headline: '作成した返答テキストをホストへ渡してください。コピー＝送信ではありません。',
-        hint: 'ホストが取り込んで承認するまで接続は始まりません。',
+        headline: '作成した返答テキストをセッション管理者へ渡してください。コピー＝送信ではありません。',
+        hint: 'セッション管理者が取り込んで承認するまで接続は始まりません。',
         waiting: false,
         actions: [A.copy_answer, A.save_answer_file, A.paste_invite, A.import_invite_file, A.cancel],
       };
     case 'awaiting_host':
       return {
-        headline: 'ホストの取り込みと承認を待っています。',
-        hint: 'この待機は、ホストが実際に読んだ・承認したことの証明ではありません。',
+        headline: 'セッション管理者の取り込みと承認を待っています。',
+        hint: 'この待機は、管理者が実際に読んだ・承認したことの証明ではありません。',
         waiting: true,
         actions: [A.copy_answer, A.save_answer_file, A.paste_invite, A.import_invite_file, A.cancel],
       };
@@ -189,18 +194,18 @@ export function deriveGuestGuidance(snapshot: JunctionSnapshot): ExchangeGuidanc
       return {headline: '接続が途切れました。復旧を待っています。', waiting: true, actions: [A.paste_invite, A.import_invite_file]};
     case 'needs_exchange':
       return {
-        headline: '再接続には、ホストからの新しい招待を取り込む必要があります。',
+        headline: '再接続には、セッション管理者からの新しい招待を取り込む必要があります。',
         waiting: false,
         actions: [A.paste_invite, A.import_invite_file],
       };
     case 'failed':
-      return {headline: '接続に失敗しました。ホストに新しい招待を発行してもらい、取り込んでください。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
+      return {headline: '接続に失敗しました。セッション管理者に新しい招待を発行してもらい、取り込んでください。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
     case 'expired':
       return {headline: '招待の有効期限が切れました。新しい招待を取り込んでください。', waiting: false, actions: [A.paste_invite, A.import_invite_file]};
     case 'rejected':
-      return {headline: 'ホストが参加を却下しました。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
+      return {headline: 'セッション管理者が参加を却下しました。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
     case 'cancelled':
-      return {headline: 'この接続はホストによって中止されました。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
+      return {headline: 'この接続はセッション管理者によって中止されました。', waiting: false, error: err, actions: [A.paste_invite, A.import_invite_file]};
     default:
       return {headline: describeExchangeState(state), waiting: Boolean(state), error: err, actions: []};
   }

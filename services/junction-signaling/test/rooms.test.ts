@@ -214,6 +214,9 @@ test("decideJoin accept adds peer to roster; reject removes pending peer", () =>
       roomLocator: result.roomLocator,
       inviteToken,
       displayName: "Guest",
+      djName: "Guest DJ",
+      avatarDataUrl: "data:image/jpeg;base64,R1VFU1Q=",
+      themeColor: "#EC4899",
       peerFingerprint: "fp",
       connectionId: "guest-conn-y",
     },
@@ -225,6 +228,18 @@ test("decideJoin accept adds peer to roster; reject removes pending peer", () =>
   assert.equal(decision.ok, true);
   const roster = registry.getRoster(result.roomLocator);
   assert.equal(roster.length, 2); // host + accepted guest
+  assert.deepEqual(
+    roster.find((peer) => peer.peerId === joined.peerId),
+    {
+      peerId: joined.peerId,
+      displayName: "Guest",
+      djName: "Guest DJ",
+      avatarDataUrl: "data:image/jpeg;base64,R1VFU1Q=",
+      themeColor: "#EC4899",
+      role: "guest",
+      acceptedAt: roster[1]?.acceptedAt,
+    },
+  );
 });
 
 test("relayLookup only allows relay between accepted peers in the same room", () => {
