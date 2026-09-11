@@ -167,6 +167,9 @@ jobs:
       - shell: pwsh
         run: Rename-Item src-tauri/bin/plumdeck-server.exe plumdeck-server-x86_64-pc-windows-msvc.exe
       - run: pnpm install --frozen-lockfile
+      - name: configure production frontend environment
+        shell: bash
+        run: cp .env.production.example .env.production
       - run: pnpm exec tauri build --bundles msi --config src-tauri/tauri.windows.conf.json
       - uses: actions/setup-python@v7
         with:

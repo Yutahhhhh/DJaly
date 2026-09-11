@@ -149,6 +149,10 @@ jobs:
           & .\src-tauri\bin\plumdeck-server-x86_64-pc-windows-msvc.exe --diagnose-analysis
           if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
 
+      - name: configure production frontend environment
+        shell: bash
+        run: cp .env.production.example .env.production
+
       - name: build tauri app
         run: pnpm exec tauri build ${{ matrix.args }}
         env:
