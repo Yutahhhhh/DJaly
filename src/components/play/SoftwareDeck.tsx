@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } fr
 import { getPadSelection, selectPads, subscribePads, PAD_MODE_NAMES } from "@/services/midi/pad-state";
 import { sampler } from "@/services/dj-engine/sampler";
 import { AlignJustify, Disc3, LayoutGrid, Pause, Play, Upload } from "lucide-react";
-import type { Track } from "@/types";
 import type { ChannelState, DeckId, DeckState } from "@/types/dj-engine";
 import type { PerformanceLoop } from "@/types/performance-metadata";
 import { cn } from "@/lib/utils";
@@ -30,7 +29,7 @@ export function Fader({ label, value, min, max, step = .01, vertical, disabled, 
 
 type Props = {
   id: DeckId; deck?: DeckState; channel?: ChannelState; active: boolean; connected: boolean; capability: boolean; capabilities: readonly string[];
-  onActivate: () => void; onDropTrack: (track: Track) => void; onToggle: () => void; onCue: () => void;
+  onActivate: () => void; onToggle: () => void; onCue: () => void;
   onSeek: (delta: number) => void; onSeekAbsolute: (ms: number) => void; onTempo: (rate: number) => void;
   onKeylock: (enabled: boolean) => void; onSync: (enabled: boolean) => void; onMaster?: () => void; onUnload: () => void;
   onHotCue: (index: number, clear: boolean) => void; onLoop: (beats: number) => void;
@@ -44,9 +43,8 @@ type Props = {
   onGridEdit: () => void; onGridClose?: () => void; gridEditor?: ReactNode;
 };
 
-export function SoftwareDeck({ id, deck, channel, active, connected, capability, capabilities, onActivate, onDropTrack, onToggle, onCue, onSeekAbsolute, onTempo, onKeylock, onSync, onMaster, onUnload, onHotCue, onLoop, onBeatJump, onBeatLoop, onLoopEnable, onQuantize, onFx, onSaveLoop, onLoopIn, onLoopOut, savedLoops, onRecallLoop, trackKey, cueColors, onGridEdit, onGridClose, gridEditor }: Props) {
+export function SoftwareDeck({ id, deck, channel, active, connected, capability, capabilities, onActivate, onToggle, onCue, onSeekAbsolute, onTempo, onKeylock, onSync, onMaster, onUnload, onHotCue, onLoop, onBeatJump, onBeatLoop, onLoopEnable, onQuantize, onFx, onSaveLoop, onLoopIn, onLoopOut, savedLoops, onRecallLoop, trackKey, cueColors, onGridEdit, onGridClose, gridEditor }: Props) {
   const left = id === "A" || id === "C";
-  const [dragOver, setDragOver] = useState(false);
   const [loopBeats, setLoopBeats] = useState(4);
   const selection = useSyncExternalStore(subscribePads, () => getPadSelection(id));
   const samplerState = useSyncExternalStore(sampler.subscribe,sampler.getSnapshot);
@@ -135,11 +133,8 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
   const leading = deck?.syncLeader === id && deck.syncEnabled;
   const stateKind = leading ? "master" : deck?.status === "error" ? "error" : deck?.status === "playing" ? "playing" : "idle";
 
-  return <article aria-label={`Deck ${id}`} data-deck={id} onClick={onActivate}
-    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragOver(true); } }}
-    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(false); }}
-    onDrop={(event) => { event.preventDefault(); setDragOver(false); try { const track = JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track; if (track.id && track.filepath && track.duration > 0) onDropTrack(track); } catch { /* Ignore foreign drag data. */ } }}
-    className={cn("dj-deck", left ? "dj-deck--left" : "dj-deck--right", active && "dj-deck--active", !deck?.track && "dj-deck--empty", dragOver && "dj-deck--drop")}>
+  return <article aria-label={`Deck ${id}`} data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`} onClick={onActivate}
+    className={cn("dj-deck", left ? "dj-deck--left" : "dj-deck--right", active && "dj-deck--active", !deck?.track && "dj-deck--empty")}>
     <div className="dj-track-info">
       <button className="dj-deck-number" aria-label={`Select deck ${id}`} aria-pressed={active} onClick={onActivate}>{id}</button>
       <div className="dj-cover">{data?.artwork ? <img src={artworkUrl(data.artwork)} alt="" /> : <Disc3 />}</div>

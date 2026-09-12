@@ -2,8 +2,8 @@ import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronDown, ChevronRight, Copy, Disc3, Folder, History, Library, ListMusic, Loader2, Pencil, Plus, Radio, Search, Sparkles, Trash2 } from "lucide-react";
 import { playService, type HistoryTrack, type LocalPlaylist, type LocalPlaylistTrack, type MirrorPlaylist, type MirrorSource, type RecordingEntry } from "@/services/play";
 import type { Track } from "@/types";
-import type { DeckId } from "@/types/dj-engine";
-import { DECK_IDS } from "@/types/dj-engine";
+import { DECK_IDS, type DeckId } from "@/types/dj-engine";
+import { installDeckDropRouting, nativeDropElement } from "@/services/deck-drop";
 import { djEngineClient } from "@/services/dj-engine/client";
 import { usePlayerStore } from "@/stores/playerStore";
 import { cn } from "@/lib/utils";
@@ -48,7 +48,6 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   const [dialogError, setDialogError] = useState<string | null>(null);
   const mirrorGeneration = useRef(0);
   const importTargetRef = useRef<{ kind: "collection" | "local_playlist"; id?: number } | null>({ kind: "collection" });
-  const internalTrackDragRef = useRef<Track | null>(null);
   const loadTrackRef = useRef(onLoad);
   loadTrackRef.current = onLoad;
 
@@ -74,42 +73,12 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
   useEffect(() => {
     let disposed = false;
     let cleanup: (() => void) | undefined;
-    let internalDragResetTimer: number | undefined;
-    const markInternalTrackDrag = (event: DragEvent) => {
-      if (!event.dataTransfer?.types.includes("application/x-plumdeck-track")) return;
-      const serialized = event.dataTransfer.getData("application/x-plumdeck-track");
-      if (!serialized) return;
-      let track: Track;
-      try { track = JSON.parse(serialized) as Track; }
-      catch { return; }
-      if (!track.id || !track.filepath) return;
-      if (internalDragResetTimer !== undefined) window.clearTimeout(internalDragResetTimer);
-      internalDragResetTimer = undefined;
-      internalTrackDragRef.current = track;
-    };
-    const releaseInternalTrackDrag = () => {
-      if (!internalTrackDragRef.current) return;
-      if (internalDragResetTimer !== undefined) window.clearTimeout(internalDragResetTimer);
-      // WebKit may deliver Tauri's native drop notification just after the DOM
-      // drop/dragend event. Keep the origin marker briefly so that notification
-      // cannot be mistaken for a Finder import.
-      internalDragResetTimer = window.setTimeout(() => {
-        internalTrackDragRef.current = null;
-        internalDragResetTimer = undefined;
-      }, 500);
-    };
-    document.addEventListener("dragstart", markInternalTrackDrag);
-    document.addEventListener("drop", releaseInternalTrackDrag);
-    document.addEventListener("dragend", releaseInternalTrackDrag);
-    const nodeAt = (x: number, y: number) => {
-      const scale = window.devicePixelRatio || 1;
-      return document.elementFromPoint(x / scale, y / scale) ?? document.elementFromPoint(x, y);
-    };
-    void getCurrentWebview().onDragDropEvent((event) => {
+    const deckDrop = installDeckDropRouting(document, (deck, track) => loadTrackRef.current(deck, track));
+    void Promise.resolve().then(() => getCurrentWebview().onDragDropEvent((event) => {
       const payload = event.payload;
       document.querySelectorAll("[data-native-drop-active]").forEach((node) => node.removeAttribute("data-native-drop-active"));
-      if (payload.type === "leave") return;
-      const dropNode = nodeAt(payload.position.x, payload.position.y);
+      if (payload.type === "leave") { deckDrop.leave(); return; }
+      const dropNode = nativeDropElement(document, payload.position.x, payload.position.y, window.devicePixelRatio || 1);
       const draggedSample = sampleDrag.current();
       if (draggedSample) {
         const pad = dropNode?.closest<HTMLElement>("[data-sampler-slot]");
@@ -119,27 +88,27 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
         if (payload.type === "drop") sampleDrag.end();
         return;
       }
+      const internalTrack = deckDrop.current();
+      if (internalTrack) {
+        if (payload.type === "drop") deckDrop.drop(dropNode, (node, track) => {
+          if (!node?.closest("[data-sampler-collection]")) return;
+          try {
+            const result = samplerLibrary.add([track.filepath]);
+            setNotice(`${result.accepted}音源を登録しました（解析なし）${result.skipped ? `・非対応${result.skipped}件をスキップ` : ""}`);
+          } catch (error) { setNotice(String(error)); }
+        });
+        else deckDrop.hover(dropNode);
+        return;
+      }
       const sampleTarget = dropNode?.closest<HTMLElement>("[data-sampler-collection]");
       if (sampleTarget) {
         if (payload.type === "enter" || payload.type === "over") sampleTarget.setAttribute("data-native-drop-active", "true");
-        // A library row drag has no native paths; register its source file instead.
-        const internal = internalTrackDragRef.current;
-        const paths = internal ? internal.filepath ? [internal.filepath] : [] : payload.type === "drop" ? payload.paths : [];
+        const paths = payload.type === "drop" ? payload.paths : [];
         if (payload.type === "drop" && paths.length) {
           try {
             const result = samplerLibrary.add(paths);
             setNotice(`${result.accepted}音源を登録しました（解析なし）${result.skipped ? `・非対応${result.skipped}件をスキップ` : ""}`);
           } catch (error) { setNotice(String(error)); }
-        }
-        return;
-      }
-      const internalTrack = internalTrackDragRef.current;
-      if (internalTrack) {
-        if (payload.type === "drop") {
-          const deckValue = dropNode?.closest<HTMLElement>("[data-deck]")?.dataset.deck;
-          if (deckValue && DECK_IDS.includes(deckValue as DeckId)) {
-            loadTrackRef.current(deckValue as DeckId, internalTrack);
-          }
         }
         return;
       }
@@ -170,15 +139,11 @@ export const PlayLibrary = memo(function PlayLibrary({ activeDeck, seedTrackId, 
         setNotice(`取込ジョブを開始しました（追加先: ${captured.kind === "collection" ? "Collection" : `Playlist #${captured.id}`}）`);
         window.dispatchEvent(new Event("plumdeck:imports-changed"));
       }).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
-    }).then((unlisten) => { if (disposed) unlisten(); else cleanup = unlisten; }).catch(() => undefined);
+    })).then((unlisten) => { if (disposed) unlisten(); else cleanup = unlisten; }).catch(() => undefined);
     return () => {
       disposed = true;
       cleanup?.();
-      document.removeEventListener("dragstart", markInternalTrackDrag);
-      document.removeEventListener("drop", releaseInternalTrackDrag);
-      document.removeEventListener("dragend", releaseInternalTrackDrag);
-      if (internalDragResetTimer !== undefined) window.clearTimeout(internalDragResetTimer);
-      internalTrackDragRef.current = null;
+      deckDrop.dispose();
     };
   }, []);
 
