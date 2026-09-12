@@ -115,7 +115,7 @@ def exercise_managed_windows_ingestion(port, directory):
     assert saved.get("title") == fixture.stem and saved.get("artist") == "Unknown", saved
     print(
         "Managed packaged light ingestion accepted and registered tagless audio; "
-        f"progress={sorted(analysis_progress)}",
+        f"progress={json.dumps(sorted(analysis_progress), ensure_ascii=True)}",
         flush=True,
     )
 
