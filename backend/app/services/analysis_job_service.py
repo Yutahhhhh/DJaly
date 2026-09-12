@@ -10,12 +10,12 @@ from datetime import datetime
 
 import numpy as np
 from sqlmodel import Session, select
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from config import settings
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
 from domain.models.setlist import SetlistTrack
-from domain.services.analysis.constants import COMPONENT_VERSIONS, EMBEDDING_MODEL
+from domain.services.analysis.constants import COMPONENT_VERSIONS, EMBEDDING_MODEL, GRID_COMPONENT_VERSION
 from infra.database import connection
 from infra.repositories.analysis_job_repository import AnalysisJobRepository
 from app.services.analysis_coordinator import analysis_coordinator
@@ -23,13 +23,26 @@ from app.services.analysis_coordinator import analysis_coordinator
 
 def analyze_components(filepath, features):
     # Each process owns its native audio state; Essentia has global native state too.
-    from ingest import get_analyzer
-    analyzer = get_analyzer()
-    if analyzer is None:
-        raise RuntimeError("Audio analyzer is unavailable")
     before = os.stat(filepath)
     started = time.monotonic()
-    result = analyzer.analyze_selected(filepath, features)
+    if features == ["rhythm"]:
+        # Already in an isolated job worker. Reuse the bounded grid-only path;
+        # no embedding model, key/timbre work, or Windows Numba compilation.
+        from domain.services.analysis.rhythm_grid import _extract
+        from domain.services.analysis.beat_grid import playback_grid, VERSION
+        grid = _extract(filepath)
+        result = {"bpm": grid["bpm"], "features_extra": {
+            "beat_positions": grid["ticks"], "bpm_confidence": grid["confidence"],
+            "playback_grid": playback_grid(grid["ticks"], grid["bpm"], grid["confidence"]),
+            "playback_grid_version": VERSION,
+            "analysis_components": {"rhythm": GRID_COMPONENT_VERSION},
+        }}
+    else:
+        from ingest import get_analyzer
+        analyzer = get_analyzer()
+        if analyzer is None:
+            raise RuntimeError("Audio analyzer is unavailable")
+        result = analyzer.analyze_selected(filepath, features)
     after = os.stat(filepath)
     if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
         raise RuntimeError("Audio file changed during analysis; retry this track")
@@ -90,6 +103,8 @@ class AnalysisJobService:
                         valid = False
                 if not valid:
                     needed.append(feature)
+            elif feature == "rhythm" and versions.get(feature) in {COMPONENT_VERSIONS[feature], GRID_COMPONENT_VERSION}:
+                continue
             elif versions.get(feature) != COMPONENT_VERSIONS[feature]:
                 needed.append(feature)
         return needed
@@ -98,7 +113,14 @@ class AnalysisJobService:
         features = self.validate_features(features)
         if limit is not None and not 1 <= limit <= 100000:
             raise ValueError("limit must be between 1 and 100000")
-        query = select(Track, TrackAnalysis, TrackEmbedding).outerjoin(TrackAnalysis, Track.id == TrackAnalysis.track_id).outerjoin(TrackEmbedding, Track.id == TrackEmbedding.track_id)
+        rhythm_only = features == ["rhythm"]
+        if rhythm_only:
+            # Planning a 25k-track grid update must not materialize every
+            # waveform, dense beat grid and 200-D embedding in Python.
+            query = select(Track.id, Track.filepath, Track.title, Track.genre,
+                           func.json_extract_string(TrackAnalysis.features_extra_json, '$.analysis_components.rhythm')).outerjoin(TrackAnalysis, Track.id == TrackAnalysis.track_id)
+        else:
+            query = select(Track, TrackAnalysis, TrackEmbedding).outerjoin(TrackAnalysis, Track.id == TrackAnalysis.track_id).outerjoin(TrackEmbedding, Track.id == TrackEmbedding.track_id)
         if track_ids is not None:
             query = query.where(Track.id.in_(track_ids))
         if genres:
@@ -106,9 +128,15 @@ class AnalysisJobService:
         with Session(self.engine) as session:
             priority = set(session.exec(select(SetlistTrack.track_id)).all())
             rows = session.exec(query.order_by(Track.id)).all()
-            candidates = [{"id": t.id, "filepath": t.filepath, "title": t.title, "genre": t.genre,
-                           "features": self.outdated(features, a, e) if only_outdated else features}
-                          for t, a, e in rows]
+            if rhythm_only:
+                current_versions = {COMPONENT_VERSIONS["rhythm"], GRID_COMPONENT_VERSION}
+                candidates = [{"id": id, "filepath": path, "title": title, "genre": genre,
+                               "features": [] if only_outdated and version in current_versions else features}
+                              for id, path, title, genre, version in rows]
+            else:
+                candidates = [{"id": t.id, "filepath": t.filepath, "title": t.title, "genre": t.genre,
+                               "features": self.outdated(features, a, e) if only_outdated else features}
+                              for t, a, e in rows]
         eligible = [t for t in candidates if t["features"]]
         eligible.sort(key=lambda t: (t["id"] not in priority, t["id"]))
         return features, candidates, eligible[:limit] if limit else eligible
@@ -116,7 +144,7 @@ class AnalysisJobService:
     def plan(self, track_ids=None, genres=None, features=None, only_outdated=True, limit=None):
         features, candidates, selected = self._select(track_ids, genres, features, only_outdated, limit)
         return {
-            "features": features, "versions": {f: COMPONENT_VERSIONS[f] for f in features},
+            "features": features, "versions": {f: GRID_COMPONENT_VERSION if features == ["rhythm"] else COMPONENT_VERSIONS[f] for f in features},
             "matched_tracks": len(candidates), "already_current": sum(not t["features"] for t in candidates),
             "selected_tracks": len(selected), "sample": selected[:20],
             "preserves": ["metadata", "genres", "lyrics", "audio_files", "unselected_features"],
@@ -222,8 +250,10 @@ class AnalysisJobService:
             if "rhythm" in features:
                 analysis.beat_positions = update.pop("beat_positions")
                 # A new rhythm result invalidates only disposable analysis
-                # candidates. User-saved grids and rekordbox imports are intact.
+                # candidates. Manual grids and rekordbox imports are intact.
                 session.exec(text("DELETE FROM track_grid_candidates WHERE track_id=:id AND source='analysis'"), params={"id": track.id})
+                from infra.repositories.analysis_grid_refresh import refresh_saved_analysis_grid
+                refresh_saved_analysis_grid(session, track.id, update.get("playback_grid"))
             if "waveform" in features:
                 analysis.waveform_peaks = update.pop("waveform_peaks")
             extra.update(update)

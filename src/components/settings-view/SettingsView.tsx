@@ -34,6 +34,7 @@ import { ImportSection } from "./ImportSection";
 import { LibraryImportDialog } from "./LibraryImportDialog";
 import { MetadataImportDialog } from "./MetadataImportDialog";
 import { useTheme } from "@/components/theme-provider";
+import { GridReanalysis } from "./GridReanalysis";
 import { downloadFile } from "@/lib/download";
 import {
   normalizeAnalysisProfile,
@@ -312,6 +313,8 @@ export function SettingsView() {
                 低スペックのWindowsでは「軽量」を選んでください。ビート操作・SYNC・波形・類似曲検索に必要な情報を保ち、音色や曲の特徴を調べる区間を短くして負荷を抑えます。「自動」は詳細解析から始め、時間がかかる場合だけ軽量へ切り替わります。Macは詳細解析を使用します。
               </p>
             </div>
+
+            <GridReanalysis />
 
             <div className="space-y-2">
               <Label htmlFor="root_path">Default Root Path</Label>

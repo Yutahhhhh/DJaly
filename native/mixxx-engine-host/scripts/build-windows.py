@@ -192,7 +192,7 @@ def main():
     options = [f"-DCMAKE_PREFIX_PATH={all_prefixes}", f"-DMIXXX_VCPKG_ROOT={prefix_root.as_posix()}",
         "-DVCPKG_TARGET_TRIPLET=x64-windows-release", "-DQML=OFF", "-DBUILD_TESTING=OFF", "-DBUILD_BENCH=OFF",
         "-DENGINEPRIME=OFF", "-DKEYFINDER=OFF", "-DPORTMIDI=OFF", "-DBROADCAST=OFF", "-DQTKEYCHAIN=OFF",
-        "-DHID=OFF", "-DBULK=OFF", "-DVINYLCONTROL=OFF", "-DFFMPEG=OFF", "-DBATTERY=OFF", "-DLILV=OFF",
+        "-DHID=OFF", "-DBULK=OFF", "-DVINYLCONTROL=OFF", "-DFFMPEG=OFF", "-DMAD=ON", "-DBATTERY=OFF", "-DLILV=OFF",
         "-DOPTIMIZE=portable", "-DWARNINGS_FATAL=OFF",
         f"-DCMAKE_PROJECT_mixxx_INCLUDE={(ROOT / 'cmake/inject-host.cmake').as_posix()}"]
     configure(upstream, ROOT / "build-upstream", *options)

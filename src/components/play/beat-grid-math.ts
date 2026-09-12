@@ -45,6 +45,40 @@ export function scaleGrid(grid: PerformanceBeatGrid, bpm: number, anchorMs: numb
   return transform({ ...grid, bpm }, ms => anchorMs + (ms - anchorMs) * ratio, duration);
 }
 
+export function bpmAt(grid: PerformanceBeatGrid, ms: number) {
+  const times = grid.beat_times_ms;
+  if (!times?.length) return grid.bpm;
+  const index = Math.max(0, Math.min(times.length - 2, lowerBeat(times, ms + .001) - 1));
+  return 60000 / (times[index + 1] - times[index]);
+}
+
+/** Explicit edit-time tempo boundary. Earlier beats never move. */
+export function setTempoFrom(grid: PerformanceBeatGrid, bpm: number, anchorMs: number, duration: number): PerformanceBeatGrid {
+  if (!Number.isFinite(bpm) || bpm < 20 || bpm > 300) throw new Error("BPMは20〜300で指定してください");
+  if (!Number.isFinite(anchorMs) || !Number.isFinite(duration) || anchorMs < 0 || anchorMs >= duration) throw new Error("変更地点を曲内に置いてください");
+  const period = 60000 / bpm;
+  const prefixCount = Math.max(0, Math.ceil((anchorMs - grid.first_beat_ms) * grid.bpm / 60000));
+  if ((!grid.beat_times_ms && prefixCount > 100000) || Math.ceil((duration - anchorMs) / period) > 100000) throw new Error("拍データの上限を超えています");
+  const times = grid.beat_times_ms ?? Array.from(
+    { length: prefixCount },
+    (_, i) => grid.first_beat_ms + i * 60000 / grid.bpm,
+  );
+  const prefix = times.filter(ms => ms < anchorMs - .01);
+  const count = Math.ceil((duration - anchorMs) / period);
+  if (prefix.length + count > 100000) throw new Error("拍データの上限を超えています");
+  const tail = Array.from({ length: count }, (_, i) => anchorMs + i * period).filter(ms => ms < duration);
+  const next = [...prefix, ...tail];
+  if (next.length < 2) throw new Error("曲内に2拍以上必要です");
+  const numbers = prefix.map((_, i) => grid.beat_numbers?.[i] ?? i % grid.beats_per_bar + 1);
+  const boundaryIndex = lowerBeat(times, anchorMs - .01);
+  const boundaryNumber = Math.abs((times[boundaryIndex] ?? Infinity) - anchorMs) < .01
+    ? grid.beat_numbers?.[boundaryIndex] ?? prefix.length % grid.beats_per_bar + 1
+    : (numbers[numbers.length - 1] ?? 0) % grid.beats_per_bar + 1;
+  return { ...grid, bpm: prefix.length ? grid.bpm : bpm, first_beat_ms: next[0],
+    beat_times_ms: next, beat_numbers: [...numbers, ...tail.map((_, i) => (boundaryNumber - 1 + i) % grid.beats_per_bar + 1)],
+    source: "manual", confidence: null };
+}
+
 export function setDownbeat(grid: PerformanceBeatGrid, ms: number, duration: number) {
   const shifted = shiftGrid(grid, ms - nearestBeat(grid, ms), duration);
   const times = shifted.beat_times_ms;

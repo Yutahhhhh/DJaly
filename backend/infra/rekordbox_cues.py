@@ -10,6 +10,7 @@ from infra.rekordbox_library import same_path
 
 from api.schemas.performance_metadata import CuePoint
 from infra.rekordbox_grid import connect_readonly, master_db_path
+from infra.rekordbox_timing import timing_offset_ms, RekordboxTimingError
 
 
 # rekordbox reserves Kind=4 and maps pads D-H to 5-9.
@@ -83,7 +84,18 @@ def read_hot_cues(filepath: str, database: Path | None = None) -> list[CuePoint]
     except Exception as exc:
         raise RekordboxCueError("Could not read cues from the local rekordbox library") from exc
 
-    return _cue_points(rows)
+    return _cue_points_for_audio(rows, filepath)
+
+
+def _cue_points_for_audio(rows, filepath: str) -> list[CuePoint]:
+    cues = _cue_points(rows)
+    if not cues:
+        return cues
+    try:
+        offset = timing_offset_ms(filepath)
+    except RekordboxTimingError as exc:
+        raise RekordboxCueError(str(exc)) from exc
+    return [cue.model_copy(update={"position_ms": max(0.0, cue.position_ms - offset)}) for cue in cues]
 
 
 def _cue_points(rows: list[tuple[Any, Any, Any]]) -> list[CuePoint]:
@@ -167,7 +179,7 @@ def read_hot_cues_bulk(
                         )
                         continue
                     try:
-                        result.cues_by_path[filepath] = _cue_points(next(iter(contents.values())))
+                        result.cues_by_path[filepath] = _cue_points_for_audio(next(iter(contents.values())), filepath)
                     except RekordboxCueError as exc:
                         result.errors_by_path[filepath] = str(exc)
         finally:

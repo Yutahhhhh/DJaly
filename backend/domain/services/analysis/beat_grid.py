@@ -5,7 +5,7 @@ pass through this function. No downbeat is inferred from beat-only detections.
 """
 import math
 
-VERSION = 1
+VERSION = 2
 
 
 def playback_grid(ticks, bpm, confidence=None):

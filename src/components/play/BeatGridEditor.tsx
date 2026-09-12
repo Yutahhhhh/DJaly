@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PerformanceBeatGrid } from "@/types/performance-metadata";
-import { nearestBeat, scaleGrid, setDownbeat, shiftGrid, subdivideGrid } from "./beat-grid-math";
+import { bpmAt, nearestBeat, scaleGrid, setDownbeat, setTempoFrom, shiftGrid, subdivideGrid } from "./beat-grid-math";
 import "./beat-grid-editor.css";
 
 export type BeatGrid = PerformanceBeatGrid;
@@ -19,6 +19,9 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
   const draftRef = useRef(draft);
   const [bpmText, setBpmText] = useState(String(draft.bpm));
   const [anchor, setAnchor] = useState(() => nearestBeat(initialGrid, positionMs));
+  const [tempoScope, setTempoScope] = useState<"all" | "from">("all");
+  const editingBpm = tempoScope === "from" ? bpmAt(draft, anchor) : draft.bpm;
+  useEffect(() => { setBpmText(String(Math.round(editingBpm * 100) / 100)); }, [editingBpm, tempoScope, anchor]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [changed, setChanged] = useState(false);
@@ -33,7 +36,7 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
   const publish = (grid: BeatGrid, record = true) => {
     const previous = draftRef.current;
     if (record) { setHistory(old => [...old.slice(-49), { grid: previous, anchor }]); setFuture([]); }
-    draftRef.current = grid; setDraft(grid); setBpmText(String(grid.bpm));
+    draftRef.current = grid; setDraft(grid);
     setChanged(true); setError(""); onPreview(grid);
   };
   const apply = (operation: () => BeatGrid) => {
@@ -59,9 +62,10 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (alive.current) setBusy(""); }
   };
-  const changeBpm = (bpm: number) => apply(() => scaleGrid(draft, bpm, anchor, durationMs));
+  const changeBpm = (bpm: number) => apply(() => tempoScope === "from"
+    ? setTempoFrom(draft, bpm, anchor, durationMs) : scaleGrid(draft, bpm, anchor, durationMs));
   // rekordbox の「拍の間隔を狭める/広げる」。間隔を狭める＝BPMを上げる。
-  const nudgeInterval = (deltaBpm: number) => changeBpm(Math.round((draft.bpm + deltaBpm) * 100) / 100);
+  const nudgeInterval = (deltaBpm: number) => changeBpm(Math.round((editingBpm + deltaBpm) * 100) / 100);
   const tapTempo = () => {
     if (locked) return;
     const now = performance.now();
@@ -77,7 +81,7 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
   const cancel = () => { if (!locked) { onPreview(null); onClose(); } };
   const save = async () => {
     if (locked) return;
-    if (!Number.isFinite(Number(bpmText)) || Number(bpmText) !== draft.bpm) { setError("BPM入力を確定してください"); return; }
+    if (!bpmText || !Number.isFinite(Number(bpmText)) || Math.abs(Number(bpmText) - editingBpm) > .006) { setError("BPM入力を確定してください"); return; }
     setBusy("適用中…"); setError("");
     try { await onSave(draft); if (alive.current) { onPreview(null); onClose(); } }
     catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
@@ -110,6 +114,12 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
 
     {/* 2段目: 拍の間隔＝BPM。狭めると BPM が上がる。 */}
     <div className="dj-grid-editor__row">
+      <select className="dj-grid-editor__scope" aria-label="BPMの変更範囲" disabled={locked} value={tempoScope} onChange={e => setTempoScope(e.target.value as "all" | "from")}>
+        <option value="all">曲全体</option><option value="from">変更地点から先</option>
+      </select>
+      {tempoScope === "from" && <button disabled={locked} title="現在位置をテンポの変更地点にする。BPMを入力するまでグリッドは変更しません" onClick={() => setAnchor(Math.max(0, Math.min(positionMs, durationMs - 1)))}>現在位置を変更地点に</button>}
+    </div>
+    <div className="dj-grid-editor__row">
       <label htmlFor={`bpm-${props.trackId}`}>BPM</label>
       <input id={`bpm-${props.trackId}`} className="dj-grid-editor__number" type="number" min={20} max={300} step={0.01} value={bpmText} disabled={locked}
         onChange={e => { setBpmText(e.target.value); const bpm = Number(e.target.value); if (e.target.value && bpm >= 20 && bpm <= 300) changeBpm(bpm); }} />
@@ -125,8 +135,8 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
     <div className="dj-grid-editor__row">
       <button disabled={!props.onTogglePlay} onClick={props.onTogglePlay}>{playing ? "Ⅱ" : "▶"}</button>
       <button disabled={locked} title="タップした間隔でBPMを設定する" onClick={tapTempo}>TAP</button>
-      <button disabled={locked || draft.bpm * 2 > 300} title="拍の間に拍を追加し、テンポを倍にする" onClick={() => apply(() => subdivideGrid(draft, 2, anchor))}>||| × 2</button>
-      <button disabled={locked || draft.bpm / 2 < 20} title="拍を間引き、テンポを半分にする" onClick={() => apply(() => subdivideGrid(draft, .5, anchor))}>||| × ½</button>
+      <button disabled={locked || editingBpm * 2 > 300} title="選択範囲のテンポを倍にする" onClick={() => tempoScope === "from" ? changeBpm(editingBpm * 2) : apply(() => subdivideGrid(draft, 2, anchor))}>||| × 2</button>
+      <button disabled={locked || editingBpm / 2 < 20} title="選択範囲のテンポを半分にする" onClick={() => tempoScope === "from" ? changeBpm(editingBpm / 2) : apply(() => subdivideGrid(draft, .5, anchor))}>||| × ½</button>
       <button disabled title="メトロノーム：この音声エンジン未対応">♪</button>
       <select aria-label="拍子" disabled={locked} value={draft.beats_per_bar} onChange={e => apply(() => ({ ...draft, beats_per_bar: Number(e.target.value), beat_numbers: draft.beat_times_ms?.map((_, i) => i % Number(e.target.value) + 1), source: "manual", confidence: null }))}>{[2,3,4,5,6,7,8,12,16].map(n => <option key={n} value={n}>{n}拍</option>)}</select>
       <span className="dj-grid-editor__hint" title="ドラッグでグリッド全体を移動、Shiftで1/10の微調整、Altで音をスクラッチ。保存・適用までエンジンのグリッドは変更しません">ドラッグ＝グリッド · Shift＝微調整</span>

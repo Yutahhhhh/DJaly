@@ -9,7 +9,7 @@ EMBEDDING_PIPELINE_VERSION = "musicnn-16khz-v1"
 EMBEDDING_MODEL = "msd-musicnn-1:musicnn-16khz-v1"
 COMPONENT_VERSIONS = {
     "embedding": EMBEDDING_PIPELINE_VERSION,
-    "rhythm": "rhythm-v3",
+    "rhythm": "rhythm-attacks-v4",
     "key": "key-v1",
     "timbre": "timbre-v1",
     "waveform": "waveform-v1",
@@ -39,4 +39,5 @@ DEFAULT_LOUDNESS_RANGE = 5.0
 # Different DSP implementations must not claim each other's analysis version.
 import sys
 if sys.platform == "win32":
-    COMPONENT_VERSIONS.update(rhythm="librosa-rhythm-v1", key="librosa-key-v1", timbre="librosa-timbre-v1")
+    COMPONENT_VERSIONS.update(rhythm="librosa-attacks-v2", key="librosa-key-v1", timbre="librosa-timbre-v1")
+GRID_COMPONENT_VERSION = "numpy-attacks-v2" if sys.platform == "win32" else COMPONENT_VERSIONS["rhythm"]

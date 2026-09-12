@@ -119,6 +119,8 @@ class IngestionRepository:
                     # beats. Saved user cues/loops/grids live in a separate row.
                     session.exec(text("DELETE FROM track_grid_candidates WHERE track_id=:id AND source='analysis'"),
                                  params={"id": track_id})
+                    from infra.repositories.analysis_grid_refresh import refresh_saved_analysis_grid
+                    refresh_saved_analysis_grid(session, track_id, extras.get("playback_grid"))
 
             if "embedding" in result and result["embedding"] and not (existing_track and preserve_full_analysis):
                 emb = session.get(TrackEmbedding, track_id)

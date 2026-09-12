@@ -18,6 +18,7 @@ from domain.services.analysis.rhythm_grid import GridAnalysisError, analyze_grid
 from domain.services.analysis.beat_grid import playback_grid, VERSION as GRID_VERSION
 from infra.database.connection import db_lock
 from infra import rekordbox_grid
+from infra import rekordbox_timing
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class GridCandidateService:
         stat = path.stat()
         fingerprint = hashlib.sha256(json.dumps([
             str(path), stat.st_size, stat.st_mtime_ns, audio_fingerprint(track.filepath),
+            rekordbox_timing.VERSION, sys.platform,
         ]).encode()).hexdigest()
         if not refresh:
             cached = self._cached(track, "rekordbox", fingerprint)
@@ -112,10 +114,13 @@ class GridCandidateService:
                 return self._within_duration(track, cached)
         grid = rekordbox_grid.read_grid(path)
         if grid:
+            offset = rekordbox_timing.timing_offset_ms(track.filepath)
+            grid = rekordbox_timing.adjust_grid(grid, offset)
             self._within_duration(track, grid)
             return self._cache(track, grid, fingerprint, {
                 "database": str(rekordbox_grid.master_db_path()), "analysis_path": str(path),
                 "external_track_id": external_id, "format": "PQTZ", "read_only": True,
+                "timing_offset_ms": offset, "timing_version": rekordbox_timing.VERSION,
             })
         return None
 
@@ -172,7 +177,7 @@ class GridCandidateService:
             raise GridAnalysisError("The rhythm analyzer found no usable beats")
         self._within_duration(track, grid)
         return self._cache(track, grid, fingerprint + f":grid-v{GRID_VERSION}", {
-            "algorithm": "numpy-whole-track-grid-v1" if sys.platform == "win32" else "Essentia RhythmExtractor2013 multifeature",
+            "algorithm": "numpy-attacks-v2" if sys.platform == "win32" else "Essentia multifeature + attack alignment v4",
             "sample_rate": 11025 if sys.platform == "win32" else 44100,
             "confidence": "raw algorithm score, not a probability", "forced": force,
         })
