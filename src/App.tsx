@@ -15,7 +15,7 @@ import { GlobalProgressIndicator } from "@/components/GlobalProgressIndicator";
 import { IngestionProvider } from "@/contexts/IngestionContext";
 import { MetadataProvider } from "@/contexts/MetadataContext";
 import { DashboardView } from "@/components/dashboard/DashboardView";
-import { API_BASE_URL } from "@/services/api-client";
+import { useStartupProgress } from "@/hooks/useStartupProgress";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Updater } from "@/components/Updater";
 import { Toaster } from "@/components/ui/toast";
@@ -37,7 +37,7 @@ function App() {
     sessionStorage.getItem("plumdeck.activeView") ?? "dashboard"
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [isServerReady, setIsServerReady] = useState(false);
+  const startup = useStartupProgress();
   const previousMode = useRef(appMode);
   const [releasingPerformanceAudio, setReleasingPerformanceAudio] = useState(appMode === "assist");
   const [releaseError, setReleaseError] = useState<string | null>(null);
@@ -48,26 +48,6 @@ function App() {
   // Music Player State
   const { currentTrack, pause } = usePlayerStore();
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
-
-  // Server Health Check
-  useEffect(() => {
-    const checkServer = async () => {
-      try {
-        const baseUrl = API_BASE_URL.replace('/api', '');
-        console.log("Checking server at:", baseUrl);
-        const res = await fetch(baseUrl);
-        if (res.ok) {
-          setIsServerReady(true);
-        } else {
-          throw new Error("Server not ready");
-        }
-      } catch (e) {
-        // リトライ
-        setTimeout(checkServer, 1000);
-      }
-    };
-    checkServer();
-  }, []);
 
   useEffect(() => {
     sessionStorage.setItem("plumdeck.activeView", activeView);
@@ -118,8 +98,8 @@ function App() {
     setAppMode(mode);
   };
 
-  if (!isServerReady) {
-    return <LoadingScreen />;
+  if (!startup.ready) {
+    return <LoadingScreen progress={startup.progress} seconds={startup.seconds} connectionError={startup.connectionError} onRetry={startup.retry} />;
   }
 
   const renderView = () => {
@@ -158,12 +138,11 @@ function App() {
   return (
     <IngestionProvider>
       <MetadataProvider>
-        <Updater />
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#080b11]">
           <div className="z-[80] flex h-10 shrink-0 items-center border-b border-slate-700 bg-[#11151d] px-3 shadow-md">
             <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">plumdeck<span className="hidden sm:inline"> Workspace</span></span>
             <JunctionBar />
-            <div className="ml-auto"><ModeToggle mode={appMode} onChange={changeMode} disabled={releasingPerformanceAudio} /></div>
+            <div className="ml-auto flex items-center gap-2"><Updater /><ModeToggle mode={appMode} onChange={changeMode} disabled={releasingPerformanceAudio} /></div>
           </div>
         <div className="min-h-0 flex-1">
         {(appMode === "play" || junction?.active) && <div className={appMode === "play" && !releasingPerformanceAudio && !releaseError ? "h-full" : "hidden"}><PlayWorkspace /></div>}

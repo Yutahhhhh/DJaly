@@ -1,97 +1,50 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  deriveGuestGuidance,
-  deriveHostCardGuidance,
-  describeExchangeState,
-  exchangeConnected,
-  formatExpiry,
-  primaryExchangeAction,
-} from './exchange-actions.ts';
-
-const peer = (exchange) => ({peerId: 'g1', displayName: 'Guest', approved: false, exchange});
-const snap = (over = {}) => ({
-  active: true, sessionId: 'room', sessionName: 'Night', revision: 1, epoch: '1',
-  localPeerId: 'self', hostPeerId: 'host', performerPeerId: 'host', handoffState: 'IDLE',
-  participants: [{peerId: 'self', displayName: 'Me'}], readiness: {ready: false, reasons: []},
-  program: {state: 'preparing'}, connection: {state: 'connected'}, ...over,
+import {deriveGuestGuidance, deriveHostCardGuidance, describeExchangeState, exchangeConnected, formatExpiry, primaryExchangeAction} from './exchange-actions.ts';
+const peer = (state, extra = {}) => ({peerId:'guest', displayName:'DJ MIKA', exchange:{state, ...extra}});
+const guest = (state) => ({hostPeerId:'host', localPeerId:'guest', participants:[{peerId:'host', exchange:{state}}], exchange:{mode:'manual',state}});
+const states = ['idle','collecting','invite_ready','awaiting_answer','approval_pending','response_ready','awaiting_host','connecting','connected','interrupted','needs_exchange','failed','expired','cancelled','rejected'];
+test('every exchange state has at most one primary action, no file or ineffective retry action', () => {
+  for(const state of states) for(const g of [deriveHostCardGuidance(peer(state)), deriveGuestGuidance(guest(state))]) {
+    assert(g.actions.filter(a => a.intent === 'primary').length <= 1, state);
+    assert(g.actions.every(a => !/file|retry/.test(a.id)), state);
+    assert([1,2,3].includes(g.step));
+  }
 });
-
-test('host: invite_ready offers copy/save and is honest that copy is not send', () => {
-  const g = deriveHostCardGuidance(peer({state: 'invite_ready', waitingFor: 'guest'}));
-  assert.equal(g.waiting, false);
-  assert.ok(g.headline.includes('まだ送信ではありません'));
-  assert.deepEqual(g.actions.map((a) => a.id), ['copy_invite', 'save_invite_file', 'paste_answer', 'import_answer_file', 'cancel']);
+test('host moves from invitation copy to response entry without claiming delivery', () => {
+  const initial=deriveHostCardGuidance(peer('invite_ready'));
+  const copied=deriveHostCardGuidance(peer('invite_ready'),true);
+  assert.equal(primaryExchangeAction(initial).id,'copy_invite'); assert.equal(initial.step,1);
+  assert.equal(primaryExchangeAction(copied).id,'paste_answer'); assert.equal(copied.step,2);
+  assert.match(copied.headline,/チャットで送り/);
 });
-
-test('host: approval happens before the answer is applied', () => {
-  const g = deriveHostCardGuidance(peer({state: 'approval_pending', waitingFor: 'host'}));
-  assert.ok(g.actions.some((a) => a.id === 'approve'));
-  assert.ok(g.actions.some((a) => a.id === 'reject'));
-  assert.ok(/承認するまで/.test(g.hint ?? ''));
+test('guest moves from reply copy to waiting and can still enter a renewed invitation', () => {
+  assert.equal(primaryExchangeAction(deriveGuestGuidance(guest('response_ready'))).id,'copy_answer');
+  const g=deriveGuestGuidance(guest('response_ready'),true);
+  assert.equal(g.step,3); assert.equal(g.waiting,true); assert.equal(primaryExchangeAction(g),undefined);
+  assert.match(g.headline,/チャットで管理DJへ送って/); assert(g.actions.some(a=>a.id==='paste_invite'));
 });
-
-test('host: needs_exchange keeps the card and points at re-inviting the same peer', () => {
-  const g = deriveHostCardGuidance(peer({state: 'needs_exchange', waitingFor: 'none'}));
-  assert.deepEqual(g.actions.map((a) => a.id), ['reexchange', 'open_relay', 'cancel']);
+test('host approval stays explicit and identifies the DJ before applying the answer', () => {
+  const g=deriveHostCardGuidance(peer('approval_pending'));
+  assert.equal(g.step,3); assert.match(g.headline,/DJ MIKA/);
+  assert.equal(primaryExchangeAction(g).id,'approve'); assert(g.actions.some(a=>a.id==='reject'));
 });
-
-test('host: failed surfaces error text next to the next action', () => {
-  const g = deriveHostCardGuidance(peer({state: 'failed', waitingFor: 'none', detail: '相手が応答しません', errorCode: 'ICE_TIMEOUT'}));
-  assert.equal(g.error, '相手が応答しません');
-  assert.ok(g.actions.some((a) => a.id === 'retry'));
+test('a temporary outage waits; persistent failure has one role-specific recovery path', () => {
+  assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer('interrupted'))),undefined);
+  for(const state of ['needs_exchange','failed','expired','cancelled','rejected']) {
+    assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer(state))).id,'reexchange');
+    assert.equal(primaryExchangeAction(deriveGuestGuidance(guest(state))).id,'paste_invite');
+  }
 });
-
-test('host: cancelled provides a transferable notice because offline peers are not notified magically', () => {
-  const g = deriveHostCardGuidance(peer({state: 'cancelled', waitingFor: 'none'}));
-  assert.ok(g.actions.some((a) => a.id === 'copy_notice'));
-  assert.ok(g.actions.some((a) => a.id === 'save_notice_file'));
-  assert.ok(/自動で伝わりません/.test(g.headline));
+test('transport errors remain visible and cancellations offer a signed notice', () => {
+  assert.equal(deriveHostCardGuidance(peer('failed',{detail:'相手が応答しません'})).error,'相手が応答しません');
+  assert(deriveHostCardGuidance(peer('cancelled')).actions.some(a=>a.id==='copy_notice'));
 });
-
-test('guest: response_ready never claims copy equals sent', () => {
-  const g = deriveGuestGuidance(snap({participants: [peerSelf('response_ready')]}));
-  assert.ok(g.headline.includes('コピー＝送信ではありません'));
-  assert.deepEqual(g.actions.map((a) => a.id), ['copy_answer', 'save_answer_file', 'paste_invite', 'import_invite_file', 'cancel']);
+test('guest can derive progress from the session snapshot without a host row', () => {
+  assert.equal(deriveGuestGuidance({participants:[],exchange:{mode:'manual',state:'connecting'}}).step,3);
 });
-
-test('guest: awaiting_host is explicit that waiting is not proof the host read it', () => {
-  const g = deriveGuestGuidance(snap({participants: [peerSelf('awaiting_host')]}));
-  assert.equal(g.waiting, true);
-  assert.ok(/証明ではありません/.test(g.hint ?? ''));
+test('connection is distinct from playback readiness; expiry is based on actual time', () => {
+  assert.equal(describeExchangeState('connected'),'接続済み'); assert(exchangeConnected('connected')); assert(!exchangeConnected('connecting'));
+  assert.equal(formatExpiry(undefined,1000),undefined); assert.equal(formatExpiry(999,1000),'有効期限切れ');
+  assert.equal(formatExpiry(31000,1000),'有効期限まで約30秒'); assert.equal(formatExpiry(601000,1000),'有効期限まで約10分');
 });
-
-test('guest: needs_exchange asks to import a fresh invite', () => {
-  const g = deriveGuestGuidance(snap({participants: [peerSelf('needs_exchange')]}));
-  assert.deepEqual(g.actions.map((a) => a.id), ['paste_invite', 'import_invite_file']);
-});
-
-test('guest: falls back to snapshot.exchange when self row has none', () => {
-  const g = deriveGuestGuidance(snap({exchange: {mode: 'manual', state: 'connecting'}}));
-  assert.equal(g.waiting, true);
-});
-
-test('describe + connected wording is distinct from readiness', () => {
-  assert.equal(describeExchangeState('connected'), '接続済み');
-  assert.equal(exchangeConnected('connected'), true);
-  assert.equal(exchangeConnected('connecting'), false);
-});
-
-test('formatExpiry is coarse and never a fake percentage', () => {
-  const now = 1_000_000;
-  assert.equal(formatExpiry(undefined, now), undefined);
-  assert.equal(formatExpiry(now - 1, now), '有効期限切れ');
-  assert.equal(formatExpiry(now + 30_000, now), '有効期限まで約30秒');
-  assert.equal(formatExpiry(now + 600_000, now), '有効期限まで約10分');
-});
-
-test('a destructive-only exchange state has no highlighted primary action', () => {
-  const collecting = deriveHostCardGuidance(peer({state: 'collecting', waitingFor: 'guest'}));
-  assert.equal(primaryExchangeAction(collecting), undefined);
-  assert.equal(collecting.actions[0].id, 'cancel');
-  assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer({state: 'approval_pending', waitingFor: 'host'})))?.id, 'approve');
-});
-
-function peerSelf(state) {
-  return {peerId: 'host', displayName: 'Host', exchange: {state, waitingFor: 'local'}};
-}

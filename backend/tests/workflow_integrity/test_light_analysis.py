@@ -12,6 +12,7 @@ import infra.database.connection as db
 from infra.database.schema import init_raw_db
 from domain.models.track import Track, TrackAnalysis, TrackEmbedding
 from domain.services.analysis.portable import PortableAudioAnalyzer
+from domain.services.analysis import light_dsp
 from utils.ingestion import (
     has_completed_analysis,
     has_completed_analysis_for_profile,
@@ -29,12 +30,11 @@ def test_portable_light_analysis_uses_a_bounded_middle_window(monkeypatch):
 
     def load(_path, start, duration):
         requested.update(start=start, duration=duration)
-        return np.full(44100, .1, dtype=np.float32)
+        return np.full(light_dsp.SAMPLE_RATE, .1, dtype=np.float32)
 
     analyzer._load_audio_segment = load
-    analyzer._rhythm = lambda _audio: (126.0, np.array([.1, .58]), .8, np.array([]), np.array([.48]))
-    analyzer._key = lambda _audio: ("C", "minor", .7)
-    analyzer._extract_light_features = lambda _audio: {
+    monkeypatch.setattr(light_dsp, "rhythm_and_key", lambda _audio: (126.0, .8, "C", "minor", .7))
+    analyzer._extract_light_features = lambda _audio, **_: {
         "energy": .25, "brightness": .4, "noisiness": .1,
         "loudness": -12.0, "loudness_range": 4.0,
         "spectral_flux": .2, "spectral_rolloff": 4000.0, "contrast": .3,
@@ -45,10 +45,11 @@ def test_portable_light_analysis_uses_a_bounded_middle_window(monkeypatch):
 
     result = analyzer.analyze_light("/music/track.mp3")
 
-    assert requested == {"start": 105.0, "duration": 90}
+    assert requested == {"start": 135.0, "duration": 30}
     assert result["analysis_level"] == "light"
     assert result["bpm"] == 126.0
     assert result["duration"] == 300
+    assert result["features_extra"]["analysis_sample_rate"] == 11025
     assert "embedding" not in result
     assert result["features_extra"]["playback_grid_estimated"] is True
 
@@ -230,7 +231,8 @@ def test_windows_auto_play_import_reuses_an_existing_light_track(tmp_path, monke
         engine.dispose()
 
 
-def test_windows_auto_play_import_falls_back_once_and_persists_light(tmp_path, monkeypatch):
+@pytest.mark.parametrize("requested_profile", ["auto", "light"])
+def test_windows_play_import_uses_light_and_bounds_worker(tmp_path, monkeypatch, requested_profile):
     from app.services import play_import_service as play_module
     from domain.services import ingestion_domain_service as ingestion_module
 
@@ -257,6 +259,8 @@ def test_windows_auto_play_import_falls_back_once_and_persists_light(tmp_path, m
             calls.append((Path(filepath).name, profile))
             if profile == "full":
                 raise RuntimeError("wrapped") from TimeoutError("Analysis timed out after 180 seconds")
+            assert kwargs["executor"].task_timeout == 60
+            assert kwargs["timeout"] == 90
             return {
                 "filepath": filepath, "title": Path(filepath).stem,
                 "artist": "DJ", "genre": "House", "duration": 60,
@@ -272,23 +276,26 @@ def test_windows_auto_play_import_falls_back_once_and_persists_light(tmp_path, m
         with Session(engine) as session:
             batch = play_module.PlayImportService(session).create(
                 "auto-light", "collection", None, [str(first), str(second)],
-                analysis_profile="auto",
+                analysis_profile=requested_profile,
             )
             session.rollback()
         play_module.process_batch(batch["id"])
         with Session(engine) as session:
             saved = play_module.PlayImportService(session).get(batch["id"])
             assert saved["state"] == "completed"
-            assert saved["effective_analysis_profile"] == "light"
+            if requested_profile == "auto":
+                assert saved["effective_analysis_profile"] == "light"
             assert [item["analysis_level"] for item in saved["items"]] == ["light", "light"]
             assert session.exec(text("SELECT count(*) FROM track_embeddings")).one()[0] == 0
-        assert calls == [("first.mp3", "full"), ("first.mp3", "light"), ("second.mp3", "light")]
+        expected = [("first.mp3", "full")] if requested_profile == "auto" else []
+        assert calls == expected + [("first.mp3", "light"), ("second.mp3", "light")]
     finally:
         engine.dispose()
 
 
-def test_windows_auto_explorer_falls_back_and_uses_light_for_remaining_files(
-    tmp_path, monkeypatch,
+@pytest.mark.parametrize("requested_profile", ["auto", "light"])
+def test_windows_explorer_uses_light_and_bounds_worker(
+    tmp_path, monkeypatch, requested_profile,
 ):
     from app.services import ingestion_app_service as app_module
 
@@ -310,6 +317,8 @@ def test_windows_auto_explorer_falls_back_and_uses_light_for_remaining_files(
             calls.append((Path(filepath).name, profile))
             if profile == "full":
                 raise RuntimeError("wrapped") from TimeoutError("Analysis timed out")
+            assert _args[0].task_timeout == 60
+            assert _args[1] == 90
             return {"analysis_level": "light"}
 
     monkeypatch.setattr(app_module.sys, "platform", "win32")
@@ -322,9 +331,37 @@ def test_windows_auto_explorer_falls_back_and_uses_light_for_remaining_files(
     service = app_module.IngestionAppService()
     service.domain_service = FakeDomain()
 
-    asyncio.run(service._run_ingestion([str(first), str(second)], False, "auto"))
+    asyncio.run(service._run_ingestion([str(first), str(second)], False, requested_profile))
 
-    assert calls == [("first.mp3", "full"), ("first.mp3", "light"), ("second.mp3", "light")]
+    expected = [("first.mp3", "full")] if requested_profile == "auto" else []
+    assert calls == expected + [("first.mp3", "light"), ("second.mp3", "light")]
     assert service.state["type"] == "complete"
     assert service.state["processed"] == 2
     assert service.state["details"]["effective_analysis_profile"] == "light"
+
+
+def test_cancelling_explorer_before_first_step_allows_immediate_retry(monkeypatch):
+    from app.services.analysis_coordinator import analysis_coordinator
+    from app.services.ingestion_app_service import IngestionAppService
+
+    service = IngestionAppService()
+    calls = []
+
+    async def finish(*_args):
+        calls.append(analysis_coordinator.owner)
+        service.update_state(type="complete")
+
+    monkeypatch.setattr(service, "_run_ingestion", finish)
+
+    async def run():
+        assert await service.start_ingestion([], analysis_profile="light")
+        await service.cancel_ingestion()  # no event-loop yield before cancel
+        assert not service.is_running
+        assert service.current_task is None
+        assert analysis_coordinator.owner is None
+        assert await service.start_ingestion([], analysis_profile="light")
+        await asyncio.wait_for(service.current_task, 2)
+
+    asyncio.run(run())
+    assert calls == ["Explorer解析"]
+    assert analysis_coordinator.owner is None

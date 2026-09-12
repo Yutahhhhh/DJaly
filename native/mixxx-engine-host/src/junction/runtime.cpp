@@ -440,7 +440,8 @@ struct Runtime::Impl {
         if(!hosting&&!p.candidate){
             if(state==ExchangeState::Connected)connection="connected";
             else if(state==ExchangeState::Interrupted)connection="reconnecting";
-            else if(state==ExchangeState::NeedsExchange||state==ExchangeState::Failed)connection="error";
+            else if(state==ExchangeState::NeedsExchange||state==ExchangeState::Failed||state==ExchangeState::Expired||state==ExchangeState::Cancelled||state==ExchangeState::Rejected)connection="error";
+            else if(state==ExchangeState::Collecting||state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost||state==ExchangeState::Connecting)connection="connecting";
         }
         p.manual.waitingFor=state==ExchangeState::InviteReady?QStringLiteral("guest")
             :state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost?QStringLiteral("host")
@@ -448,12 +449,24 @@ struct Runtime::Impl {
             :QStringLiteral("none");
         ++auth.revision;
     }
+    // Transport-scoped state must not leak into a fresh connection. In
+    // particular, an old heartbeat must not immediately interrupt the new link.
+    void resetLinkHandshake(Peer& p) {
+        p.hello=false;p.producing=false;p.remoteStreamReady=false;
+        p.lastControlAt=monotonicNanos();p.hasHealth=false;p.healthAt=0;
+        p.healthStatsReady=false;p.probeReady=false;p.lastProbeRttMs=0;
+        p.smoothedRttMs=0;p.smoothedJitterMs=0;p.pending.clear();
+    }
     /// Starts one connection attempt for `p`. When the peer already has a live
     /// transport the attempt is built alongside it as a replacement candidate,
     /// so an established connection keeps carrying audio until the new one is
     /// actually up.
     QString manualStartAttempt(Peer& p,bool offerer,const QJsonArray& remoteIce) {
-        const bool replacement=p.transport&&p.transport->aggregateLinkState()==LinkState::Connected;
+        // ICE can still report Connected after a suspended/half-open link has
+        // stopped carrying control traffic. Preserve only a recently live link.
+        const auto now=monotonicNanos();
+        const bool replacement=p.transport&&p.transport->aggregateLinkState()==LinkState::Connected
+            &&p.hello&&p.lastControlAt&&now-p.lastControlAt<=3000000000LL;
         const auto serial=++serialCounter;QString error;
         auto transport=buildTransport(p.id,serial,offerer,iceServerUrls(remoteIce),&error);
         if(!transport)return error.isEmpty()?QStringLiteral("接続を開始できません"):error;
@@ -463,7 +476,8 @@ struct Runtime::Impl {
             // exactly one attempt is ever gathering for this peer.
             p.candidate.reset();p.candidateSerial=0;
             if(p.transport)p.transport->close();
-            p.transport=std::move(transport);p.serial=serial;p.hello=false;p.producing=false;p.pending.clear();
+            p.transport=std::move(transport);p.serial=serial;
+            resetLinkHandshake(p);
         }
         p.manual.retries=0;p.manual.clearArtifacts();p.manual.noticeText.clear();
         p.manual.collectDeadline=monotonicNanos()+30000000000LL;p.manual.connectDeadline=0;
@@ -560,7 +574,7 @@ struct Runtime::Impl {
         p.candidate.reset();p.candidateSerial=0;
         // The new link starts from a clean handshake; the peer id, approval and
         // authenticated fingerprint are deliberately preserved.
-        p.hello=false;p.producing=false;p.remoteStreamReady=false;p.lastControlAt=monotonicNanos();p.hasHealth=false;p.healthAt=0;p.healthStatsReady=false;p.probeReady=false;p.pending.clear();
+        resetLinkHandshake(p);
         queue(p,"peer.hello",localProfile());
         if(hosting)queue(p,"session.snapshot",wireState(true));
         if(!hosting&&(auth.owner==auth.local||auth.next==auth.local))sendManifest(p);
@@ -573,7 +587,7 @@ struct Runtime::Impl {
             else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("再接続できませんでした。接続情報を作り直してください"),QStringLiteral("candidate_failed"));
             return;}
         if(serial!=p.serial||p.candidate||exchangeStateTerminal(p.manual.state))return;
-        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
+        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){if(!p.hello)p.lastControlAt=monotonicNanos();p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
         else if(state==LinkState::Disconnected){
             // A transient outage is not a manual re-exchange. The performer,
             // the epoch and the authorisation all stay exactly as they are.
@@ -1187,7 +1201,7 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         if(!verifyExchangeSignature(*packet,packet->descriptionFingerprint(),&failure))return reject(failure);
         return packet->sanitized();
     }
-    const auto input=p["text"].toString(p["invite"].toString());
+    const auto input=p["text"].toString(p["invite"].toString()).trimmed();
     const bool manualCreate=op=="create"&&(p["exchangeMode"]=="manual"||p["signalingUrl"].toString().isEmpty());
     const bool manualJoin=op=="join"&&input.startsWith("PLUMDECK-JUNCTION-");
     if(manualCreate||manualJoin){
@@ -1234,6 +1248,8 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
             auto i=d->peers.find(d->hosting?packet->peerId:d->auth.host);if(i==d->peers.end())return reject("対応する招待が見つかりません");auto& peer=*i->second;
             if(packet->inviteId!=peer.manual.inviteId||packet->generation!=peer.manual.generation||packet->attempt!=peer.manual.attempt)return reject("別の招待、または更新前の接続情報です。最新の招待への返答を取り込んでください");
             if(d->hosting){
+                const auto expectedPeer=p["peerId"].toString();
+                if(!expectedPeer.isEmpty()&&packet->peerId!=expectedPeer)return reject("別のDJへの返答です。返答を送ったDJの行で入力してください");
                 if(packet->kind!=ExchangeKind::Response)return reject("DJから届いた返答を取り込んでください");
                 if(packet->hostFingerprint!=d->identity->fingerprint||packet->expiresAt!=peer.manual.expiresAt)return reject("招待と返答の識別情報が一致しません");
                 if(exchangeStateTerminal(peer.manual.state))return reject("この招待は取り消し済み、または無効です。新しい招待を作成してください");

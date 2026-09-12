@@ -406,25 +406,22 @@
 .junction-quality small { grid-column: 1 / -1; width: 42px; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 8.5px; }
 .junction-roster-actions { display: flex; justify-content: flex-end; align-items: center; gap: 5px; padding-left: 72px; }
 .junction-row-primary { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.junction-row-more { position: relative; }
-.junction-row-more > summary { display: grid; place-items: center; width: 30px; height: 28px; border: 1px solid #405566; border-radius: 5px; color: #a9bac8; cursor: pointer; list-style: none; }
-.junction-row-more > summary::-webkit-details-marker { display: none; }
-.junction-row-menu {
-  position: absolute;
-  z-index: 6;
-  right: 0;
-  top: calc(100% + 4px);
-  width: min(260px, 78vw);
-  display: grid;
-  gap: 5px;
-  padding: 7px;
-  border: 1px solid #425262;
-  border-radius: 7px;
-  background: #121d28;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.52);
-}
-.junction-row-menu .junction-btn { width: 100%; text-align: left; }
-.junction-inline-exchange { margin-left: 72px; padding: 8px; border-radius: 6px; background: #101d28; }
+.junction-exchange-flow { padding: 10px 0 2px; }
+.junction-roster-row > .junction-exchange-flow { margin-left: 34px; }
+.junction-own-connection { padding: 14px; border: 1px solid #385973; border-radius: 10px; background: #142534; }
+.junction-own-connection h3 { margin: 0; color: #e2edf5; font-size: 14px; }
+.junction-exchange-steps { display: flex; gap: 18px; padding: 0; margin: 0 0 12px; list-style: none; color: #91a5b4; font-size: 11px; }
+.junction-exchange-steps li { display: flex; align-items: center; gap: 5px; }
+.junction-exchange-steps li span { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; border: 1px solid #51697b; }
+.junction-exchange-steps [aria-current="step"] { color: #d6f3ff; font-weight: 600; }
+.junction-exchange-steps [aria-current="step"] span { background: #145f80; border-color: #70c7e8; }
+.junction-exchange-steps .is-done { color: #81d5b1; }
+.junction-exchange-next { margin: 0 0 9px; font-size: 12px; line-height: 1.65; color: #d8e6f0; }
+.junction-exchange-menu { z-index: 200; max-width: min(300px, 90vw); background: #142534; color: #d8e6f0; border-color: #4b6579; }
+.junction-exchange-menu [role="menuitem"] { padding: 9px 12px; font-size: 12px; cursor: pointer; }
+.junction-exchange-menu [data-highlighted] { background: #25445c; color: white; }
+.junction-exchange-menu .junction-menu-danger { color: #fda4af; }
+.junction-inline-exchange { margin-top: 8px; padding: 10px; border-radius: 6px; background: #101d28; }
 .junction-inline-exchange label { margin-top: 0; }
 .junction-row-note { margin: 0 0 0 72px; color: #91a5b4; font-size: 10.5px; line-height: 1.45; }
 .junction-row-warning { margin: 0 0 0 72px; color: #fde68a; font-size: 10.5px; line-height: 1.45; }
@@ -448,7 +445,7 @@
   .junction-roster-main { grid-template-columns: 23px 34px minmax(0, 1fr) 37px; gap: 6px; }
   .junction-avatar { width: 34px; height: 34px; border-radius: 8px; }
   .junction-roster-actions,
-  .junction-inline-exchange { padding-left: 0; margin-left: 63px; }
+  .junction-roster-row > .junction-exchange-flow { margin-left: 0; }
   .junction-row-note { margin-left: 63px; }
   .junction-row-warning { margin-left: 63px; }
   .junction-row-primary { max-width: calc(100vw - 145px); }

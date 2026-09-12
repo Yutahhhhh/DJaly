@@ -184,6 +184,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & .\src-tauri\bin\plumdeck-server-x86_64-pc-windows-msvc.exe --diagnose-light-analysis
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged light analysis failed' }
           & .\src-tauri\bin\plumdeck-server-x86_64-pc-windows-msvc.exe --diagnose-analysis
           if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
 

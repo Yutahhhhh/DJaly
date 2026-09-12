@@ -67,9 +67,12 @@ class IngestionDomainService:
         save_to_db: bool = True,
         write_source_metadata: bool = True,
         analysis_profile: str = "full",
+        on_progress=None,
     ) -> Optional[Dict[str, Any]]:
         """1曲のインポート処理のメインロジック。"""
         filename = os.path.basename(filepath)
+        if on_progress:
+            on_progress({"stage": "checking", "label": "登録済み情報・音源の更新を確認しています"})
         lyrics_content = None
 
         lrc_path = os.path.splitext(filepath)[0] + ".lrc"
@@ -170,10 +173,12 @@ class IngestionDomainService:
             if analysis_profile == "light":
                 run_args += (analysis_profile,)
 
-            result = await asyncio.wait_for(
-                loop.run_in_executor(executor, analyze_track_file, *run_args),
-                timeout=timeout
-            )
+            if on_progress and hasattr(executor, "submit_with_progress"):
+                future = asyncio.wrap_future(executor.submit_with_progress(
+                    analyze_track_file, *run_args, on_progress=on_progress))
+            else:
+                future = loop.run_in_executor(executor, analyze_track_file, *run_args)
+            result = await asyncio.wait_for(future, timeout=timeout)
         except Exception as exc:
             raise RuntimeError(f"Audio analysis failed for {filename}: {exc}") from exc
 
@@ -232,6 +237,8 @@ class IngestionDomainService:
                 )
             
             if save_to_db:
+                if on_progress:
+                    on_progress({"stage": "saving", "label": "解析結果をライブラリに保存しています"})
                 if db_lock:
                     async with db_lock:
                         await loop.run_in_executor(None, self.repository.save_track, result, True)

@@ -6,18 +6,23 @@ import sys
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from .progress import progress_sink
 
 
 def _worker(send, function, args):
     try:
-        send.send((True, function(*args)))
+        with progress_sink(lambda event: send.send(("progress", event))):
+            send.send((True, function(*args)))
     except BaseException as exc:
-        send.send((False, f"{type(exc).__name__}: {exc}"))
+        try:
+            send.send((False, f"{type(exc).__name__}: {exc}"))
+        except (OSError, EOFError):
+            pass  # The parent already timed out or cancelled and closed its pipe.
     finally:
         send.close()
 
 
-def run_isolated(function, args=(), timeout=600, cancel_event=None):
+def run_isolated(function, args=(), timeout=600, cancel_event=None, on_progress=None):
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
     process = context.Process(target=_worker, args=(send, function, args), daemon=True)
@@ -33,6 +38,14 @@ def run_isolated(function, args=(), timeout=600, cancel_event=None):
                     ok, result = receive.recv()
                 except EOFError as exc:
                     raise RuntimeError("Analysis worker exited without a result") from exc
+                if ok == "progress":
+                    if on_progress:
+                        # An observer failure must not lose a valid analysis.
+                        try:
+                            on_progress(result)
+                        except Exception:
+                            pass
+                    continue
                 if not ok:
                     raise RuntimeError(result)
                 return result
@@ -79,3 +92,7 @@ class AnalysisExecutor(ThreadPoolExecutor):
         if cancel_futures:
             self._cancel_event.set()
         return super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    def submit_with_progress(self, fn, /, *args, on_progress):
+        return super().submit(run_isolated, fn, args, self.task_timeout,
+                              self._cancel_event, on_progress)

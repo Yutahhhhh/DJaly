@@ -6,6 +6,7 @@ import os
 import sys
 import uuid
 from domain.services.analysis.process_runner import AnalysisExecutor
+from domain.services.analysis.light_dsp import WORKER_TIMEOUT as LIGHT_WORKER_TIMEOUT
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from utils.ingestion import (
     has_completed_analysis_result,
 )
 from app.services.analysis_coordinator import analysis_coordinator
+from app.services.analysis_progress import analysis_progress
 from infra.repositories.ingestion_repository import IngestionRepository
 from infra.repositories.setlist_repository import SetlistRepository
 import infra.database.connection as db_connection
@@ -129,6 +131,7 @@ class PlayImportService:
         if not batch:
             raise ValueError("取込ジョブが見つかりません")
         result = dict(batch._mapping)
+        result["progress"] = analysis_progress.get(batch_id)
         result["items"] = _rows(self.session.exec(text("""
             SELECT i.*,intent.state AS membership_state,intent.setlist_track_id
             FROM import_items i JOIN import_target_intents intent ON intent.item_id=i.id
@@ -141,7 +144,7 @@ class PlayImportService:
     def list(self, active: bool = False) -> list[dict[str, Any]]:
         where = "WHERE state NOT IN ('completed','completed_with_errors','canceled')" if active else ""
         qualified_where = where.replace("state ", "b.state ")
-        return _rows(self.session.exec(text(f"""
+        rows = _rows(self.session.exec(text(f"""
             SELECT b.*,
               count(i.id) AS total_items,
               count(i.id) FILTER (WHERE i.state IN ('completed','existing')) AS succeeded_items,
@@ -153,6 +156,7 @@ class PlayImportService:
             {qualified_where}
             GROUP BY ALL ORDER BY b.created_at DESC {" " if active else "LIMIT 100"}
         """)))
+        return [{**row, "progress": analysis_progress.get(row["id"])} for row in rows]
 
     def set_state(self, batch_id: str, action: str) -> dict[str, Any]:
         if action not in {"pause", "resume", "cancel", "retry"}:
@@ -197,6 +201,7 @@ def process_batch(batch_id: str) -> None:
         except Exception as cleanup_error:
             print(f"CRITICAL: could not finalize failed import {batch_id}: {cleanup_error}", flush=True)
     finally:
+        analysis_progress.clear(batch_id)
         analysis_coordinator.release(token)
 
 
@@ -232,6 +237,8 @@ def _process_batch(batch_id: str) -> None:
         )
         if requested_profile == "full":
             executor.task_timeout = 570
+        elif effective_profile == "light":
+            executor.task_timeout = LIGHT_WORKER_TIMEOUT
         session.exec(text("UPDATE import_batches SET state='processing',updated_at=CURRENT_TIMESTAMP WHERE id=:id"), params={"id": batch_id})
         session.commit()
         for item in batch["items"]:
@@ -241,7 +248,10 @@ def _process_batch(batch_id: str) -> None:
             if item["state"] not in {"queued", "failed", "probing", "analyzing"}:
                 continue
             path = Path(item["canonical_path"])
+            def progress(event):
+                analysis_progress.update(batch_id, str(path), event)
             try:
+                progress({"stage": "checking", "label": "音源の内容・登録済み情報を確認しています"})
                 if not path.is_file() or not os.access(path, os.R_OK) or path.stat().st_size == 0:
                     raise ValueError("音源を読み取れません")
                 before = path.stat()
@@ -281,9 +291,10 @@ def _process_batch(batch_id: str) -> None:
                         loop = asyncio.get_running_loop()
                         return await domain.process_track_ingestion(
                             str(path), bool(track), loop, executor=executor,
-                            timeout=600 if profile == "full" else 210,
+                            timeout=600 if profile == "full" else LIGHT_WORKER_TIMEOUT + 30,
                             save_to_db=False, write_source_metadata=False,
                             analysis_profile=profile,
+                            on_progress=progress,
                         )
 
                     try:
@@ -304,7 +315,7 @@ def _process_batch(batch_id: str) -> None:
                         # batch (and a resumed batch) does not repeat a known
                         # over-budget detailed analysis.
                         effective_profile = "light"
-                        executor.task_timeout = 180
+                        executor.task_timeout = LIGHT_WORKER_TIMEOUT
                         session.exec(text("""
                             UPDATE import_batches
                             SET effective_analysis_profile='light',updated_at=CURRENT_TIMESTAMP
@@ -314,6 +325,7 @@ def _process_batch(batch_id: str) -> None:
                         result = asyncio.run(analyze("light"))
                     if not result or not has_completed_analysis_result(result, existing_embedding):
                         raise ValueError("再生に必要なBPM・長さ・メタデータを取得できませんでした")
+                    progress({"stage": "saving", "label": "音源の整合性を確認し、解析結果を保存しています"})
                     after = path.stat()
                     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or _sha(path) != identity:
                         raise ValueError("解析中に音源が変更されました。再試行してください")

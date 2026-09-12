@@ -1,5 +1,5 @@
 mod waveform;
-mod junction_exchange_files;
+mod startup;
 use std::env;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -71,6 +71,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_deep_link::init())
         .manage(BackendChild::default())
+        .manage(startup::StartupState::default())
         .plugin(tauri_plugin_shell::init())
         // 開発者ツールを有効化 (リリースビルドでもF12/右クリックで開けるようにする)
         .plugin(tauri_plugin_devtools::init())
@@ -113,6 +114,10 @@ pub fn run() {
             )?)?;
             menu.append(&view_menu)?;
 
+            let help_menu = Submenu::new(handle, "Help", true)?;
+            help_menu.append(&MenuItem::with_id(handle, "check_updates", "更新を確認...", true, None::<&str>)?)?;
+            menu.append(&help_menu)?;
+
             Ok(menu)
         })
         .on_window_event(|window, event| {
@@ -124,6 +129,9 @@ pub fn run() {
             }
         })
         .on_menu_event(|app, event| {
+            if event.id() == "check_updates" {
+                let _ = app.emit("app://check-updates", ());
+            }
             if event.id() == "toggle_devtools" {
                 if let Some(window) = app.get_webview_window("main") {
                     if window.is_devtools_open() {
@@ -141,6 +149,7 @@ pub fn run() {
         .manage(assist::commands::WindowBounds::default())
         .invoke_handler(tauri::generate_handler![
             junction_pending_invite,
+            startup::backend_startup_status,
             assist::commands::assist_snapshot,
             assist::commands::assist_request_accessibility,
             assist::commands::assist_open_accessibility_settings,
@@ -163,8 +172,6 @@ pub fn run() {
             waveform::dj_waveform_pcm,
             waveform::dj_waveform_manifest,
             dj_engine::commands::junction_command,
-            junction_exchange_files::junction_read_exchange_file,
-            junction_exchange_files::junction_write_exchange_file,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -208,36 +215,47 @@ pub fn run() {
             #[cfg(not(debug_assertions))]
             let port = "48123"; // 競合しにくいポート番号
 
-            let sidecar_command = app
-                .shell()
-                .sidecar("plumdeck-server")
-                .map_err(|e| {
-                    eprintln!("Failed to create sidecar command: {}", e);
-                    e
-                })?
+            let sidecar = match app.shell().sidecar("plumdeck-server") {
+                Ok(command) => command,
+                Err(error) => {
+                    startup::fail(app.handle(), format!("解析サービスの起動を準備できません: {}", error));
+                    return Ok(());
+                }
+            };
+            let sidecar_command = sidecar
                 .env("PLUMDECK_PORT", port)
                 .env("PLUMDECK_MANAGED_SIDECAR", "1");
 
             // コマンドの実行結果を詳細にログ出力
             println!("Attempting to spawn sidecar with port: {}", port);
 
-            let (mut _rx, _child) = sidecar_command.spawn().map_err(|e| {
-                eprintln!("Failed to spawn sidecar: {}", e);
-                e
-            })?;
+            let (mut _rx, _child) = match sidecar_command.spawn() {
+                Ok(result) => result,
+                Err(error) => {
+                    startup::fail(app.handle(), format!("解析サービスを起動できません: {}", error));
+                    return Ok(());
+                }
+            };
 
             let (ended, completion) = std::sync::mpsc::channel();
             *app.state::<BackendChild>().0.lock().unwrap() = Some(ManagedBackend {child: _child, ended: completion});
 
             // 非同期でログを出力するスレッドを作成（デバッグ用）
+            let startup_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = _rx.recv().await {
                     if let CommandEvent::Stdout(line) = event {
+                        if let Some(progress) = startup::parse(&line) {
+                            startup::publish(&startup_handle, progress);
+                        }
                         println!("[PY]: {}", String::from_utf8_lossy(&line));
                     } else if let CommandEvent::Stderr(line) = event {
                         eprintln!("[PY ERR]: {}", String::from_utf8_lossy(&line));
-                    } else if let CommandEvent::Terminated(_) = event {
+                    } else if let CommandEvent::Terminated(status) = event {
+                        startup::fail(&startup_handle, format!("解析サービスが終了しました（終了コード: {:?}）", status.code));
                         let _ = ended.send(());
+                    } else if let CommandEvent::Error(error) = event {
+                        startup::fail(&startup_handle, format!("解析サービスとの通信に失敗しました: {}", error));
                     }
                 }
             });

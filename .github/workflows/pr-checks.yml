@@ -48,6 +48,8 @@ jobs:
       - name: Junction signaling contract tests
         working-directory: services/junction-signaling
         run: npm ci && npm test
+      - name: Manual updater state and restart tests
+        run: node --experimental-strip-types --test src/services/update-controller.test.mjs
 
   backend:
     name: Database and import regression tests
@@ -69,6 +71,14 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m pytest --confcutdir=backend/tests/portability backend/tests/portability -q
+      - name: Test lightweight DSP without librosa or model dependencies
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest --confcutdir=backend/tests/portable_audio backend/tests/portable_audio/test_light_analysis.py -q
+      - name: Test isolated worker progress, timeout and recovery
+        env:
+          PYTHONPATH: backend
+        run: python backend/tests/analysis_process_smoke.py
 
   windows-shell:
     name: Windows shell and controller regression tests

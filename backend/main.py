@@ -27,11 +27,14 @@ from config import settings
 from app.services.analysis_job_service import analysis_job_service
 import asyncio
 import os
+from startup_progress import report as startup_report
 
 # Lifespan event to handle startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    startup_report("database", "楽曲データベースを準備しています", 3)
     init_db()
+    startup_report("queue", "前回の解析・取り込み状態を復元しています", 4)
     # A process crash cannot resume an in-flight inference. Keep the target
     # intent and offer an explicit resume instead of leaving a permanent spinner.
     from sqlmodel import Session
@@ -47,6 +50,7 @@ async def lifespan(app: FastAPI):
     # session_manager は run() 完了後に再利用できないため、lifespan のたびに作り直す。
     mcp_app_holder.refresh()
     async with mcp_server.session_manager.run():
+        startup_report("ready", "起動処理が完了しました。接続を確認しています", 5)
         yield
     await asyncio.to_thread(analysis_job_service.shutdown)
     checkpoint_db()  # WAL を本体へ畳み込む (肥大抑制の補助)

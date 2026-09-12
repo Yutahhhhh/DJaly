@@ -185,7 +185,10 @@ function LegacyProgressIndicator() {
                 解析方法：{queued ? "開始待ち" : effectiveAnalysisProfile === "light" ? "軽量（プレイ優先）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
               </p>
               <p>経過 {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒 · 成功 {ingestStats.processed} · スキップ {ingestStats.skipped} · 失敗 {ingestStats.errors}</p>
-              {activeFiles.map(file => <p key={file.path} className="break-all">{getFileName(file.path)} · {file.seconds}秒</p>)}
+              {activeFiles.map(file => <div key={file.path} className="space-y-1 rounded border p-2" role="status">
+                <p className="break-all">{getFileName(file.path)} · {file.seconds}秒</p>
+                <p className="text-xs text-muted-foreground">{file.stage}</p>
+              </div>)}
               {activeFiles.some(file => file.seconds > 120) && <p className="text-amber-600">解析に時間がかかっています。音源解析ワーカーにはタイムアウトがあり、失敗理由はここに表示されます。</p>}
               {(connectionError || lastError) && <p role="alert" className="break-all text-destructive">{connectionError || lastError}</p>}
             </div>}

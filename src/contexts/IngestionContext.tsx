@@ -28,7 +28,7 @@ interface IngestionContextType {
   showComplete: boolean;
   lastError: string;
   elapsedSeconds: number;
-  activeFiles: Array<{ path: string; seconds: number }>;
+  activeFiles: Array<{ path: string; seconds: number; stage: string }>;
   connectionError: string;
   analysisProfile: AnalysisProfile;
   effectiveAnalysisProfile: "light" | "full";
@@ -160,6 +160,7 @@ export function IngestionProvider({ children }: { children: ReactNode }) {
   const activeFiles = Object.entries(snapshot.details?.active_files ?? {}).map(([path, start]) => ({
     path,
     seconds: Math.max(0, Math.floor(now / 1000 - Number(start))),
+    stage: String((snapshot.details?.active_progress as Record<string, string> | undefined)?.[path] || "解析を準備しています"),
   }));
   const statusText = snapshot.type === "complete"
     ? `解析終了：成功 ${stats.processed}・スキップ ${stats.skipped}・失敗 ${stats.errors}`

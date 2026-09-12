@@ -2,8 +2,7 @@
 // Manual (signalling-free) Junction admission packets.
 //
 // A manual session never contacts a signalling server. The host and every
-// guest exchange three kinds of bounded text packet by hand (file or
-// clipboard):
+// guest exchange three kinds of bounded text packet through the clipboard:
 //
 //   invite    host -> guest   session identity + both non-trickle offers
 //   response  guest -> host   both non-trickle answers

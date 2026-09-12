@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+from domain.services.analysis.progress import report
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ def analyze_track_file(filepath: str, high_precision: bool = True, skip_basic: b
     """
     Wrapper function for backward compatibility.
     """
+    report("initializing", "解析ワーカーを初期化しています")
     analyzer = get_analyzer()
     if analyzer:
         if analysis_profile == "light" and hasattr(analyzer, "analyze_light"):

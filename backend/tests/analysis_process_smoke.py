@@ -3,6 +3,7 @@ import os
 import time
 import unittest
 from domain.services.analysis.process_runner import run_isolated, AnalysisExecutor
+from domain.services.analysis.progress import report
 
 
 def echo(value):
@@ -15,6 +16,19 @@ def crash():
 
 def hang():
     time.sleep(30)
+
+
+def progressing():
+    report("decode", "音源を読み込み中")
+    time.sleep(.05)
+    report("rhythm", "BPMを解析中")
+    return 126
+
+
+def endless_progress():
+    while True:
+        report("rhythm", "解析中")
+        time.sleep(.01)
 
 
 class ProcessSmoke(unittest.TestCase):
@@ -38,6 +52,24 @@ class ProcessSmoke(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 pool.submit(crash).result(timeout=5)
             self.assertEqual(pool.submit(echo, 42).result(timeout=5), 42)
+
+    def test_progress_is_delivered_before_result(self):
+        stages = []
+        with AnalysisExecutor(max_workers=1) as pool:
+            future = pool.submit_with_progress(progressing, on_progress=lambda event: stages.append((event["stage"], time.monotonic())))
+            self.assertEqual(future.result(timeout=5), 126)
+        self.assertEqual([stage for stage, _ in stages], ["decode", "rhythm"])
+        self.assertGreater(stages[1][1] - stages[0][1], .02)
+
+    def test_progress_does_not_reset_deadline(self):
+        with self.assertRaises(TimeoutError):
+            run_isolated(endless_progress, timeout=.3, on_progress=lambda _: None)
+        self.assertEqual(run_isolated(echo, (42,), 5), 42)
+
+    def test_broken_observer_does_not_fail_analysis(self):
+        def broken(_event):
+            raise RuntimeError("UI disconnected")
+        self.assertEqual(run_isolated(progressing, timeout=5, on_progress=broken), 126)
 
 
 if __name__ == "__main__":

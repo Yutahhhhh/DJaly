@@ -1,5 +1,4 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { djEngineClient } from '../dj-engine/client';
 import { junctionState } from './state';
 import type {
@@ -13,7 +12,7 @@ import type {
 import type { EngineReply } from '../../types/dj-engine';
 
 const DESKTOP_ONLY = 'Junctionはデスクトップアプリで利用できます。';
-/** Native gateway packet budget. Keep in sync with junction_read/write_exchange_file. */
+/** Native gateway packet budget. */
 export const EXCHANGE_TEXT_MAX_BYTES = 128 * 1024;
 
 let engineBoot: Promise<void> | undefined;
@@ -93,22 +92,4 @@ export async function readExchangeClipboard(): Promise<string> {
   const text = await navigator.clipboard.readText();
   if (!text.trim()) throw new Error('クリップボードに文字がありません。');
   return text;
-}
-
-// --- File alternative to clipboard. Explicit dialog selection. ---------------
-export async function readExchangeFile(): Promise<string | null> {
-  if (!isTauri()) throw new Error(DESKTOP_ONLY);
-  const path = await openFileDialog({multiple: false, filters: [{name: 'Junction 交換テキスト', extensions: ['txt', 'json', 'jct']}]});
-  if (typeof path !== 'string') return null;
-  const text = await invoke<string>('junction_read_exchange_file', {path});
-  if (byteLength(text) > EXCHANGE_TEXT_MAX_BYTES) throw new Error('ファイルが大きすぎます。正しい交換用ファイルか確認してください。');
-  return text;
-}
-export async function writeExchangeFile(text: string, defaultName = 'junction-exchange.txt'): Promise<boolean> {
-  if (!isTauri()) throw new Error(DESKTOP_ONLY);
-  if (!text) throw new Error('保存する内容がありません。');
-  const path = await saveFileDialog({defaultPath: defaultName, filters: [{name: 'Junction 交換テキスト', extensions: ['txt']}]});
-  if (!path) return false;
-  await invoke('junction_write_exchange_file', {path, text});
-  return true;
 }
