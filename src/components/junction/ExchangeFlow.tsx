@@ -47,7 +47,7 @@ export function ExchangeFlow({guidance, host, connected, busy, error, onAction, 
       {!textOpen && primary && <button type="button" className="junction-btn junction-btn-primary" disabled={busy} onClick={() => act(primary.id)}>{primary.label}</button>}
       {secondary.length > 0 && <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild><button type="button" className="junction-btn junction-btn-default" aria-label="接続のその他の操作" disabled={busy}>その他 •••</button></DropdownMenuTrigger>
-        <DropdownMenuContent className="junction-exchange-menu" align="end" onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
+        <DropdownMenuContent className="junction-exchange-menu" align="end" onKeyDown={(event) => event.stopPropagation()} onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
           if (focusInput.current) { event.preventDefault(); input.current?.focus(); focusInput.current = false; }
         }}>
           {secondary.map((action) => <DropdownMenuItem key={action.id} disabled={busy} className={action.intent === 'danger' ? 'junction-menu-danger' : ''} onSelect={() => act(action.id)}>{action.label}</DropdownMenuItem>)}

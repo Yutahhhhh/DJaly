@@ -440,7 +440,8 @@ struct Runtime::Impl {
         if(!hosting&&!p.candidate){
             if(state==ExchangeState::Connected)connection="connected";
             else if(state==ExchangeState::Interrupted)connection="reconnecting";
-            else if(state==ExchangeState::NeedsExchange||state==ExchangeState::Failed)connection="error";
+            else if(state==ExchangeState::NeedsExchange||state==ExchangeState::Failed||state==ExchangeState::Expired||state==ExchangeState::Cancelled||state==ExchangeState::Rejected)connection="error";
+            else if(state==ExchangeState::Collecting||state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost||state==ExchangeState::Connecting)connection="connecting";
         }
         p.manual.waitingFor=state==ExchangeState::InviteReady?QStringLiteral("guest")
             :state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost?QStringLiteral("host")
@@ -586,7 +587,7 @@ struct Runtime::Impl {
             else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("再接続できませんでした。接続情報を作り直してください"),QStringLiteral("candidate_failed"));
             return;}
         if(serial!=p.serial||p.candidate||exchangeStateTerminal(p.manual.state))return;
-        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
+        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){if(!p.hello)p.lastControlAt=monotonicNanos();p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
         else if(state==LinkState::Disconnected){
             // A transient outage is not a manual re-exchange. The performer,
             // the epoch and the authorisation all stay exactly as they are.
