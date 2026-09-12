@@ -3,7 +3,7 @@
 .analysis-panels .dj-resize-handle:hover, .analysis-panels .dj-resize-handle:focus-visible, .analysis-panels .dj-resize-handle.is-dragging { background: var(--primary); opacity: .55; }
 .tag-sidebar { width: clamp(140px, var(--tag-sidebar, 220px), 30%); flex: 0 0 auto; min-width: 0; overflow: hidden; }
 .tag-list { width: clamp(160px, var(--tag-list, 280px), 40%); flex: 0 0 auto; min-width: 0; overflow: hidden; }
-.setlist-sidebar { width: clamp(140px, var(--setlist-sidebar, 220px), 25%); flex: 0 0 auto; min-width: 0; overflow: hidden; }
+.setlist-sidebar { width: clamp(180px, var(--setlist-sidebar, 220px), 25%); flex: 0 0 auto; min-width: 0; overflow: hidden; }
 .setlist-selector { width: clamp(220px, var(--setlist-selector, 360px), 50%); flex: 0 0 auto; min-width: 0; overflow: hidden; }
 .setlist-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; font-size: .75rem; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .setlist-summary span { white-space: nowrap; }
@@ -12,13 +12,20 @@
 *::-webkit-scrollbar { display: none; width: 0; height: 0; }
 [data-plumdeck-scrollbar] { display: none !important; }
 /* Stack by the space actually left beside the app sidebar, not the viewport. */
-.setlist-layout { container-type: inline-size; }
+.setlist-layout { container-type: inline-size; min-height: 0; }
 @container (max-width: 960px) {
-  .setlist-panels { flex-wrap: wrap; overflow-y: auto; }
-  .setlist-panels > .setlist-sidebar { width: 100%; max-height: 140px; }
-  .setlist-panels > .dj-resize-handle { display: none; }
-  .setlist-panels > .setlist-columns { flex: 1 1 100%; flex-wrap: wrap; min-height: 480px; }
-  .setlist-columns > .setlist-editor { flex: 1 1 100%; height: 55vh; }
+  /* Keep the setlist names reachable at full height. Share the remaining
+     height between editing and choosing tracks, independently of viewport vh. */
+  .setlist-panels > .setlist-columns { flex-direction: column; min-height: 0; overflow-y: auto; }
+  .setlist-columns > .setlist-editor { flex: 1 0 240px; }
   .setlist-columns > .dj-resize-handle { display: none; }
-  .setlist-selector { width: 100%; height: 50vh; }
+  .setlist-columns > .setlist-selector { width: 100%; height: auto; flex: 1 0 240px; border-left: 0; border-top: 1px solid var(--border); }
+}
+@container (max-width: 560px) {
+  /* At phone-sized widths stack explicitly, with scrollable, usable panels.
+     Never let flex shrinking turn the names into a two-row strip. */
+  .setlist-panels { flex-direction: column; overflow-y: auto; }
+  .setlist-panels > .setlist-sidebar { width: 100%; height: 220px; flex: 0 0 220px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .setlist-panels > .dj-resize-handle { display: none; }
+  .setlist-panels > .setlist-columns { flex: 1 0 480px; overflow: visible; }
 }

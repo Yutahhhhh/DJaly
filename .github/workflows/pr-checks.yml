@@ -75,10 +75,44 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m pytest --confcutdir=backend/tests/portable_audio backend/tests/portable_audio/test_light_analysis.py -q
+      - name: Test real lightweight model and whole-track grid in cold workers
+        env:
+          PYTHONPATH: backend
+          OMP_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          python -m pip install onnxruntime==1.30.0
+          python backend/fetch_musicnn_onnx.py
+          python backend/light_analysis_diagnostic.py
       - name: Test isolated worker progress, timeout and recovery
         env:
           PYTHONPATH: backend
         run: python backend/tests/analysis_process_smoke.py
+
+  windows-light-analysis:
+    name: Windows light analysis with real model
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-pr.txt
+      - run: choco install ffmpeg -y --no-progress
+      - run: python -m pip install -r backend/requirements-pr.txt onnxruntime==1.30.0
+      - run: python backend/fetch_musicnn_onnx.py
+      - name: Verify whole-track grid and real embeddings in fresh workers
+        env:
+          PYTHONPATH: backend
+          OMP_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+        run: python backend/light_analysis_diagnostic.py
 
   windows-shell:
     name: Windows shell and controller regression tests

@@ -16,16 +16,30 @@ def analyze_file(path):
     else:
         from domain.services.analysis.portable import PortableAudioAnalyzer
         result = PortableAudioAnalyzer().analyze_light(path)
-    forbidden = {"librosa", "numba", "onnxruntime", "tensorflow"}.intersection(sys.modules)
+    forbidden = {"librosa", "numba", "tensorflow"}.intersection(sys.modules)
     assert not forbidden, f"Light worker loaded heavy dependencies: {forbidden}"
     assert result is not None
     assert abs(result["bpm"] - 126) < 1, result["bpm"]
     assert result["key"] == "C major", result["key"]
     assert result["analysis_level"] == "light"
-    assert "embedding" not in result
+    import numpy as np
+    embedding = np.asarray(result["embedding"])
+    assert embedding.shape == (200,) and np.isfinite(embedding).all() and np.linalg.norm(embedding) > 0
+    assert result["features_extra"]["embedding_patch_count"] == 3
+    ticks = np.asarray(result["features_extra"]["beat_positions"])
+    assert ticks[0] < .3 and ticks[-1] > 299
+    assert np.max(np.abs(np.diff(ticks) - 60 / 126)) < .015
+    assert len(result["features_extra"]["waveform_peaks"]) == 500
+    from api.schemas.performance_metadata import BeatGrid
+    grid = BeatGrid.model_validate(result["features_extra"]["playback_grid"])
+    assert grid.first_beat_ms < 300 and abs(grid.bpm - 126) < .1
     assert result["features_extra"]["analysis_window_seconds"] == 30
     assert result["features_extra"]["analysis_sample_rate"] == 11025
-    return {"bpm": result["bpm"], "key": result["key"],
+    memory = {}
+    if sys.platform != "win32":
+        import resource
+        memory["peak_rss_mb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
+    return {"bpm": result["bpm"], "key": result["key"], "beats": len(ticks), "embedding_dimensions": len(embedding), **memory,
             "worker_seconds": round(time.monotonic() - started, 3)}
 
 
@@ -33,10 +47,10 @@ def run():
     import numpy as np
     from domain.services.analysis.process_runner import run_isolated
     sr = 11025
-    t = np.arange(sr * 40) / sr
+    t = np.arange(sr * 300) / sr
     audio = sum(amplitude * np.sin(2 * np.pi * frequency * t)
                 for amplitude, frequency in ((.15, 261.626), (.12, 329.628), (.10, 391.995)))
-    for beat in np.arange(.25, 40, 60 / 126):
+    for beat in np.arange(.25, 300, 60 / 126):
         start = int(beat * sr)
         count = min(100, len(audio) - start)
         audio[start:start + count] += .5 * np.exp(-np.arange(count) / 17.5)

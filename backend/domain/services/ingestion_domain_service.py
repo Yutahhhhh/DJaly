@@ -231,7 +231,7 @@ class IngestionDomainService:
                         result[key] = db_val
 
             if not has_completed_analysis_result(result, existing_embedding):
-                requirement = "BPM, duration or metadata" if result.get("analysis_level") == "light" else "BPM, duration, metadata or embedding"
+                requirement = "BPM, duration, metadata, embedding or playback data"
                 raise RuntimeError(
                     f"Audio analysis returned incomplete {requirement} for {filename}"
                 )

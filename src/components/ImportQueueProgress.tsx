@@ -81,7 +81,7 @@ export function ImportQueueProgress({ raised = false }: { raised?: boolean }) {
               {row.progress.label} · {Math.max(0, Math.floor(now / 1000 - row.progress.started_at))}秒
             </p>}
             <p className="text-xs text-muted-foreground">
-              解析方法：{effectiveProfile === "light" ? "軽量（プレイ優先）" : row.analysis_profile === "auto" ? "自動・詳細解析中" : "詳細"}
+              解析方法：{effectiveProfile === "light" ? "軽量（低負荷）" : row.analysis_profile === "auto" ? "自動・詳細解析中" : "詳細"}
             </p>
             <p className="text-xs text-muted-foreground">成功 {row.succeeded_items} · 失敗 {row.failed_items} · スキップ {row.skipped_items} · 待機 {row.queued_items ?? 0}</p>
             <div className="flex flex-wrap gap-2">

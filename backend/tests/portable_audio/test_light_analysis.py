@@ -9,6 +9,8 @@ import wave
 
 from domain.services.analysis.portable import PortableAudioAnalyzer
 from domain.services.analysis.light_dsp import SAMPLE_RATE, rhythm_and_key
+from domain.services.analysis.light_grid import analyze as analyze_grid
+from domain.services.analysis.beat_grid import playback_grid
 
 
 def fixture_audio(bpm=126, root=0, minor=False, seconds=30, sample_rate=SAMPLE_RATE):
@@ -49,7 +51,7 @@ def test_light_rejects_invalid_input_and_does_not_invent_silent_bpm():
 
 
 @pytest.mark.parametrize("extension", ["wav", "mp3", "flac"])
-def test_real_light_decode_and_analysis_never_imports_heavy_runtime(tmp_path, monkeypatch, extension):
+def test_real_light_dsp_and_codecs_without_heavy_runtime(tmp_path, monkeypatch, extension):
     converter = shutil.which("ffmpeg")
     if not converter:
         pytest.skip("FFmpeg required for real decoder test")
@@ -64,6 +66,11 @@ def test_real_light_decode_and_analysis_never_imports_heavy_runtime(tmp_path, mo
     if extension != "wav":
         path = source.with_suffix("." + extension)
         subprocess.run([converter, "-v", "error", "-i", str(source), str(path)], check=True, timeout=20)
+    # Codec/DSP gate runs without model dependencies. Actual ONNX inference is
+    # covered separately by the cold-worker diagnostic, including packaged Windows.
+    monkeypatch.setattr(PortableAudioAnalyzer, "_extract_light_embedding", lambda *args: {
+        "embedding": [.2] * 200, "features_extra": {},
+    })
     original_import = builtins.__import__
 
     def guarded(name, *args, **kwargs):
@@ -87,7 +94,12 @@ def test_real_light_decode_and_analysis_never_imports_heavy_runtime(tmp_path, mo
     assert result["features_extra"]["analysis_window_seconds"] == 30
     assert result["features_extra"]["analysis_window_start_seconds"] == pytest.approx(5, abs=.1)
     assert result["analysis_level"] == "light"
-    assert "embedding" not in result
+    assert len(result["embedding"]) == 200
+    extra = result["features_extra"]
+    assert extra["beat_positions"][0] < .3
+    assert extra["beat_positions"][-1] > 39
+    assert len(extra["waveform_peaks"]) == 500
+    assert extra["playback_grid"]["bpm"] == pytest.approx(126, abs=.1)
 
 
 def test_light_features_are_finite_bounded_approximations():
@@ -105,3 +117,55 @@ def test_light_features_are_finite_bounded_approximations():
     assert result["loudness"] < 0
     assert result["loudness_range"] > 0
     assert result["spectral_rolloff"] > 0
+
+
+@pytest.mark.parametrize("bpm", [70, 90, 126, 174, 220])
+def test_whole_track_grid_preserves_offset_and_does_not_accumulate_drift(bpm):
+    estimated, ticks, _ = analyze_grid(fixture_audio(bpm=bpm, seconds=180))
+    expected = np.arange(.25, 180, 60 / bpm)
+    assert len(ticks) == len(expected)
+    assert np.max(np.abs(ticks - expected)) < .015
+    grid = playback_grid(ticks, estimated)
+    assert grid["beat_times_ms"] is None
+    assert abs(grid["bpm"] - bpm) < .02
+    assert abs(grid["first_beat_ms"] - 250) < 15
+
+
+@pytest.mark.parametrize("kind", ["change", "ramp", "silent_intro"])
+def test_whole_track_grid_follows_tempo_changes_and_silent_intros(kind):
+    seconds = 80
+    times = np.arange(SAMPLE_RATE * seconds) / SAMPLE_RATE
+    audio = .05 * np.sin(2 * np.pi * 261.626 * times)
+    beat = 20.25 if kind == "silent_intro" else .25
+    if kind == "silent_intro":
+        audio[:20 * SAMPLE_RATE] = 0
+    expected = []
+    while beat < seconds:
+        expected.append(beat)
+        start = int(beat * SAMPLE_RATE)
+        count = min(100, len(audio) - start)
+        audio[start:start + count] += .6 * np.exp(-np.arange(count) / 17.5)
+        bpm = (126 if beat < 40 else 93) if kind == "change" else (100 + beat * 30 / seconds if kind == "ramp" else 126)
+        beat += 60 / bpm
+    bpm, ticks, _ = analyze_grid(audio)
+    errors = np.abs(ticks[:, None] - np.asarray(expected)[None, :])
+    # Abrupt edits may need manual correction at the boundary. Do not flatten
+    # their whole track to a constant grid or lose the rest of the beat series.
+    assert np.mean(errors.min(axis=0) < .025) > .98
+    assert np.percentile(errors.min(axis=1), 95) < .015
+    grid = playback_grid(ticks, bpm)
+    assert (grid["beat_times_ms"] is None) == (kind == "silent_intro")
+    if kind == "silent_intro":
+        assert 20_230 < grid["first_beat_ms"] < 20_270
+
+
+def test_whole_track_grid_rejects_silence_and_invalid_audio():
+    for audio in [np.zeros(SAMPLE_RATE * 8), np.ones(100), np.full(SAMPLE_RATE * 8, np.nan)]:
+        with pytest.raises(ValueError):
+            analyze_grid(audio)
+
+
+def test_model_filter_bank_matches_detailed_preprocessing():
+    librosa = pytest.importorskip("librosa")
+    from domain.services.analysis.portable import musicnn_mel_filters
+    np.testing.assert_array_equal(musicnn_mel_filters(), librosa.filters.mel(sr=16000, n_fft=512, n_mels=96, norm="slaney"))

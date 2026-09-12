@@ -7,6 +7,7 @@ import logging
 import math
 from pathlib import Path
 import statistics
+import sys
 
 from sqlalchemy import text
 from sqlmodel import Session
@@ -171,6 +172,7 @@ class GridCandidateService:
             raise GridAnalysisError("The rhythm analyzer found no usable beats")
         self._within_duration(track, grid)
         return self._cache(track, grid, fingerprint + f":grid-v{GRID_VERSION}", {
-            "algorithm": "Essentia RhythmExtractor2013 multifeature", "sample_rate": 44100,
+            "algorithm": "numpy-whole-track-grid-v1" if sys.platform == "win32" else "Essentia RhythmExtractor2013 multifeature",
+            "sample_rate": 11025 if sys.platform == "win32" else 44100,
             "confidence": "raw algorithm score, not a probability", "forced": force,
         })

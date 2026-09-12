@@ -114,8 +114,13 @@ class IngestionRepository:
                     analysis_changed = True
             if analysis_changed:
                 session.add(analysis)
+                if extras.get("beat_positions") and not (existing_track and preserve_full_analysis):
+                    # A cached automatic grid must not mask freshly analyzed
+                    # beats. Saved user cues/loops/grids live in a separate row.
+                    session.exec(text("DELETE FROM track_grid_candidates WHERE track_id=:id AND source='analysis'"),
+                                 params={"id": track_id})
 
-            if "embedding" in result and result["embedding"]:
+            if "embedding" in result and result["embedding"] and not (existing_track and preserve_full_analysis):
                 emb = session.get(TrackEmbedding, track_id)
                 new_emb_json = json.dumps(result["embedding"])
                 new_model = result.get("embedding_model") or (emb.model_name if emb else "musicnn")

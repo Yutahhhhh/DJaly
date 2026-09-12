@@ -18,11 +18,10 @@ def _extract(filepath: str) -> dict:
     import numpy as np
     if sys.platform == "win32":
         from .portable import PortableAudioAnalyzer
+        from .light_grid import analyze
         analyzer = PortableAudioAnalyzer()
-        audio = analyzer._load_audio(filepath, max_seconds=MAX_SECONDS)
-        if len(audio) < 5 * 44100 or float(np.max(np.abs(audio))) < 1e-6:
-            raise ValueError("Grid analysis needs at least five seconds of audible audio")
-        bpm, ticks, confidence, _, _ = analyzer.rhythm_extractor(audio)
+        audio = analyzer._load_grid_audio(filepath)
+        bpm, ticks, confidence = analyze(audio)
         if not np.isfinite(ticks).all() or len(ticks) < 2:
             raise ValueError("The rhythm analyzer found no usable beats")
         return {"bpm": float(bpm), "ticks": ticks.tolist(), "confidence": float(confidence)}
