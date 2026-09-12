@@ -94,15 +94,12 @@ def exercise_managed_windows_ingestion(port, directory):
         "targets": [str(fixture)], "force_update": True, "analysis_profile": "light",
     }, timeout=15)
     assert started["status"] == "success", started
-    seen_worker_progress = False
+    observed_progress = set()
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         state = json_api(port, "/api/ingest/status", timeout=5)
         labels = (state.get("details") or {}).get("active_progress") or {}
-        seen_worker_progress |= any(
-            label in {"解析ワーカーを開始しました", "曲名・長さなどの音源情報を読み取っています"}
-            for label in labels.values()
-        )
+        observed_progress.update(label for label in labels.values() if isinstance(label, str))
         if state.get("type") in {"complete", "error", "cancelled"}:
             break
         time.sleep(.1)
@@ -110,8 +107,17 @@ def exercise_managed_windows_ingestion(port, directory):
         raise TimeoutError("Managed packaged /api/ingest did not finish within 90s")
     assert state.get("type") == "complete", state
     assert state.get("processed") == 1 and state.get("errors") == 0, state
-    assert seen_worker_progress, "Packaged worker never reported entry into audio analysis"
-    print("Managed packaged light ingestion accepted tagless audio and completed", flush=True)
+    analysis_progress = observed_progress - {"解析ワーカーを起動しています"}
+    assert analysis_progress, f"Packaged worker reported no concrete audio stage: {observed_progress}"
+    page = json_api(port, "/api/tracks/page?limit=2", timeout=10)
+    assert page.get("total") == 1 and len(page.get("items") or []) == 1, page
+    saved = page["items"][0]
+    assert saved.get("title") == fixture.stem and saved.get("artist") == "Unknown", saved
+    print(
+        "Managed packaged light ingestion accepted and registered tagless audio; "
+        f"progress={sorted(analysis_progress)}",
+        flush=True,
+    )
 
 
 def main():
