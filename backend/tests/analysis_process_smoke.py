@@ -2,7 +2,7 @@
 import os
 import time
 import unittest
-from domain.services.analysis.process_runner import run_isolated, AnalysisExecutor
+from domain.services.analysis.process_runner import run_isolated, AnalysisExecutor, worker_probe
 from domain.services.analysis.progress import report
 
 
@@ -70,6 +70,37 @@ class ProcessSmoke(unittest.TestCase):
         def broken(_event):
             raise RuntimeError("UI disconnected")
         self.assertEqual(run_isolated(progressing, timeout=5, on_progress=broken), 126)
+
+    def test_explicit_worker_subcommand_runs_from_executor_thread(self):
+        previous = os.environ.get("PLUMDECK_FORCE_SUBPROCESS_WORKER")
+        os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = "1"
+        stages = []
+        try:
+            with AnalysisExecutor(max_workers=1, task_timeout=10) as pool:
+                result = pool.submit_with_progress(
+                    worker_probe, {"ok": True},
+                    on_progress=lambda event: stages.append(event["stage"]),
+                ).result(timeout=15)
+        finally:
+            if previous is None:
+                os.environ.pop("PLUMDECK_FORCE_SUBPROCESS_WORKER", None)
+            else:
+                os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = previous
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(stages, ["worker_ready", "probe"])
+
+    def test_explicit_worker_timeout_releases_process(self):
+        previous = os.environ.get("PLUMDECK_FORCE_SUBPROCESS_WORKER")
+        os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = "1"
+        try:
+            with self.assertRaises(TimeoutError):
+                run_isolated(worker_probe, (None, 30), timeout=.3)
+            self.assertEqual(run_isolated(worker_probe, (42,), timeout=10), 42)
+        finally:
+            if previous is None:
+                os.environ.pop("PLUMDECK_FORCE_SUBPROCESS_WORKER", None)
+            else:
+                os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = previous
 
 
 if __name__ == "__main__":

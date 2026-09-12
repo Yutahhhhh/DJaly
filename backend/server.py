@@ -18,7 +18,10 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
 if __name__ == "__main__":
-    import uvicorn
+    if sys.argv[1:] == ["--analysis-worker"]:
+        from domain.services.analysis.worker_cli import run
+        raise SystemExit(run())
+
     if sys.argv[1:] == ["--diagnose-light-analysis"]:
         from light_analysis_diagnostic import run
         run()
@@ -28,6 +31,8 @@ if __name__ == "__main__":
         from analysis_diagnostic import run
         run()
         raise SystemExit(0)
+
+    import uvicorn
 
     # 設定の読み込みと環境変数のセットアップ
     # これを最初に行うことで、後続のインポート(librosa等)が正しいパスを使用できる

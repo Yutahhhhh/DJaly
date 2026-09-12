@@ -107,6 +107,19 @@ def test_light_completion_requires_real_embedding_and_playback_data():
     assert not has_completed_analysis_for_profile(track, None, "auto")
 
 
+def test_audio_analysis_completion_is_independent_of_tag_metadata():
+    from utils.metadata import has_valid_metadata
+
+    result = light_result(title="Terrace Conga II", artist="Unknown")
+    track = SimpleNamespace(
+        title=result["title"], artist=result["artist"], duration=60,
+        bpm=126, analysis_level="light",
+    )
+    assert not has_valid_metadata(track)
+    assert has_completed_analysis_result(result)
+    assert has_completed_analysis(track, result["embedding"])
+
+
 def test_light_data_reaches_playback_recommendations_and_preserves_manual_cues(tmp_path, monkeypatch):
     from infra.repositories.ingestion_repository import IngestionRepository
     from infra.repositories.track_repository import TrackRepository

@@ -10,8 +10,10 @@ from mutagen.flac import FLAC, Picture
 
 def has_valid_metadata(track: Any) -> bool:
     """
-    トラックのメタデータが実用的（Unknownではない）かどうかを判定する。
-    ingestion.py からインポートされるため、ここで定義。
+    トラックの表示メタデータが完全（Unknownではない）かどうかを判定する。
+
+    これは音響解析の成否とは独立した判定である。タグのない音源でも
+    BPM・グリッド・波形・埋め込みの解析結果は有効として保存できる。
     """
     if not track:
         return False

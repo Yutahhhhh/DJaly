@@ -45,7 +45,7 @@ def analyze_file(path):
 
 def run():
     import numpy as np
-    from domain.services.analysis.process_runner import run_isolated
+    from domain.services.analysis.process_runner import AnalysisExecutor
     sr = 11025
     t = np.arange(sr * 300) / sr
     audio = sum(amplitude * np.sin(2 * np.pi * frequency * t)
@@ -62,12 +62,22 @@ def run():
             output.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
         # A fresh process for each track, with a budget including cold imports,
         # FFmpeg and DSP. Run before the full diagnostic to prevent warm JIT
-        # caches from masking an accidental heavy-runtime dependency.
-        for _ in range(2):
-            started = time.monotonic()
-            result = run_isolated(analyze_file, (str(path),), timeout=30)
-            result["total_seconds"] = round(time.monotonic() - started, 3)
-            results.append(result)
+        # caches from masking an accidental heavy-runtime dependency. Submit via
+        # AnalysisExecutor so the packaged gate covers the same server-thread ->
+        # worker boundary used by the UI, rather than calling run_isolated on the
+        # diagnostic's main thread.
+        with AnalysisExecutor(max_workers=1, task_timeout=30) as executor:
+            for _ in range(2):
+                stages = []
+                started = time.monotonic()
+                future = executor.submit_with_progress(
+                    analyze_file, str(path), on_progress=lambda event: stages.append(event["stage"])
+                )
+                result = future.result(timeout=35)
+                assert "metadata" in stages, f"Worker never reached audio analysis: {stages}"
+                result["progress_stages"] = stages
+                result["total_seconds"] = round(time.monotonic() - started, 3)
+                results.append(result)
     print(json.dumps({"ok": True, "profile": "light", "cold_workers": results}))
 
 
