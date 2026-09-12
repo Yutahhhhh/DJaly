@@ -114,10 +114,12 @@ export function BeatGridEditor(props: BeatGridEditorProps) {
 
     {/* 2段目: 拍の間隔＝BPM。狭めると BPM が上がる。 */}
     <div className="dj-grid-editor__row">
-      <select aria-label="BPMの変更範囲" disabled={locked} value={tempoScope} onChange={e => setTempoScope(e.target.value as "all" | "from")}>
+      <select className="dj-grid-editor__scope" aria-label="BPMの変更範囲" disabled={locked} value={tempoScope} onChange={e => setTempoScope(e.target.value as "all" | "from")}>
         <option value="all">曲全体</option><option value="from">変更地点から先</option>
       </select>
       {tempoScope === "from" && <button disabled={locked} title="現在位置をテンポの変更地点にする。BPMを入力するまでグリッドは変更しません" onClick={() => setAnchor(Math.max(0, Math.min(positionMs, durationMs - 1)))}>現在位置を変更地点に</button>}
+    </div>
+    <div className="dj-grid-editor__row">
       <label htmlFor={`bpm-${props.trackId}`}>BPM</label>
       <input id={`bpm-${props.trackId}`} className="dj-grid-editor__number" type="number" min={20} max={300} step={0.01} value={bpmText} disabled={locked}
         onChange={e => { setBpmText(e.target.value); const bpm = Number(e.target.value); if (e.target.value && bpm >= 20 && bpm <= 300) changeBpm(bpm); }} />

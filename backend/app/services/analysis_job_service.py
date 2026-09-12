@@ -250,7 +250,7 @@ class AnalysisJobService:
             if "rhythm" in features:
                 analysis.beat_positions = update.pop("beat_positions")
                 # A new rhythm result invalidates only disposable analysis
-                # candidates. User-saved grids and rekordbox imports are intact.
+                # candidates. Manual grids and rekordbox imports are intact.
                 session.exec(text("DELETE FROM track_grid_candidates WHERE track_id=:id AND source='analysis'"), params={"id": track.id})
                 from infra.repositories.analysis_grid_refresh import refresh_saved_analysis_grid
                 refresh_saved_analysis_grid(session, track.id, update.get("playback_grid"))
