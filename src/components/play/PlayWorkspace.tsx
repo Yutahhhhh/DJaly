@@ -8,7 +8,7 @@ import { memoryAction } from "@/services/dj-engine/memory-cues";
 import { sampler } from "@/services/dj-engine/sampler";
 import "./sampler.css";
 import { useDdj1000 } from "@/hooks/useDdj1000";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AlertTriangle, Circle, Columns3, Disc3, Keyboard, Loader2, Mic, Power, Rows3, Settings2, Square, Volume2 } from "lucide-react";
 import { useDjEngine } from "@/hooks/useDjEngine";
 import { playService , type RecordingEntry } from "@/services/play";
@@ -35,12 +35,23 @@ import { RecordingSaveDialog } from "./RecordingSaveDialog";
 import { RekordboxCueImportButton } from "./RekordboxCueImportButton";
 import { BeatGridEditor } from "./BeatGridEditor";
 import type { PerformanceBeatGrid, PerformanceMetadata } from "@/types/performance-metadata";
+import { PlayDragDropProvider, usePlayDeckDrop } from "./PlayDragDrop";
 import { ApiError } from "@/services/api-client";
 import { KeyedTaskQueue } from "@/services/dj-engine/keyed-task-queue";
 type GridEditSession = { deck: DeckId; trackId: number; metadata: PerformanceMetadata; initialGrid: PerformanceBeatGrid };
 /** 助走の上限。これ以上は曲頭を見失うので、つまみ出せる長さを切る。 */
 
 type HistoryRuntime = { key: string; trackId: number; loadedAt: string; startedAt?: string; playedMs: number; playingSince?: number };
+
+function DeckWaveformLane({ id, expandedPair, children }: { id: DeckId; expandedPair: 'AB' | 'CD' | null; children: ReactNode }) {
+  const drop = usePlayDeckDrop(`play-deck-waveform-${id}`, id);
+  return <div ref={drop.setNodeRef}
+    data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`} data-track-drop-active={drop.isOver ? "true" : undefined}
+    className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"))}
+    style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}>
+    {children}
+  </div>;
+}
 
 function restoredHistory(): [DeckId, HistoryRuntime][] {
   try {
@@ -672,13 +683,10 @@ export function PlayWorkspace() {
   };
   // Lanes accept the same drag payload as the decks, so a row can be dropped on
   // whichever waveform the eye is already on.
-  const lane = (id: DeckId, layout: WaveformLayout) => <div key={id}
-    data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`}
-    className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"))}
-    style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}>
+  const lane = (id: DeckId, layout: WaveformLayout) => <DeckWaveformLane key={id} id={id} expandedPair={expandedPair}>
     {waveform(id, layout)}
     <button className="dj-wave-expand" aria-label={`デッキ ${id} のペアを拡大`} aria-pressed={!!expandedPair?.includes(id)} onClick={()=>setExpandedPair(current=>current?.includes(id)?null:(id==='A'||id==='B'?'AB':'CD'))}>拡大</button>
-  </div>;
+  </DeckWaveformLane>;
   // シンク先は「いま master になっているデッキ」。無ければ相方のデッキ。
   // 一覧のプレビュー波形に出すホットキュー。編集したトラックはこちらが最新。
   const listCueOverrides = useMemo(
@@ -774,7 +782,7 @@ export function PlayWorkspace() {
     error: setCommandError,
   });
 
-  return <main style={{'--wave-contrast':waveContrast,'--wave-grayscale':waveMonochrome?1:0} as CSSProperties} className={cn("dj-workspace", expandedPair&&"dj-workspace--wave-expanded", compactDecks && "dj-workspace--compact", deckCount === 4 && "dj-workspace--four", waveformLayout === "vertical" && "dj-workspace--vertical")}>
+  return <PlayDragDropProvider onLoad={loadTrack}><main style={{'--wave-contrast':waveContrast,'--wave-grayscale':waveMonochrome?1:0} as CSSProperties} className={cn("dj-workspace", expandedPair&&"dj-workspace--wave-expanded", compactDecks && "dj-workspace--compact", deckCount === 4 && "dj-workspace--four", waveformLayout === "vertical" && "dj-workspace--vertical")}>
     <header className="dj-global-bar">
       <div className="dj-performance-label"><Disc3 /><strong>PERFORMANCE</strong></div>
       <PanelToolbar visible={panels} onToggle={togglePanel} />
@@ -872,5 +880,5 @@ export function PlayWorkspace() {
     <RecordingSaveDialog recording={savingRecording} onClose={() => setSavingRecording(null)}
       onBeforePreview={prepareRecordingPreview}
       onSettled={() => setSavingRecording(null)} />
-  </main>;
+  </main></PlayDragDropProvider>;
 }

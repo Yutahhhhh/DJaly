@@ -1,6 +1,6 @@
 {
   "productName": "plumdeck",
-  "version": "0.5.10",
+  "version": "0.5.11",
   "identifier": "com.plumdeck.app",
   "build": {
     "beforeDevCommand": "npm run dev",

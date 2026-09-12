@@ -2,12 +2,18 @@ import { djEngineClient } from '../dj-engine/client';
 import { tileWorker } from "./worker-client";
 import { invoke } from '@tauri-apps/api/core';
 import { type WaveformTile } from './protocol';
+import { normalizeWaveformManifest as normalizeManifest } from './manifest';
+export { normalizeTileRanges } from './manifest';
 export interface WaveformManifest {
   schemaVersion:2; assetKey:string; sourceSampleRateHz:number; channelCount:1|2;
   sourceFrameOrigin:number; sourceFrameCount:number; frameCountFinal:boolean;
   baseFramesPerBin:64; tileBins:2048; state:'queued'|'partial'|'ready'|'error';revision:number;
   levels:{lod:number;framesPerBin:number;readyTileRanges:[number,number][];bandReadyTileRanges:[number,number][]}[];
 }
+export function normalizeWaveformManifest(value: unknown): WaveformManifest | null {
+  return normalizeManifest(value) as WaveformManifest | null;
+}
+
 const LIMIT=64*1024*1024;
 type Entry={promise:Promise<WaveformTile>;bytes:number;refs:number;used:number;tile?:WaveformTile};
 class WaveformRepository {

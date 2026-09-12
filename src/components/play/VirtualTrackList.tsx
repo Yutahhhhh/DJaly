@@ -7,6 +7,7 @@ import { artworkUrl, useTrackVisuals } from "./useTrackVisuals";
 import { formatTime } from "./SoftwareDeck";
 import { performanceMetadataService } from "@/services/performance-metadata";
 import type { SortField, SortState } from "./track-sort";
+import { usePlayActionDrop, usePlayTrackDrag } from "./PlayDragDrop";
 
 const ROW_HEIGHT = 24;
 
@@ -72,17 +73,9 @@ export function VirtualTrackList({ resourceKey, tracks, total, hasMore, loading,
     onRemove(track);
     return true;
   };
-  const [dropActive, setDropActive] = useState(false);
+  const playlistDrop = usePlayActionDrop(`play-track-list-${resourceKey}`, onDropTrack);
 
-  return <div className={`dj-virtual-tracks${dropActive ? " is-drop" : ""}`}
-    onDragOver={(event) => { if (onDropTrack && event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropActive(true); } }}
-    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropActive(false); }}
-    onDrop={(event) => {
-      if (!onDropTrack) return;
-      event.preventDefault(); setDropActive(false);
-      try { onDropTrack(JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track); }
-      catch { /* 他所からのドラッグは無視する。 */ }
-    }}>
+  return <div ref={playlistDrop.setNodeRef} className={`dj-virtual-tracks${playlistDrop.isOver ? " is-drop" : ""}`}>
     <div className="dj-vtrack-header">{COLUMNS.map((column) => {
       const active = column.field && sort?.field === column.field ? sort.direction : null;
       if (!column.field || !onSort) return <span key={column.label}>{column.label}</span>;
@@ -98,7 +91,7 @@ export function VirtualTrackList({ resourceKey, tracks, total, hasMore, loading,
         if (removeSelected()) event.preventDefault();
       }}
       onScroll={(event) => { const node = event.currentTarget; setViewport({ top: node.scrollTop, height: node.clientHeight }); if (node.scrollHeight - node.scrollTop - node.clientHeight < ROW_HEIGHT * 12) onLoadMore(); }}>
-      <div style={{ height: tracks.length * ROW_HEIGHT, position: "relative" }}>{tracks.slice(start, end).map((track, relative) => <VirtualTrackRow key={track.browser_key ?? track.setlist_track_id ?? track.id} track={track} index={start + relative} top={(start + relative) * ROW_HEIGHT} activeDeck={activeDeck} selected={selected === track.id} onSelect={() => { onSelect(track.id); scrollRef.current?.focus({ preventScroll: true }); }} onLoad={() => onLoad(track)} onRemove={onRemove ? () => onRemove(track) : undefined} cues={cueOverrides?.[track.id] ?? cuePoints[track.id]} />)}</div>
+      <div style={{ height: tracks.length * ROW_HEIGHT, position: "relative" }}>{tracks.slice(start, end).map((track, relative) => <VirtualTrackRow key={track.browser_key ?? track.setlist_track_id ?? track.id} dragId={`play-track-${resourceKey}-${track.browser_key ?? track.setlist_track_id ?? track.id}`} track={track} index={start + relative} top={(start + relative) * ROW_HEIGHT} activeDeck={activeDeck} selected={selected === track.id} onSelect={() => { onSelect(track.id); scrollRef.current?.focus({ preventScroll: true }); }} onLoad={() => onLoad(track)} onRemove={onRemove ? () => onRemove(track) : undefined} cues={cueOverrides?.[track.id] ?? cuePoints[track.id]} />)}</div>
       {!tracks.length && !loading && !error && <div className="dj-library-message">{empty}</div>}
       {(loading || error || hasMore) && <div className="dj-page-state">{loading ? <><Loader2 className="animate-spin" />読み込み中…</> : error ? <><span>{error}</span><button onClick={onRetry}>再試行</button></> : <button onClick={onLoadMore}>さらに読み込む</button>}</div>}
     </div>
@@ -110,10 +103,11 @@ export function VirtualTrackList({ resourceKey, tracks, total, hasMore, loading,
   </div>;
 }
 
-function VirtualTrackRow({ track, index, top, activeDeck, selected, onSelect, onLoad, onRemove, cues }: { track: BrowserTrack; index: number; top: number; activeDeck: DeckId; selected: boolean; onSelect: () => void; onLoad: () => void; onRemove?: () => void; cues?: (number | null)[] }) {
+function VirtualTrackRow({ dragId, track, index, top, activeDeck, selected, onSelect, onLoad, onRemove, cues }: { dragId: string; track: BrowserTrack; index: number; top: number; activeDeck: DeckId; selected: boolean; onSelect: () => void; onLoad: () => void; onRemove?: () => void; cues?: (number | null)[] }) {
   const { data } = useTrackVisuals(track.id);
-  return <div className={`dj-vtrack-row${selected ? " is-selected" : ""}`} style={{ transform: `translateY(${top}px)` }} draggable={Boolean(track.filepath)}
-    onDragStart={(event) => { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-plumdeck-track", JSON.stringify(track)); }} onClick={onSelect} onDoubleClick={() => track.filepath && onLoad()}>
+  const drag = usePlayTrackDrag(dragId, track);
+  return <div ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} className={`dj-vtrack-row${selected ? " is-selected" : ""}${drag.isDragging ? " is-dragging" : ""}`} style={{ transform: `translateY(${top}px)` }}
+    onClick={onSelect} onDoubleClick={() => track.filepath && onLoad()}>
     <span>{index + 1}</span><span>{track.key || "—"}</span><span><DeckWaveform trackId={track.id} positionMs={0} durationMs={(track.duration || 0) * 1000} layout="horizontal" side="left" color="cyan" hotCues={cues} compact /></span><span>{data?.artwork ? <img src={artworkUrl(data.artwork)} alt="" /> : <Disc3 />}</span><span>{track.bpm?.toFixed(2) || "—"}</span><span title={track.title || track.filepath}>{track.title || track.filepath || "—"}</span><span>{track.artist || "—"}</span><span>{formatTime((track.duration || 0) * 1000)}</span><span>{track.genre || "—"}</span><span className="dj-vtrack-actions"><button disabled={!track.filepath} title={`Deck ${activeDeck}へロード`} onClick={(event) => { event.stopPropagation(); onLoad(); }}>→{activeDeck}</button>{onRemove && <button title="プレイリストから削除" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 /></button>}</span>
   </div>;
 }
