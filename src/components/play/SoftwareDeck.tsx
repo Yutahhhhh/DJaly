@@ -17,6 +17,7 @@ import { PadModeSelect } from "./PadModeSelect";
 import { AutoBeatLoop, type LoopMode } from "./AutoBeatLoop";
 import { TempoPlatter, TEMPO_RANGES, type TempoRange } from "./TempoPlatter";
 import "./play-controls.css";
+import { usePlayDeckDrop } from "./PlayDragDrop";
 
 export function formatTime(ms: number) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -44,6 +45,7 @@ type Props = {
 };
 
 export function SoftwareDeck({ id, deck, channel, active, connected, capability, capabilities, onActivate, onToggle, onCue, onSeekAbsolute, onTempo, onKeylock, onSync, onMaster, onUnload, onHotCue, onLoop, onBeatJump, onBeatLoop, onLoopEnable, onQuantize, onFx, onSaveLoop, onLoopIn, onLoopOut, savedLoops, onRecallLoop, trackKey, cueColors, onGridEdit, onGridClose, gridEditor }: Props) {
+  const deckDrop = usePlayDeckDrop(`play-deck-controls-${id}`, id);
   const left = id === "A" || id === "C";
   const [loopBeats, setLoopBeats] = useState(4);
   const selection = useSyncExternalStore(subscribePads, () => getPadSelection(id));
@@ -133,7 +135,7 @@ export function SoftwareDeck({ id, deck, channel, active, connected, capability,
   const leading = deck?.syncLeader === id && deck.syncEnabled;
   const stateKind = leading ? "master" : deck?.status === "error" ? "error" : deck?.status === "playing" ? "playing" : "idle";
 
-  return <article aria-label={`Deck ${id}`} data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`} onClick={onActivate}
+  return <article ref={deckDrop.setNodeRef} aria-label={`Deck ${id}`} data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`} data-track-drop-active={deckDrop.isOver ? "true" : undefined} onClick={onActivate}
     className={cn("dj-deck", left ? "dj-deck--left" : "dj-deck--right", active && "dj-deck--active", !deck?.track && "dj-deck--empty")}>
     <div className="dj-track-info">
       <button className="dj-deck-number" aria-label={`Select deck ${id}`} aria-pressed={active} onClick={onActivate}>{id}</button>

@@ -34,6 +34,7 @@ test('real decoder stereo tiles and callback source-frame clock agree across rat
   const ensure=await command('waveform.ensure',{deck:'A',loadGeneration:generation});assert(ensure.assetKey,JSON.stringify(ensure));
   let manifest;for(let i=0;i<300;i++){manifest=await command('waveform.manifest',{assetKey:ensure.assetKey});if(manifest.state==='ready'||manifest.state==='error')break;await delay(20);}
   assert.equal(manifest.state,'ready',JSON.stringify(manifest));assert.equal(manifest.sourceFrameCount,frames);assert.equal(manifest.sourceSampleRateHz,rate);
+  assert(manifest.levels.length > 0);for(const level of manifest.levels){assert(Array.isArray(level.readyTileRanges));assert(level.readyTileRanges.every(range=>Array.isArray(range)&&range.length===2),JSON.stringify(level));}
   let count=0,energy=0;
   for(let i=0;i<2;i++){
     const binary=await readFile(path.join(directory,'cache',ensure.assetKey,`0-${i}-bands.bin`));const tile=parseTile(binary.buffer.slice(binary.byteOffset,binary.byteOffset+binary.byteLength));

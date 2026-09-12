@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { djEngineClient } from '@/services/dj-engine/client';
 import { chooseLod, type WaveformTile } from '@/services/waveform/protocol';
-import { waveformRepository, type WaveformManifest } from '@/services/waveform/repository';
+import { normalizeWaveformManifest, waveformRepository, type WaveformManifest } from '@/services/waveform/repository';
 import type { DeckId } from '@/types/dj-engine';
 const EMPTY_TILES:WaveformTile[]=[];
 export function useNativeWaveform(deck:string|undefined,positionMs:number,spanMs:number,overview:boolean,physicalPixels=2000){
@@ -32,7 +32,8 @@ export function useNativeWaveform(deck:string|undefined,positionMs:number,spanMs
         if(result.assetKey){
           asset.current=result.assetKey;
           if(result.state==='error'){if(live)setError('波形を読み込めませんでした');return;}
-          const m=await invoke<WaveformManifest>('dj_waveform_manifest',{sessionId:binding.session,assetKey:result.assetKey});
+          const m=normalizeWaveformManifest(await invoke<unknown>('dj_waveform_manifest',{sessionId:binding.session,assetKey:result.assetKey}));
+          if(!m)throw new Error('Invalid waveform manifest');
           if(live&&m.state==='error'){setError('波形を読み込めませんでした');return;}
           if(live&&m.schemaVersion===2&&m.assetKey===result.assetKey&&Array.isArray(m.levels)){setManifest(m);if(m.state==='ready'||m.state==='error')return;}
         }

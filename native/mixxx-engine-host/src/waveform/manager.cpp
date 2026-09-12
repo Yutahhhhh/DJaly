@@ -184,8 +184,13 @@ void Manager::analyze(const Job& job){
         if(diskBytes_+bytes.size()+full.size()-oldSize>1024ull*1024*1024-65536)throw std::runtime_error("CACHE_QUOTA");
         save(path,bytes);save(fullPath,full);diskBytes_+=bytes.size()+full.size()-oldSize;
         while(levels.size()<=int(lod))levels.append(QJsonObject{});
+        // QJsonArray{QJsonArray{...}} selects QJsonArray's copy constructor on
+        // some Qt/MSVC combinations and silently produces [0, end], not the
+        // protocol's required [[0, end]]. Wrap the inner array as a JSON value
+        // so the outer array always contains one range.
+        const QJsonArray readyRanges{QJsonValue(QJsonArray{0,double(index+1)})};
         levels[int(lod)]=QJsonObject{{"lod",int(lod)},{"framesPerBin",double(std::uint64_t(64)<<lod)},
-          {"readyTileRanges",QJsonArray{QJsonArray{0,double(index+1)}}},{"bandReadyTileRanges",rate>5000?QJsonArray{QJsonArray{0,double(index+1)}}:QJsonArray{}}};
+          {"readyTileRanges",readyRanges},{"bandReadyTileRanges",rate>5000?readyRanges:QJsonArray{}}};
     });
     mixxx::SampleBuffer buffer(16384*2);SINT position=origin;double lastPublish=0;unsigned late=deckclock::lateCallbacks.load();
     while(!stop_ && position<source->frameIndexRange().end()){
