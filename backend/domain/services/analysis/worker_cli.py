@@ -46,10 +46,13 @@ def _resolve(operation):
 
 def run():
     try:
-        line = sys.stdin.readline(16 * 1024 * 1024)
-        if not line or not line.endswith("\n"):
+        # Windows' redirected stdin can still advertise the active ANSI code
+        # page. The parent always writes UTF-8, so decode bytes explicitly or
+        # Japanese music paths become mojibake before FFmpeg sees them.
+        raw = sys.stdin.buffer.readline(16 * 1024 * 1024 + 1)
+        if not raw or len(raw) > 16 * 1024 * 1024 or not raw.endswith(b"\n"):
             raise ValueError("Analysis worker request is missing or too large")
-        request = json.loads(line)
+        request = json.loads(raw.decode("utf-8"))
         if request.get("version") != 1 or not isinstance(request.get("args"), list):
             raise ValueError("Unsupported analysis worker request")
         _send({

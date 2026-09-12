@@ -75,10 +75,11 @@ class ProcessSmoke(unittest.TestCase):
         previous = os.environ.get("PLUMDECK_FORCE_SUBPROCESS_WORKER")
         os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = "1"
         stages = []
+        value = {"path": "C:/音楽/テラス・コンガ.mp3"}
         try:
             with AnalysisExecutor(max_workers=1, task_timeout=10) as pool:
                 result = pool.submit_with_progress(
-                    worker_probe, {"ok": True},
+                    worker_probe, value,
                     on_progress=lambda event: stages.append(event["stage"]),
                 ).result(timeout=15)
         finally:
@@ -86,7 +87,7 @@ class ProcessSmoke(unittest.TestCase):
                 os.environ.pop("PLUMDECK_FORCE_SUBPROCESS_WORKER", None)
             else:
                 os.environ["PLUMDECK_FORCE_SUBPROCESS_WORKER"] = previous
-        self.assertEqual(result, {"ok": True})
+        self.assertEqual(result, value)
         self.assertEqual(stages, ["worker_ready", "probe"])
 
     def test_explicit_worker_timeout_releases_process(self):
