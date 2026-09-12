@@ -30,7 +30,10 @@ test('host approval stays explicit and identifies the DJ before applying the ans
   assert.equal(primaryExchangeAction(g).id,'approve'); assert(g.actions.some(a=>a.id==='reject'));
 });
 test('a temporary outage waits; persistent failure has one role-specific recovery path', () => {
-  assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer('interrupted'))),undefined);
+  const recovering=deriveHostCardGuidance(peer('interrupted'));
+  assert.equal(primaryExchangeAction(recovering),undefined);
+  assert.match(recovering.headline,/自動で再接続/);
+  assert.match(deriveGuestGuidance(guest('interrupted')).headline,/自動で再接続/);
   for(const state of ['needs_exchange','failed','expired','cancelled','rejected']) {
     assert.equal(primaryExchangeAction(deriveHostCardGuidance(peer(state))).id,'reexchange');
     assert.equal(primaryExchangeAction(deriveGuestGuidance(guest(state))).id,'paste_invite');

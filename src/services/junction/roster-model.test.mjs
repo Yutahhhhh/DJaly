@@ -130,6 +130,13 @@ test('a turn request is visible without becoming the next or current performer',
   assert.equal(coordinatorCanSelect('requested'), true);
 });
 
+test('a temporary transport interruption is shown as automatic reconnect, not a terminal disconnect', () => {
+  const unstable = participant('guest', {rosterStatus: 'unstable', exchange: {state: 'interrupted', waitingFor: 'none'}});
+  assert.equal(participantVisualState(unstable, snapshot([unstable])), 'reconnecting');
+  const legacy = participant('legacy', {status: 'interrupted'});
+  assert.equal(participantVisualState(legacy, snapshot([legacy])), 'reconnecting');
+});
+
 test('connection quality has an accessible four-level presentation plus unknown fallback', () => {
   assert.deepEqual(qualityPresentation({level: 'good', rttMs: 42, packetLossPct: 0.25, jitterMs: 3}), {
     level: 'good', label: '通信良好', bars: 3, detail: '遅延 42ms / 損失 0.3% / 揺らぎ 3ms',

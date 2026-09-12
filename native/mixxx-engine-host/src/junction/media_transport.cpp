@@ -185,6 +185,15 @@ bool MediaTransport::sendBulk(const QByteArray&b){
  return false;
 #endif
 }
+bool MediaTransport::sendKeepAlive(){
+#ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
+ std::shared_ptr<rtc::DataChannel> c;{std::lock_guard lock(d->mutex);c=d->channels[1];}
+ if(!c||!c->isOpen()||c->bufferedAmount()>65536)return false;
+ const std::byte marker{0};try{return c->send(&marker,1);}catch(...){return false;}
+#else
+ return false;
+#endif
+}
 bool MediaTransport::sendValidation(const QByteArray&b){
 #ifdef PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL
  std::shared_ptr<rtc::DataChannel> c,control;{std::lock_guard lock(d->mutex);c=d->channels[2];control=d->channels[0];}if(!c||!c->isOpen()||b.size()>kMaxChunkBytes+72||c->bufferedAmount()>32768||(control&&control->bufferedAmount()>0))return false;{std::lock_guard lock(d->mutex);auto now=monotonicNanos();if(now-d->validationWindow>=1000000000){d->validationWindow=now;d->validationBytes=0;}if(d->validationBytes+b.size()>256*1024)return false;d->validationBytes+=b.size();}try{return c->send(reinterpret_cast<const std::byte*>(b.constData()),b.size());}catch(...){return false;}

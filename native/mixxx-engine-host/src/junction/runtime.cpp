@@ -41,8 +41,13 @@
 #endif
 namespace junction {
 namespace {
+// Desktop screen sharing, power management and a busy audio engine can all
+// pause delivery for several seconds. A missing heartbeat is a degradation,
+// not permission to destroy a connection which WebRTC may still recover.
+constexpr qint64 kControlSilenceNanos=10000000000LL;
+constexpr quint64 kSnapshotIntervalTicks=100; // 500 ms at the 5 ms session tick.
 QByteArray json(const QJsonObject& v) {return QJsonDocument(v).toJson(QJsonDocument::Compact);}
-QString fingerprint() {return QStringLiteral("mixxx-3ebac449e7e5fe2a0186596657696e87ce8b0e56-junction-4");}
+QString fingerprint() {return QStringLiteral("mixxx-3ebac449e7e5fe2a0186596657696e87ce8b0e56-junction-5");}
 bool validOrigin(const QUrl& u) {
     return u.isValid() && !u.host().isEmpty() && u.userInfo().isEmpty() && u.fragment().isEmpty() && u.query().isEmpty() && (u.scheme()=="wss" || (u.scheme()=="ws" && (u.host()=="127.0.0.1" || u.host()=="localhost" || u.host()=="::1")));
 }
@@ -100,8 +105,9 @@ struct Runtime::Impl {
     // `candidate` is a replacement connection attempt built while `transport`
     // is still carrying audio. It is promoted only once it actually connects,
     // so a manual re-exchange never interrupts an established peer.
-    struct Peer {QString id,name,fp,avatarDataUrl,themeColor;bool approved=false,hello=false,producing=false,remoteStreamReady=false,endingAck=false;std::unique_ptr<MediaTransport> transport;QQueue<QByteArray> pending;
-        qint64 lastControlAt=0,healthAt=0;quint64 serial=0,candidateSerial=0;std::unique_ptr<MediaTransport> candidate,retiring; qint64 retireAt=0;ManualAttempt manual;HealthReportMessage health;bool hasHealth=false;
+    struct PendingControl {QString type;QByteArray bytes;};
+    struct Peer {QString id,name,fp,avatarDataUrl,themeColor;bool approved=false,hello=false,producing=false,remoteStreamReady=false,endingAck=false;std::unique_ptr<MediaTransport> transport;QQueue<PendingControl> pending;
+        qint64 lastControlAt=0,healthAt=0,bulkDisconnectedAt=0;quint64 serial=0,candidateSerial=0;std::unique_ptr<MediaTransport> candidate,retiring; qint64 retireAt=0;ManualAttempt manual;HealthReportMessage health;bool hasHealth=false;
         MediaTransport::Statistics healthStats;bool healthStatsReady=false,probeReady=false;double lastProbeRttMs=0,smoothedRttMs=0,smoothedJitterMs=0;};
     std::map<QString,std::unique_ptr<Peer>> peers;
 #if defined(PLUMDECK_JUNCTION_WITH_LIBDATACHANNEL)
@@ -169,9 +175,18 @@ struct Runtime::Impl {
 #endif
     }
     void queue(Peer& p,const QString& type,QJsonObject payload) {
+        const auto bytes=json({{"version",1},{"sessionId",auth.sessionId},{"senderPeerId",auth.local},{"epoch",u64(auth.epoch)},{"messageId",secureRandomHex(12)},{"type",type},{"payload",payload}});
+        // Snapshots and probes describe only the newest state. Coalescing them
+        // prevents a briefly busy client from replaying stale traffic after it
+        // resumes. A profile-bearing snapshot wins until it is actually sent.
+        if(type=="session.snapshot"||type=="clock.probe")for(int index=p.pending.size()-1;index>=0;--index){
+            auto& queued=p.pending[index];if(queued.type!=type)continue;
+            if(type=="session.snapshot"&&queued.bytes.contains("\"avatarDataUrl\"")&&!bytes.contains("\"avatarDataUrl\""))return;
+            queued.bytes=bytes;return;
+        }
         if(p.pending.size()>=64&&(type=="session.snapshot"||type=="clock.probe"))return;
         if(p.pending.size()>=128) {p.pending.clear();if(manual)manualSetState(p,ExchangeState::NeedsExchange,"このDJへの制御通信が混雑しています。接続情報を作り直してください","control_backpressure");else fail("制御通信が混雑しています");return;}
-        p.pending.enqueue(json({{"version",1},{"sessionId",auth.sessionId},{"senderPeerId",auth.local},{"epoch",u64(auth.epoch)},{"messageId",secureRandomHex(12)},{"type",type},{"payload",payload}}));
+        p.pending.enqueue(PendingControl{type,bytes});
     }
     void broadcast(const QString& type,const QJsonObject& payload) {for(auto& [id,p]:peers)if(p->approved&&p->transport)queue(*p,type,payload);}
     void restoreLobby() {
@@ -210,7 +225,7 @@ struct Runtime::Impl {
         // Health reports are expected once per second. Never leave an old green
         // result on screen after a suspended or half-open connection.
         if(!measured->hasHealth||!measured->healthAt||monotonicNanos()-measured->healthAt>4500000000LL){
-            if(measured->transport&&measured->transport->aggregateLinkState()!=LinkState::Connected)return {{"level","offline"}};
+            if(measured->transport&&measured->transport->linkState(false)!=LinkState::Connected)return {{"level","offline"}};
             return {{"level","unknown"}};
         }
         return {{"level",qualityLevel(measured->health.rttMs,measured->health.lossFraction)},{"rttMs",measured->health.rttMs},{"jitterMs",measured->health.jitterMs},{"packetLossPct",measured->health.lossFraction*100.0}};
@@ -405,7 +420,7 @@ struct Runtime::Impl {
         // Manual mode aggregates candidates instead of trickling them, so the
         // description/candidate callbacks below are inert without signalling.
         callbacks.gatheringComplete=[safe,id,serial](bool){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->manualCollected(*p,serial);},Qt::QueuedConnection);};
-        callbacks.linkState=[safe,id,serial](bool,LinkState state){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,state]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->manualLinkChanged(*p,serial,state);},Qt::QueuedConnection);};
+        callbacks.linkState=[safe,id,serial](bool bulk,LinkState state){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bulk,state]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->manualLinkChanged(*p,serial,bulk,state);},Qt::QueuedConnection);};
         callbacks.localDescription=[safe,id,serial](bool bulk,QString sdp,QString type,QString){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bulk,sdp,type]{if(!safe||safe->d->manual)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","description"},{"bulk",bulk},{"sdp",sdp},{"descriptionType",type}}}});},Qt::QueuedConnection);};
         callbacks.localCandidate=[safe,id,serial](bool bulk,QString candidate,QString mid){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,bulk,candidate,mid]{if(!safe||safe->d->manual)return;auto* p=safe->d->peerForSerial(id,serial);if(p)safe->d->signalSend({{"type","signal.relay"},{"toPeerId",id},{"payload",QJsonObject{{"kind","candidate"},{"bulk",bulk},{"candidate",candidate},{"mid",mid}}}});},Qt::QueuedConnection);};
         callbacks.producerManifest=[safe,id,serial](StreamManifest manifest){if(safe)QMetaObject::invokeMethod(safe,[safe,id,serial,manifest]{if(!safe)return;auto* p=safe->d->peerForSerial(id,serial);if(p&&safe->d->liveSerial(*p,serial)){auto profile=safe->d->localProfile();profile["stream"]=streamJson(manifest);safe->d->queue(*p,"peer.hello",profile);}},Qt::QueuedConnection);};
@@ -453,7 +468,7 @@ struct Runtime::Impl {
     // particular, an old heartbeat must not immediately interrupt the new link.
     void resetLinkHandshake(Peer& p) {
         p.hello=false;p.producing=false;p.remoteStreamReady=false;
-        p.lastControlAt=monotonicNanos();p.hasHealth=false;p.healthAt=0;
+        p.lastControlAt=monotonicNanos();p.hasHealth=false;p.healthAt=0;p.bulkDisconnectedAt=0;
         p.healthStatsReady=false;p.probeReady=false;p.lastProbeRttMs=0;
         p.smoothedRttMs=0;p.smoothedJitterMs=0;p.pending.clear();
     }
@@ -465,8 +480,8 @@ struct Runtime::Impl {
         // ICE can still report Connected after a suspended/half-open link has
         // stopped carrying control traffic. Preserve only a recently live link.
         const auto now=monotonicNanos();
-        const bool replacement=p.transport&&p.transport->aggregateLinkState()==LinkState::Connected
-            &&p.hello&&p.lastControlAt&&now-p.lastControlAt<=3000000000LL;
+        const bool replacement=p.transport&&p.transport->linkState(false)==LinkState::Connected
+            &&p.hello&&p.lastControlAt&&now-p.lastControlAt<=kControlSilenceNanos;
         const auto serial=++serialCounter;QString error;
         auto transport=buildTransport(p.id,serial,offerer,iceServerUrls(remoteIce),&error);
         if(!transport)return error.isEmpty()?QStringLiteral("接続を開始できません"):error;
@@ -581,19 +596,33 @@ struct Runtime::Impl {
         p.manual.collectDeadline=0;p.manual.connectDeadline=0;
         manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));
     }
-    void manualLinkChanged(Peer& p,quint64 serial,LinkState state) {
+    void manualLinkChanged(Peer& p,quint64 serial,bool bulk,LinkState state) {
         if(!manual)return;
         if(serial==p.candidateSerial){if(state==LinkState::Connected)manualPromoteIfReady(p);
             else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("再接続できませんでした。接続情報を作り直してください"),QStringLiteral("candidate_failed"));
             return;}
         if(serial!=p.serial||p.candidate||exchangeStateTerminal(p.manual.state))return;
-        if(state==LinkState::Connected&&p.transport->aggregateLinkState()==LinkState::Connected){if(!p.hello)p.lastControlAt=monotonicNanos();p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
-        else if(state==LinkState::Disconnected){
-            // A transient outage is not a manual re-exchange. The performer,
-            // the epoch and the authorisation all stay exactly as they are.
-            if(!p.candidate&&!exchangeStateTerminal(p.manual.state))manualSetState(p,ExchangeState::Interrupted,QStringLiteral("接続が不安定です。復旧を待っています"),QStringLiteral("interrupted"));
+        if(bulk){
+            // Asset transfer is intentionally separate from audio and control.
+            // It is idle for most of a set, so its transient state must not
+            // disconnect a healthy session or prevent DJs gathering in lobby.
+            if(state==LinkState::Connected){
+                p.bulkDisconnectedAt=0;
+                if(p.manual.state==ExchangeState::Connecting&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
+            }else if(state==LinkState::Disconnected||state==LinkState::Failed){
+                if(!p.bulkDisconnectedAt)p.bulkDisconnectedAt=monotonicNanos();
+                if(p.manual.state==ExchangeState::Connecting&&state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("楽曲転送用の接続を開始できませんでした。接続情報を作り直してください"),QStringLiteral("bulk_failed"));
+            }
+            return;
         }
-        else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("接続が切れました。接続情報を作り直してください"),QStringLiteral("link_failed"));
+        if(state==LinkState::Connected){
+            if(p.manual.state==ExchangeState::Connecting&&p.transport->aggregateLinkState()!=LinkState::Connected)return;
+            if(!p.hello)p.lastControlAt=monotonicNanos();p.manual.connectDeadline=0;p.manual.retries=0;
+            if(p.manual.state==ExchangeState::Interrupted||p.manual.state==ExchangeState::Connecting)manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));
+        }
+        // Disconnected is deliberately debounced by manualTick. The existing
+        // PeerConnection keeps retrying and incoming control restores the UI.
+        else if(state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("音声・操作の接続を復旧できませんでした。接続情報を作り直してください"),QStringLiteral("control_failed"));
     }
     /// Signed offline notice. Without a channel to the other end, the only
     /// honest option is a transferable packet the user delivers by hand.
@@ -626,7 +655,7 @@ struct Runtime::Impl {
     }
     void discardAttempt(Peer& p) {
         if(p.candidate){p.candidateSerial=0;p.candidate.reset();}
-        else if(p.transport&&p.transport->aggregateLinkState()!=LinkState::Connected){p.serial=0;p.transport.reset();p.hello=false;p.pending.clear();}
+        else if(p.transport&&p.transport->linkState(false)!=LinkState::Connected){p.serial=0;p.transport.reset();p.hello=false;p.pending.clear();}
         p.manual.collectDeadline=0;p.manual.connectDeadline=0;p.manual.clearArtifacts();
     }
     QString acceptManualInvite(const ExchangePacket& packet,bool initial) {
@@ -678,7 +707,7 @@ struct Runtime::Impl {
         for(auto& [id,p]:peers){
             auto& attempt=p->manual;
             if(p->retiring){if(hosting)route(p->retiring->decodedRing(),id);if(nowNanos>=p->retireAt)p->retiring.reset();}
-            if(attempt.state==ExchangeState::Connected&&p->lastControlAt&&nowNanos-p->lastControlAt>3000000000LL){manualSetState(*p,ExchangeState::Interrupted,"通信が途切れています。15秒間、同じ接続の復旧を待ちます");attempt.connectDeadline=nowNanos+15000000000LL;}
+            if(attempt.state==ExchangeState::Connected&&p->lastControlAt&&nowNanos-p->lastControlAt>kControlSilenceNanos){manualSetState(*p,ExchangeState::Interrupted,"通信が一時的に途切れています。同じ接続への自動再接続を続けています",QStringLiteral("control_silent"));attempt.connectDeadline=0;}
             if(p->candidate)manualPromoteIfReady(*p);
             if(attempt.collectDeadline&&nowNanos>=attempt.collectDeadline){
                 discardAttempt(*p);
@@ -691,7 +720,9 @@ struct Runtime::Impl {
             }
             const bool waiting=attempt.state==ExchangeState::InviteReady||attempt.state==ExchangeState::ResponseReady
                 ||attempt.state==ExchangeState::AwaitingHost||attempt.state==ExchangeState::ApprovalPending;
-            if(attempt.state==ExchangeState::Interrupted){if(!attempt.connectDeadline)attempt.connectDeadline=nowNanos+15000000000LL;else if(nowNanos>=attempt.connectDeadline){discardAttempt(*p);manualSetState(*p,ExchangeState::NeedsExchange,"接続が戻りません。ホストから新しい接続情報を受け取ってください");}}
+            // Interrupted keeps the authenticated transport alive. WebRTC can
+            // recover it without another invite; only a terminal Failed state
+            // or an explicit replacement exchange discards the connection.
             if(waiting&&attempt.expiresAt&&nowMs>=attempt.expiresAt){
                 discardAttempt(*p);
                 manualSetState(*p,ExchangeState::Expired,QStringLiteral("接続情報の期限が切れました。作り直してください"),QStringLiteral("expired"));
@@ -722,7 +753,7 @@ struct Runtime::Impl {
         if(!hosting && auth.sessionId=="pending" && id==auth.host && envelope.type==MessageType::SessionSnapshot)auth.sessionId=envelope.sessionId;
         if(envelope.sessionId!=auth.sessionId)return;
         p.lastControlAt=monotonicNanos();
-        if(manual&&p.manual.state==ExchangeState::Interrupted&&p.transport&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;manualSetState(p,ExchangeState::Connected,"通信が復旧しました");}
+        if(manual&&p.manual.state==ExchangeState::Interrupted&&p.transport&&p.transport->linkState(false)==LinkState::Connected){p.manual.connectDeadline=0;manualSetState(p,ExchangeState::Connected,"通信が復旧しました");}
         const auto payload=envelope.payload;
         if(envelope.type==MessageType::SessionSnapshot && payload["engineFingerprint"]!=fingerprint()){fail("エンジンのバージョンが一致しません");return;}
         if(!p.hello && envelope.type!=MessageType::PeerHello && envelope.type!=MessageType::SessionSnapshot)return;
@@ -922,6 +953,10 @@ struct Runtime::Impl {
     void pumpAssets() {
         if(outgoing.isEmpty())return;
         auto& job=outgoing.head();auto peer=peers.find(job.peer);if(peer==peers.end()||!peer->second->transport){outgoing.dequeue();return;}
+        // A failed bulk connection does not tear down audio/control while DJs
+        // are gathering. Only when an actual asset transfer needs it do we ask
+        // for a replacement exchange, keeping the queued transfer resumable.
+        if(manual&&peer->second->transport->linkState(true)==LinkState::Failed){if(peer->second->manual.state!=ExchangeState::NeedsExchange)manualSetState(*peer->second,ExchangeState::NeedsExchange,"楽曲転送用の接続を復旧できませんでした。再接続の招待を作ってください","bulk_failed");return;}
         QFile f(job.path);if(!f.open(QIODevice::ReadOnly)){outgoing.dequeue();fail("転送元の音源を開けません");return;}
         f.seek(qint64(job.offset));auto bytes=f.read(32768);
         if(bytes.isEmpty()){queue(*peer->second,"asset.complete",{{"assetId",job.hash}});outgoing.dequeue();return;}
@@ -1087,13 +1122,13 @@ struct Runtime::Impl {
             auth.owner=auth.host;auth.epoch=recoveryEpoch;auth.cutoverFrame=recoveryResumeFrame;auth.phase="switching";auth.committed.reset();auth.next.clear();auth.handoffId.clear();recoveryResumeFrame=0;recoveryUntil=0;backupPending.clear();problem.clear();reasons.clear();ownerAudioAt=monotonicNanos();++auth.revision;
         }
         auth.advance(now());audible.store(auth.local==auth.owner);
-        for(auto& [id,p]:peers){if(!p->transport)continue;for(int n=0;n<8&&!p->pending.isEmpty();++n){if(!p->transport->sendControl(p->pending.head()))break;p->pending.dequeue();}if(hosting)route(p->transport->decodedRing(),id);}
+        for(auto& [id,p]:peers){if(!p->transport)continue;for(int n=0;n<8&&!p->pending.isEmpty();++n){if(!p->transport->sendControl(p->pending.head().bytes))break;p->pending.dequeue();}if(ticks%200==0)p->transport->sendKeepAlive();if(hosting)route(p->transport->decodedRing(),id);}
         if(endingAt){bool acknowledged=hosting;for(const auto& [id,p]:peers)if(p->approved&&!p->endingAck)acknowledged=false;
             if(acknowledged||monotonicNanos()>=endingAt){signalSend({{"type",endingHost?"room.close":"peer.leave"}});stop();return;}
         }
         route(tap.localRing(),auth.local);
         if(hosting&&auth.owner!=auth.local&&ownerAudioAt&&monotonicNanos()-ownerAudioAt>300000000LL&&auth.phase!="recovery"&&(!auth.committed||now()>auth.cutoverFrame+14400))beginRecovery("プレイ担当者の音声が届いていません。配信を復旧中です");
-        if(ticks%20==0 && hosting)broadcast("session.snapshot",wireState(false));
+        if(ticks%kSnapshotIntervalTicks==0 && hosting)broadcast("session.snapshot",wireState(false));
         if(ticks%200==0){if(hosting)signalSend({{"type","host.heartbeat"}});else{auto p=peers.find(auth.host);if(p!=peers.end()&&p->second->transport)queue(*p->second,"clock.probe",{{"t1",QString::number(monotonicNanos())}});}}
         if(!hosting&&bootstrapStart&&lifecycle=="starting"&&auth.phase=="preparing"&&auth.next==auth.local&&clock.ready()&&ticks%20==0){auto host=peers.find(auth.host);if(host!=peers.end()&&host->second->hello&&host->second->transport&&host->second->transport->aggregateLinkState()==LinkState::Connected){if(!host->second->producing){q->setCaptureAnchor(UINT64_MAX,0);captureEpoch.store(auth.epoch);sendManifest(*host->second);return;}ready=true;reasons.clear();queue(*host->second,"handoff.ready",{{"ready",true},{"bootstrap",true},{"handoffId",auth.handoffId}});}}
         if(exportJob.valid() && exportJob.wait_for(std::chrono::seconds(0))==std::future_status::ready){auto result=exportJob.get();if(exportHandoff!=auth.handoffId)return;graph=result.first;assets.insert(result.second.begin(),result.second.end());
@@ -1268,8 +1303,8 @@ QJsonObject Runtime::command(const QString& op,const QJsonObject& p,QString* err
         if(op=="invite.cancel"||op=="peer.retry"||op=="peer.approve"){
             const auto id=d->hosting?p["peerId"].toString():d->auth.host;auto i=d->peers.find(id);if(i==d->peers.end())return reject("参加者が見つかりません");auto& peer=*i->second;
             if(op=="peer.retry"){
-                if(peer.transport&&peer.transport->aggregateLinkState()==LinkState::Connected){d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::Connected,"接続は継続しています");return snapshot();}
-                if(peer.manual.state==ExchangeState::Interrupted&&peer.manual.retries++<2){peer.manual.connectDeadline=monotonicNanos()+15000000000LL;return snapshot();}
+                if(peer.transport&&peer.transport->linkState(false)==LinkState::Connected&&peer.lastControlAt&&monotonicNanos()-peer.lastControlAt<=kControlSilenceNanos){d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::Connected,"接続は継続しています");return snapshot();}
+                if(peer.manual.state==ExchangeState::Interrupted&&peer.transport){d->queue(peer,"peer.hello",d->localProfile());peer.transport->sendKeepAlive();peer.manual.detail="同じ接続への自動再接続を続けています";++d->auth.revision;return snapshot();}
                 d->discardAttempt(peer);d->manualSetState(peer,ExchangeState::NeedsExchange,"新しい接続情報の交換が必要です。ホストがこの参加者の招待を作り直してください");return snapshot();
             }
             if(op=="peer.approve"){

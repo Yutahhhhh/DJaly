@@ -54,7 +54,7 @@ export function deriveHostCardGuidance(participant: JunctionParticipant, copied 
     case 'connected':
       return {step: 3, headline: '接続済みです。', waiting: false, actions: [secondary('reexchange')]};
     case 'interrupted':
-      return {step: 3, headline: '通信が途切れました。15秒間、復旧を待っています。', waiting: true, actions: [secondary('reexchange')]};
+      return {step: 3, headline: '通信が一時的に途切れています。同じ接続へ自動で再接続しています。', hint: 'セッションとDJの順番は維持されます。復旧不能と表示された場合だけ招待を作り直してください。', waiting: true, actions: [secondary('reexchange')]};
     case 'cancelled': case 'rejected':
       return {step: 1, headline: 'この接続操作は終了しました。相手にもチャットで伝えてください。', waiting: false, actions: [A.reexchange, A.copy_notice]};
     default:
@@ -79,7 +79,7 @@ export function deriveGuestGuidance(snapshot: JunctionSnapshot, copied = false):
     case 'connected':
       return {step: 3, headline: 'セッションに接続済みです。', waiting: false, actions: [secondary('paste_invite')]};
     case 'interrupted':
-      return {step: 3, headline: '通信が途切れました。15秒間、復旧を待っています。', waiting: true, actions: [secondary('paste_invite')]};
+      return {step: 3, headline: '通信が一時的に途切れています。同じ接続へ自動で再接続しています。', hint: 'セッションとDJの順番は維持されます。復旧不能と表示された場合だけ管理DJから新しい招待を受け取ってください。', waiting: true, actions: [secondary('paste_invite')]};
     default:
       return {step: 1, headline: '管理DJに再接続の招待をお願いし、届いた新しい招待を入力してください。',
         hint: '取り込むと新しい返答が作られます。その返答を管理DJへ送り返してください。',
