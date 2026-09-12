@@ -9,12 +9,22 @@ from .beat_grid import playback_grid, VERSION as GRID_VERSION
 from .beat_alignment import align_beats
 from .progress import report
 
-# Essentia Import
-try:
-    import essentia
-    import essentia.standard as es
-    HAS_ESSENTIA = True
-except ImportError:
+# Windows uses ``PortableAudioAnalyzer`` for both profiles.  Importing
+# Essentia here used to map its TensorFlow runtime before ``__new__`` could
+# select that implementation.  A light-analysis worker consequently paid the
+# detailed-analysis startup and memory cost on every track, which is enough to
+# hit the short worker deadline on low-spec Windows machines.
+#
+# Keep the native Essentia import on macOS/Linux only.  Methods that reference
+# ``es`` are overridden by the portable implementation on Windows.
+if sys.platform != "win32":
+    try:
+        import essentia
+        import essentia.standard as es
+        HAS_ESSENTIA = True
+    except ImportError:
+        HAS_ESSENTIA = False
+else:
     HAS_ESSENTIA = False
 
 logger = logging.getLogger(__name__)

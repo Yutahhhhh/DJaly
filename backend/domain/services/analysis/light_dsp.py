@@ -7,7 +7,10 @@ import numpy as np
 
 SAMPLE_RATE = 11025
 WINDOW_SECONDS = 30
-WORKER_TIMEOUT = 60.0
+# The work is bounded, but process/model startup varies greatly on inexpensive
+# Windows hardware and antivirus can delay the first model mapping.  This is a
+# safety deadline for a genuinely stuck worker, not a performance target.
+WORKER_TIMEOUT = 180.0
 FRAME_SIZE = 2048
 HOP_SIZE = 128
 
