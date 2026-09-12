@@ -149,6 +149,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & .\backend\dist\plumdeck-server.exe --diagnose-light-analysis
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged light analysis failed' }
           & .\backend\dist\plumdeck-server.exe --diagnose-analysis
           if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
       - name: Start packaged API and initialize MCP

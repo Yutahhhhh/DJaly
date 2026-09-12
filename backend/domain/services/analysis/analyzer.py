@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, Tuple, List, Union
 from tinytag import TinyTag
 from . import constants
 from .beat_grid import playback_grid, VERSION as GRID_VERSION
+from .progress import report
 
 # Essentia Import
 try:
@@ -58,7 +59,9 @@ class AudioAnalyzer:
         filename = os.path.basename(filepath)
 
         try:
+            report("metadata", "曲名・長さなどの音源情報を読み取っています")
             tag = self._extract_metadata(filepath) or TinyTag(None, 0)
+            report("decode", "音源全体を読み込んでいます")
             audio = self._load_audio(filepath)
             if audio is None: return None
 
@@ -91,12 +94,14 @@ class AudioAnalyzer:
                 }
 
             if not skip_waveform:
+                report("waveform", "波形データを作成しています")
                 peaks = self._compute_waveform_peaks(audio, num_points=500)
                 if "features_extra" not in result: result["features_extra"] = {}
                 result["features_extra"]["waveform_peaks"] = peaks
 
             if self.embedding_algo:
                 try:
+                    report("embedding", "類似曲検索用のAI解析を行っています")
                     embedding = self._extract_embedding(audio)
                     result.update({k: v for k, v in embedding.items() if k != "features_extra"})
                     result.setdefault("features_extra", {}).update(embedding["features_extra"])
@@ -202,8 +207,11 @@ class AudioAnalyzer:
         except: return None
 
     def _extract_features(self, audio: np.ndarray) -> Dict[str, Any]:
+        report("rhythm", "BPM・ビート位置を解析しています")
         bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
+        report("key", "キーを解析しています")
         key, scale, key_strength = self.key_extractor(audio)
+        report("timbre", "音量・音色の詳細を解析しています")
         return {
             "bpm": bpm, "beat_positions": ticks, "bpm_confidence": confidence,
             "key": key, "scale": scale, "key_strength": key_strength,

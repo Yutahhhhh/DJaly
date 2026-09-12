@@ -72,6 +72,15 @@ class BackgroundTaskService:
                 "details": {},
             })
             self.current_task = asyncio.create_task(self._task_wrapper(task_coroutine))
+            def finalize(task):
+                # A task cancelled before its first step never enters the
+                # wrapper's finally. Close the unawaited coroutine and clear
+                # ownership so an immediate retry can start.
+                task_coroutine.close()
+                if self.current_task is task:
+                    self.is_running = False
+                    self.current_task = None
+            self.current_task.add_done_callback(finalize)
         await self.broadcast()
         return True
 

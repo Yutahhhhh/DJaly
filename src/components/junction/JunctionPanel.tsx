@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { open as openAudioDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import type { AudioDevice } from '@/types/dj-engine';
 import type { ExchangeInspection, JunctionOp, JunctionSnapshot } from '@/types/junction';
-import type { ExchangeActionId } from '@/services/junction/exchange-actions';
+import { deriveGuestGuidance, type ExchangeActionId } from '@/services/junction/exchange-actions';
+import { ExchangeFlow } from './ExchangeFlow';
 import { useJunction } from '@/hooks/useJunction';
 import { djEngineClient } from '@/services/dj-engine/client';
 import {
@@ -10,8 +11,6 @@ import {
   junctionCommand,
   junctionInspectExchange,
   readExchangeClipboard,
-  readExchangeFile,
-  writeExchangeFile,
 } from '@/services/junction/client';
 import { DJ_NAME_MAX_LENGTH, limitDjName, participantName, profileAvatarValue, stableThemeColor } from '@/services/junction/roster-model';
 import { DjProfileEditor, type DjProfileValue } from './DjProfileEditor';
@@ -21,7 +20,7 @@ import './junction.css';
 
 const PROFILE_KEY = 'plumdeck.junction.profile';
 
-interface CardState { busy: boolean; error: string; message?: string }
+interface CardState { busy: boolean; error: string; copiedPacket?: string }
 type CardMap = Record<string, CardState>;
 
 interface Props {
@@ -99,7 +98,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
   };
 
   const runCard = async (key: string, fn: () => Promise<unknown>, rethrow = false): Promise<void> => {
-    setCard(key, {busy: true, error: '', message: ''});
+    setCard(key, {busy: true, error: ''});
     try {
       await fn();
     } catch (cause) {
@@ -162,36 +161,11 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
       case 'copy_answer':
         void runCard(peerId, async () => {
           await copyExchangeText(exchangeText);
-          setCard(peerId, {
-            message: action === 'copy_invite'
-              ? '招待用の文字をコピーしました。相手へ送ってください。'
-              : '返答の文字をコピーしました。セッション管理者へ送ってください。',
-          });
+          setCard(peerId, {copiedPacket: exchangeText});
         });
-        return;
-      case 'save_invite_file':
-      case 'save_answer_file':
-        void runCard(peerId, () => writeExchangeFile(exchangeText, 'junction-exchange.txt'));
         return;
       case 'copy_notice':
         void runCard(peerId, () => copyExchangeText(noticeText));
-        return;
-      case 'save_notice_file':
-        void runCard(peerId, () => writeExchangeFile(noticeText, 'junction-notice.txt'));
-        return;
-      case 'paste_answer':
-      case 'paste_invite':
-        void runCard(peerId, async () => {
-          const text = await readExchangeClipboard();
-          await junctionCommand('exchange.import', {text});
-        });
-        return;
-      case 'import_answer_file':
-      case 'import_invite_file':
-        void runCard(peerId, async () => {
-          const text = await readExchangeFile();
-          if (text != null) await junctionCommand('exchange.import', {text});
-        });
         return;
       case 'approve':
         void runCard(peerId, () => junctionCommand('peer.approve', {peerId, accept: true}));
@@ -199,21 +173,17 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
       case 'reject':
         void runCard(peerId, () => junctionCommand('peer.approve', {peerId, accept: false}));
         return;
-      case 'retry':
-        void runCard(peerId, () => junctionCommand('peer.retry', {peerId}));
-        return;
       case 'reexchange':
         void runCard(peerId, () => junctionCommand('invite.create', {peerId}));
         return;
       case 'cancel':
-      case 'dismiss':
         void runCard(peerId, () => junctionCommand('invite.cancel', {peerId}));
         return;
     }
   };
 
   const cardErrors = Object.fromEntries(Object.entries(cards).map(([key, value]) => [key, value.error]));
-  const cardMessages = Object.fromEntries(Object.entries(cards).map(([key, value]) => [key, value.message]));
+  const copiedPackets = Object.fromEntries(Object.entries(cards).map(([key, value]) => [key, value.copiedPacket]));
   const busyKey = Object.entries(cards).find(([, value]) => value.busy)?.[0];
 
   const onPanelKeyDown = (event: React.KeyboardEvent) => {
@@ -280,9 +250,9 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
               djName: profile.djName,
               avatarDataUrl: profile.avatarDataUrl,
               themeColor: profile.themeColor,
-              text: joinText,
+              text: joinText.trim(),
             })}
-            onFileError={setEntryError}
+            onInputError={setEntryError}
           />
         ) : snapshot && (
           <>
@@ -305,7 +275,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
               <section className="junction-invite-composer">
                 <div>
                   <h3>DJを招待</h3>
-                  <p>招待・返答の文字はサーバーを経由しません。作成した文字をチャットなどで相手へ直接渡します。</p>
+                  <p>招待を相手へ送り、届いた返答を確認すると接続できます。</p>
                 </div>
                 <label>
                   招待するDJ名
@@ -324,7 +294,7 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
                     setShowInvite(false);
                   })}
                 >
-                  招待用の文字を作る
+                  招待を作る
                 </button>
                 {cards.invite?.error && <p className="junction-card-error" role="alert">{cards.invite.error}</p>}
               </section>
@@ -337,14 +307,28 @@ export function JunctionPanel({open, onClose, incomingInvite, onConsumeIncoming,
               </p>
             )}
 
+            {!host && !serverMode && <section className="junction-own-connection" aria-labelledby="junction-own-connection-title">
+              <h3 id="junction-own-connection-title">あなたの接続 · 参加DJ</h3>
+              <p className="junction-card-note">管理DJ：{participantName(snapshot.participants.find((p) => p.peerId === snapshot.hostPeerId) ?? {peerId: snapshot.hostPeerId, displayName: '管理DJ', approved: true})}</p>
+              {selfExchange?.state === 'connected' && <p className="junction-exchange-next">セッションに接続済みです。</p>}
+              <ExchangeFlow
+                key={`${snapshot.sessionId}:${selfExchange?.inviteId ?? snapshot.exchange?.inviteId ?? ''}`}
+                host={false} connected={selfExchange?.state === 'connected'}
+                guidance={deriveGuestGuidance(snapshot, Boolean(copiedPackets[snapshot.hostPeerId] && copiedPackets[snapshot.hostPeerId] === snapshot.exchange?.responseText))}
+                busy={Boolean(cards[snapshot.hostPeerId]?.busy)} error={cardErrors[snapshot.hostPeerId]}
+                onAction={(action) => handleExchangeAction(snapshot.hostPeerId, action)}
+                onImport={(text) => runCard(snapshot.hostPeerId, () => junctionCommand('exchange.import', {text: text.trim()}), true)}
+              />
+            </section>}
+
             <JunctionRoster
               snapshot={snapshot}
               host={host}
               busyKey={busyKey}
               errors={cardErrors}
-              messages={cardMessages}
+              copiedPackets={copiedPackets}
               onExchangeAction={handleExchangeAction}
-              onImportText={(peerId, text) => runCard(peerId, () => junctionCommand('exchange.import', {text}), true)}
+              onImportText={(peerId, text) => runCard(peerId, () => junctionCommand('exchange.import', {text: text.trim(), peerId}), true)}
               onChooseParticipant={(peerId, first) => void runCard('handoff', () => junctionCommand(first ? 'session.start' : 'handoff.request', first ? {performerPeerId: peerId} : {targetPeerId: peerId}))}
               onAcceptHandoff={() => void runCard('handoff', () => junctionCommand('handoff.accept'))}
               onCancelHandoff={() => void runCard('handoff', () => junctionCommand('handoff.cancel'))}
@@ -484,7 +468,7 @@ interface EntryProps {
   onInspect: () => void;
   onCreate: () => void;
   onJoin: () => void;
-  onFileError: (message: string) => void;
+  onInputError: (message: string) => void;
 }
 
 function EntrySection(props: EntryProps) {
@@ -539,8 +523,7 @@ function EntrySection(props: EntryProps) {
           </label>
           <div className="junction-card-actions">
             <button type="button" className="junction-btn junction-btn-primary" disabled={props.inspecting || !props.joinText.trim()} onClick={props.onInspect}>招待を確認</button>
-            <button type="button" className="junction-btn junction-btn-default" disabled={props.inspecting} onClick={() => void readExchangeClipboard().then(props.setJoinText).catch((cause) => props.onFileError(String(cause)))}>貼り付け</button>
-            <button type="button" className="junction-btn junction-btn-default" disabled={props.inspecting} onClick={() => void readExchangeFile().then((text) => { if (text != null) props.setJoinText(text); }).catch((cause) => props.onFileError(String(cause)))}>ファイルを選ぶ</button>
+            <button type="button" className="junction-btn junction-btn-default" disabled={props.inspecting} onClick={() => void readExchangeClipboard().then(props.setJoinText).catch((cause) => props.onInputError(String(cause)))}>貼り付け</button>
           </div>
           {props.preview && (
             <div className="junction-invite-preview">

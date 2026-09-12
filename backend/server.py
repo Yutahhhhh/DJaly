@@ -1,8 +1,6 @@
 import os
 import sys
-import uvicorn
 import multiprocessing
-import platformdirs
 import threading
 
 # Bound native pools before importing the audio stack; analysis jobs control concurrency.
@@ -20,6 +18,12 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
 if __name__ == "__main__":
+    import uvicorn
+    if sys.argv[1:] == ["--diagnose-light-analysis"]:
+        from light_analysis_diagnostic import run
+        run()
+        raise SystemExit(0)
+
     if sys.argv[1:] == ["--diagnose-analysis"]:
         from analysis_diagnostic import run
         run()
@@ -27,6 +31,8 @@ if __name__ == "__main__":
 
     # 設定の読み込みと環境変数のセットアップ
     # これを最初に行うことで、後続のインポート(librosa等)が正しいパスを使用できる
+    from startup_progress import report as startup_report
+    startup_report("settings", "設定・保存先を読み込んでいます", 1)
     from config import settings
     settings.setup_environment()
 
@@ -41,6 +47,7 @@ if __name__ == "__main__":
 
     # mainモジュールからappオブジェクトを直接インポート
     # これによりPyInstaller環境下でも正しくアプリが見つかる
+    startup_report("services", "ライブラリ・解析・再生の機能を読み込んでいます", 2)
     from main import app
 
     # ポート番号を環境変数から取得（デフォルトは開発用の8001）

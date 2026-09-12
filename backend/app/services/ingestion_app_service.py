@@ -2,6 +2,7 @@ import asyncio
 import os
 import multiprocessing
 from domain.services.analysis.process_runner import AnalysisExecutor
+from domain.services.analysis.light_dsp import WORKER_TIMEOUT as LIGHT_WORKER_TIMEOUT
 from typing import List, Dict, Any, Optional
 from sqlmodel import Session, select
 from config import settings
@@ -60,11 +61,15 @@ class IngestionAppService(BackgroundTaskService):
                               analysis_profile: str = "auto") -> bool:
         if analysis_profile not in {"auto", "light", "full"}:
             raise ValueError("Unknown analysis profile")
-        token = analysis_coordinator.acquire("Explorer解析")
+        token = None
 
         async def run_with_token():
             nonlocal token
             try:
+                # Acquire only once this coroutine is running. Cancelling the
+                # task before its first step otherwise bypasses this finally
+                # and leaks the global slot forever.
+                token = analysis_coordinator.acquire("Explorer解析")
                 if token is None:
                     # Queue behind a Play import (or other analysis) instead of
                     # rejecting the request. Non-blocking polls keep cancel safe:
@@ -116,6 +121,7 @@ class IngestionAppService(BackgroundTaskService):
                 errors=0,
                 stage="音源ファイルを検索中",
                 active_files={},
+                active_progress={},
                 failed_files=[],
                 last_error="",
                 queued=False,
@@ -179,16 +185,30 @@ class IngestionAppService(BackgroundTaskService):
                         type="processing"
                     )
                     self.state["details"]["active_files"][filepath] = time.time()
+                    self.state["details"]["active_progress"][filepath] = "解析ワーカーを起動しています"
                     await self.emit_state()
+
+                    def report_progress(event):
+                        def update():
+                            if filepath not in self.state["details"].get("active_files", {}):
+                                return
+                            stages = dict(self.state["details"].get("active_progress", {}))
+                            stages[filepath] = event["label"]
+                            self.update_state(active_progress=stages)
+                            asyncio.create_task(self.emit_state())
+                        loop.call_soon_threadsafe(update)
 
                     try:
                         async def analyze(profile: str):
-                            timeout = 600.0 if profile == "full" else 210.0
+                            timeout = 600.0 if profile == "full" else LIGHT_WORKER_TIMEOUT + 30
+                            if profile == "light":
+                                executor.task_timeout = LIGHT_WORKER_TIMEOUT
                             return await asyncio.wait_for(
                                 self.domain_service.process_track_ingestion(
                                     filepath, force_update, loop, executor, timeout,
                                     self.db_lock, save_to_db=True,
                                     analysis_profile=profile,
+                                    on_progress=report_progress,
                                 ),
                                 timeout=timeout + 30,
                             )
@@ -223,13 +243,15 @@ class IngestionAppService(BackgroundTaskService):
                         self.update_state(last_error=f"{os.path.basename(filepath)}: {type(e).__name__}: {e}")
                     finally:
                         self.state["details"]["active_files"].pop(filepath, None)
+                        self.state["details"]["active_progress"].pop(filepath, None)
                     
                     # Update progress estimation
                     self.update_state(type="progress", processed=self.state["processed"],
                                       current=self.state["processed"] + self.state["skipped"] + self.state["errors"])
                     await self.emit_state()
 
-            worker_timeout = 570.0 if analysis_profile == "full" else WORKER_TIMEOUT
+            worker_timeout = (LIGHT_WORKER_TIMEOUT if effective_profile == "light"
+                              else 570.0 if analysis_profile == "full" else WORKER_TIMEOUT)
             executor = AnalysisExecutor(max_workers=max_workers, task_timeout=worker_timeout)
             try:
                 self.executor = executor

@@ -15,8 +15,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { ExchangeActionId, ExchangeGuidance } from '@/services/junction/exchange-actions';
-import { deriveGuestGuidance, deriveHostCardGuidance, primaryExchangeAction } from '@/services/junction/exchange-actions';
+import type { ExchangeActionId } from '@/services/junction/exchange-actions';
+import { deriveHostCardGuidance } from '@/services/junction/exchange-actions';
 import {
   orderedParticipants,
   compactReadinessReasons,
@@ -33,6 +33,7 @@ import {
   type RosterVisualState,
 } from '@/services/junction/roster-model';
 import type { JunctionParticipant, JunctionSnapshot } from '@/types/junction';
+import { ExchangeFlow } from './ExchangeFlow';
 
 const STATE_LABEL: Record<RosterVisualState, string> = {
   invited: '招待中',
@@ -52,7 +53,7 @@ interface Props {
   host: boolean;
   busyKey?: string;
   errors: Record<string, string>;
-  messages: Record<string, string | undefined>;
+  copiedPackets: Record<string, string | undefined>;
   onExchangeAction: (peerId: string, action: ExchangeActionId) => void;
   onImportText: (peerId: string, text: string) => Promise<void>;
   onChooseParticipant: (peerId: string, first: boolean) => void;
@@ -68,7 +69,7 @@ export function JunctionRoster({
   host,
   busyKey,
   errors,
-  messages,
+  copiedPackets,
   onExchangeAction,
   onImportText,
   onChooseParticipant,
@@ -138,7 +139,7 @@ export function JunctionRoster({
                 host={host}
                 busy={busyKey === participant.peerId || busyKey === 'handoff'}
                 error={errors[participant.peerId]}
-                message={messages[participant.peerId]}
+                copiedPacket={copiedPackets[participant.peerId]}
                 onExchangeAction={onExchangeAction}
                 onImportText={onImportText}
                 onChooseParticipant={onChooseParticipant}
@@ -164,7 +165,7 @@ interface RowProps {
   host: boolean;
   busy: boolean;
   error?: string;
-  message?: string;
+  copiedPacket?: string;
   onExchangeAction: (peerId: string, action: ExchangeActionId) => void;
   onImportText: (peerId: string, text: string) => Promise<void>;
   onChooseParticipant: (peerId: string, first: boolean) => void;
@@ -180,7 +181,7 @@ function RosterRow({
   host,
   busy,
   error,
-  message,
+  copiedPacket,
   onExchangeAction,
   onImportText,
   onChooseParticipant,
@@ -197,31 +198,16 @@ function RosterRow({
     disabled: !sortable,
   });
   const style = {transform: CSS.Transform.toString(transform), transition};
-  const guidance = exchangeGuidance(participant, snapshot, host);
-  const primary = primaryAction(participant, snapshot, host, state, guidance);
-  const secondary = guidance?.actions.filter((action) => action.id !== primary?.exchangeAction) ?? [];
+  const guidance = host && !isSelf && participant.exchange ? deriveHostCardGuidance(participant, Boolean(copiedPacket && copiedPacket === participant.exchange.inviteText)) : undefined;
+  const primary = primaryAction(participant, snapshot, host, state);
   // The coordinator can withdraw a pending turn before it is committed.
   const cancellable = handoffCancelAvailable(state, host);
-  const [textOpen, setTextOpen] = useState(false);
-  const [text, setText] = useState('');
-  const [textError, setTextError] = useState('');
   const quality = qualityPresentation(
     participant.connectionQuality ?? (state === 'disconnected' ? {level: 'offline'} : undefined),
   );
   const readinessReason = state === 'next' && !snapshot.readiness.ready
     ? compactReadinessReasons(snapshot.readiness.reasons)
     : undefined;
-
-  const submitText = async () => {
-    setTextError('');
-    try {
-      await onImportText(participant.peerId, text);
-      setText('');
-      setTextOpen(false);
-    } catch (cause) {
-      setTextError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
 
   return (
     <li
@@ -256,7 +242,7 @@ function RosterRow({
         <ConnectionIndicator presentation={quality} />
       </div>
 
-      {(primary || secondary.length > 0 || cancellable) && (
+      {(primary || cancellable) && (
         <div className="junction-roster-actions">
           {primary && (
             <button
@@ -279,61 +265,22 @@ function RosterRow({
               引き継ぎを取消
             </button>
           )}
-          {(secondary.length > 0 || guidance) && (
-            <details className="junction-row-more">
-              <summary aria-label={`${participantName(participant)}のその他の操作`}>•••</summary>
-              <div className="junction-row-menu">
-                {canImportText(participant, snapshot, host) && (
-                  <button type="button" className="junction-btn junction-btn-default" onClick={() => setTextOpen((value) => !value)}>
-                    受け取った文字を入力
-                  </button>
-                )}
-                {secondary.map((action) => (
-                  <button
-                    key={action.id}
-                    type="button"
-                    className={`junction-btn junction-btn-${action.intent}`}
-                    disabled={busy}
-                    onClick={() => onExchangeAction(participant.peerId, action.id)}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-            </details>
-          )}
+
         </div>
       )}
 
-      {textOpen && (
-        <div className="junction-inline-exchange">
-          <label>
-            受け取った文字
-            <textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={3}
-              maxLength={131072}
-              placeholder={host ? 'このDJから届いた返答を貼り付け' : 'セッション管理者から届いた文字を貼り付け'}
-            />
-          </label>
-          <div className="junction-card-actions">
-            <button type="button" className="junction-btn junction-btn-primary" disabled={busy || !text.trim()} onClick={() => void submitText()}>
-              取り込む
-            </button>
-            <button type="button" className="junction-btn junction-btn-default" onClick={() => setTextOpen(false)}>閉じる</button>
-          </div>
-          {textError && <p className="junction-card-error" role="alert">{textError}</p>}
-        </div>
-      )}
-      {guidance?.hint && state !== 'ready' && <p className="junction-row-note">{guidance.hint}</p>}
+      {guidance && <ExchangeFlow
+        key={`${participant.peerId}:${participant.exchange?.inviteId ?? ''}`}
+        guidance={guidance} host connected={participant.exchange?.state === 'connected'} busy={busy} error={error}
+        onAction={(action) => onExchangeAction(participant.peerId, action)}
+        onImport={(text) => onImportText(participant.peerId, text)}
+      />}
       {readinessReason && (
         <p className="junction-row-warning" role="status">
           準備待ち：{readinessReason}
         </p>
       )}
-      {(error || guidance?.error) && <p className="junction-card-error" role="alert">{error || guidance?.error}</p>}
-      {message && <p className="junction-row-note" role="status">{message}</p>}
+      {error && !guidance && <p className="junction-card-error" role="alert">{error}</p>}
     </li>
   );
 }
@@ -361,18 +308,6 @@ function ConnectionIndicator({presentation}: {presentation: ReturnType<typeof qu
   );
 }
 
-function exchangeGuidance(
-  participant: JunctionParticipant,
-  snapshot: JunctionSnapshot,
-  host: boolean,
-): ExchangeGuidance | undefined {
-  if (host && participant.exchange) return deriveHostCardGuidance(participant);
-  if (!host && participant.peerId === snapshot.hostPeerId && snapshot.exchange?.mode === 'manual') {
-    return deriveGuestGuidance(snapshot);
-  }
-  return undefined;
-}
-
 interface PrimaryAction {
   label: string;
   kind?: 'first' | 'next' | 'accept' | 'request';
@@ -385,14 +320,7 @@ function primaryAction(
   snapshot: JunctionSnapshot,
   host: boolean,
   state: RosterVisualState,
-  guidance?: ExchangeGuidance,
 ): PrimaryAction | undefined {
-  const exchange = participant.exchange?.state ?? (!host && participant.peerId === snapshot.hostPeerId ? snapshot.exchange?.state : undefined);
-  if (guidance && exchange !== 'connected') {
-    const action = primaryExchangeAction(guidance);
-    if (action) return {label: action.label, exchangeAction: action.id};
-  }
-
   const isSelf = participant.peerId === snapshot.localPeerId;
   const lobby = snapshot.lifecycle === 'lobby' || (!snapshot.performerPeerId && snapshot.lifecycle !== 'live');
   if (host && lobby && coordinatorCanSelect(state)) return {label: '最初のDJに選ぶ', kind: 'first'};
@@ -401,9 +329,4 @@ function primaryAction(
   if (host && state === 'next' && snapshot.readiness.ready) return {label: '交代を確定', kind: 'accept'};
   if (turnRequestAvailable(state, host, isSelf)) return {label: '次を希望する', kind: 'request'};
   return undefined;
-}
-
-function canImportText(participant: JunctionParticipant, snapshot: JunctionSnapshot, host: boolean): boolean {
-  if (host) return Boolean(participant.exchange && participant.peerId !== snapshot.localPeerId);
-  return participant.peerId === snapshot.hostPeerId && snapshot.exchange?.mode === 'manual';
 }

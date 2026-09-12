@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useImportQueue, importFinished } from "@/hooks/useImportQueue";
 import { workflowsService, type ImportBatch } from "@/services/workflows";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -11,6 +11,11 @@ const labels: Record<string, string> = {
 };
 export function ImportQueueProgress({ raised = false }: { raised?: boolean }) {
   const { batches, error } = useImportQueue();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
@@ -72,6 +77,9 @@ export function ImportQueueProgress({ raised = false }: { raised?: boolean }) {
             </div>
             <Progress value={Number(row.total_items) ? 100 * done / Number(row.total_items) : 0} />
             {row.current_file && <p className="truncate" title={row.current_file}>{row.current_file.split(/[/\\]/).pop()}</p>}
+            {row.progress && !importFinished(row) && row.state !== "paused" && <p role="status" className="text-xs">
+              {row.progress.label} · {Math.max(0, Math.floor(now / 1000 - row.progress.started_at))}秒
+            </p>}
             <p className="text-xs text-muted-foreground">
               解析方法：{effectiveProfile === "light" ? "軽量（プレイ優先）" : row.analysis_profile === "auto" ? "自動・詳細解析中" : "詳細"}
             </p>

@@ -11,10 +11,12 @@ import numpy as np
 
 from .analyzer import AudioAnalyzer
 from . import constants
+from . import light_dsp
+from .progress import report
 from utils.executables import find_ffmpeg
 
 
-LIGHT_ANALYSIS_SECONDS = 90
+LIGHT_ANALYSIS_SECONDS = light_dsp.WINDOW_SECONDS
 
 
 def musicnn_bands(audio: np.ndarray) -> np.ndarray:
@@ -30,12 +32,17 @@ def musicnn_bands(audio: np.ndarray) -> np.ndarray:
 
 class PortableAudioAnalyzer(AudioAnalyzer):
     def __init__(self):
-        import librosa
-        self.librosa = librosa
         self.rhythm_extractor = self._rhythm
         self.key_extractor = self._key
         self.embedding_algo = True  # The model is loaded only when embedding is requested.
         self._embedding_session = None
+
+    @property
+    def librosa(self):
+        # Light analysis must never import librosa/Numba, including during
+        # construction in a fresh spawned or packaged worker.
+        import librosa
+        return librosa
 
     def _load_audio(self, filepath, max_seconds=1800):
         converter = find_ffmpeg()
@@ -76,10 +83,10 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             command.extend(["-ss", f"{start_seconds:.3f}"])
         command.extend([
             "-i", str(filepath), "-t", str(duration_seconds), "-vn", "-ac", "1",
-            "-ar", str(constants.SAMPLE_RATE), "-f", "f32le", "pipe:1",
+            "-ar", str(light_dsp.SAMPLE_RATE), "-f", "f32le", "pipe:1",
         ])
         decoded = subprocess.run(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
             check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if decoded.returncode:
@@ -88,14 +95,14 @@ class PortableAudioAnalyzer(AudioAnalyzer):
                 + decoded.stderr.decode("utf-8", errors="replace")[-2000:]
             )
         audio = np.frombuffer(decoded.stdout, dtype="<f4").copy()
-        maximum = int(duration_seconds * constants.SAMPLE_RATE)
+        maximum = int(duration_seconds * light_dsp.SAMPLE_RATE)
         if audio.size > maximum:
             audio = audio[:maximum]
         if not audio.size or not np.isfinite(audio).all():
             raise ValueError("Audio is empty or contains non-finite samples")
         return audio
 
-    def _extract_light_features(self, audio):
+    def _extract_light_features(self, audio, sample_rate=constants.SAMPLE_RATE):
         """Return inexpensive, finite descriptors from a bounded audio window."""
         rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
         loudness = float(20 * np.log10(max(rms, 1e-7)))
@@ -106,7 +113,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
 
         # A short FFT slice is enough for an approximate brightness/rolloff
         # indicator and avoids constructing a full-track STFT matrix.
-        fft_samples = min(len(audio), constants.SAMPLE_RATE * 10)
+        fft_samples = min(len(audio), sample_rate * 10)
         sample = audio[(len(audio) - fft_samples) // 2:][:fft_samples]
         frame_size, hop = 2048, 1024
         if len(sample) < frame_size:
@@ -114,7 +121,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         frames = np.lib.stride_tricks.sliding_window_view(sample, frame_size)[::hop]
         spectra = np.abs(np.fft.rfft(frames * np.hanning(frame_size), axis=1))
         spectrum = np.mean(spectra, axis=0)
-        frequencies = np.fft.rfftfreq(frame_size, 1 / constants.SAMPLE_RATE)
+        frequencies = np.fft.rfftfreq(frame_size, 1 / sample_rate)
         total = float(np.sum(spectrum))
         brightness = float(np.dot(spectrum, frequencies) / total) if total > 0 else 0.0
         if total > 0:
@@ -147,12 +154,14 @@ class PortableAudioAnalyzer(AudioAnalyzer):
 
     def analyze_light(self, filepath, external_lyrics=None):
         """Windows speed-first analysis without full decode or MusiCNN."""
+        report("metadata", "曲名・長さなどの音源情報を読み取っています")
         tag = self._extract_metadata(filepath)
         duration = float(getattr(tag, "duration", 0) or 0)
         start = max(0.0, (duration - LIGHT_ANALYSIS_SECONDS) / 2) if duration else 0.0
+        report("decode", f"代表区間を読み込んでいます（最大{LIGHT_ANALYSIS_SECONDS}秒）")
         audio = self._load_audio_segment(filepath, start, LIGHT_ANALYSIS_SECONDS)
-        bpm, _ticks, confidence, _, _ = self._rhythm(audio)
-        key, scale, key_strength = self._key(audio)
+        report("rhythm_key", "BPM・キーを軽量推定しています")
+        bpm, confidence, key, scale, key_strength = light_dsp.rhythm_and_key(audio)
         if not np.isfinite(bpm) or bpm <= 0:
             raise ValueError("軽量解析でBPMを取得できませんでした")
 
@@ -160,11 +169,12 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             "analysis_level": "light",
             "analysis_profile": "light",
             "analysis_window_start_seconds": round(start, 3),
-            "analysis_window_seconds": round(len(audio) / constants.SAMPLE_RATE, 3),
+            "analysis_window_seconds": round(len(audio) / light_dsp.SAMPLE_RATE, 3),
+            "analysis_sample_rate": light_dsp.SAMPLE_RATE,
             "analysis_components": {
-                "rhythm": "librosa-rhythm-light-v1",
-                "key": "librosa-key-light-v1",
-                "timbre": "bounded-summary-v1",
+                "rhythm": "numpy-autocorrelation-light-v2",
+                "key": "numpy-chroma-light-v2",
+                "timbre": "bounded-summary-v2",
             },
             "bpm_confidence": round(float(confidence), 2),
             "key_strength": round(float(key_strength), 2),
@@ -173,6 +183,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             "playback_grid_estimated": True,
         }
         metadata = tag
+        report("timbre", "音量・明るさなどの基本情報を計算しています")
         result = {
             "filepath": str(filepath),
             "title": ((getattr(metadata, "title", None) or "").strip()
@@ -193,7 +204,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             "danceability": float(np.clip(confidence, 0, 1)),
             "analysis_level": "light",
             "features_extra": extra,
-            **self._extract_light_features(audio),
+            **self._extract_light_features(audio, sample_rate=light_dsp.SAMPLE_RATE),
         }
         raw_year = getattr(metadata, "year", None)
         year_prefix = str(raw_year).strip()[:4] if raw_year else ""

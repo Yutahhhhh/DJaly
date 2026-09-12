@@ -309,7 +309,7 @@ export function SettingsView() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Macでは従来の詳細解析を維持します。Windowsの自動解析は時間がかかる場合だけ軽量へ切り替わります。軽量解析はすぐ再生できますが、類似曲やジャンル推定の精度が下がります。
+                低スペックのWindowsでは「軽量」を選んでください。最大30秒の音源からBPM・キーを概算し、AIモデルは使用しません。正確なビート位置や類似曲検索用の解析は「詳細」で追加できます。「自動」は詳細解析から始め、時間がかかる場合だけ軽量へ切り替わります。Macは詳細解析を使用します。
               </p>
             </div>
 
