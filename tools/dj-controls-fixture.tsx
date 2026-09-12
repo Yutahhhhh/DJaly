@@ -16,7 +16,7 @@ function Fixture() {
   return <main className={`dj-workspace ${compact?"dj-workspace--compact":""} ${four?"dj-workspace--four":""}`} style={{height:"100vh"}}>
     <header className="dj-global-bar"><button onClick={()=>setCompact(!compact)}>Density</button><button onClick={()=>setFour(!four)}>Deck count</button></header>
     <div className="dj-deck-pair">{(["A","B"] as const).map(id=><SoftwareDeck key={id} id={id} deck={{...deck,deck:id}} channel={channel} active connected capability capabilities={capabilities} gain={1}
-      onActivate={noop} onDropTrack={noop} onToggle={noop} onCue={noop} onSeek={noop} onSeekAbsolute={noop} onGain={noop} onTempo={noop} onKeylock={noop} onSync={noop} onUnload={noop} onGridEdit={noop}
+      onActivate={noop} onToggle={noop} onCue={noop} onSeek={noop} onSeekAbsolute={noop} onGain={noop} onTempo={noop} onKeylock={noop} onSync={noop} onUnload={noop} onGridEdit={noop}
       onHotCue={(slot,clear)=>{record({cue:slot,clear});setDeck(old=>({...old,hotCues:old.hotCues.map((v,i)=>i===slot?clear?null:4000:v)}))}}
       onLoop={beats=>record({loop:beats})} onBeatLoop={beats=>record({loop:beats})} onBeatJump={beats=>record({jump:beats})} onLoopEnable={enabled=>record({loopEnabled:enabled})} onQuantize={enabled=>record({quantize:enabled})}
       onTrim={value=>{record({trim:value});setChannel(old=>({...old,trim:value}))}} onFilter={value=>{record({filter:value});setChannel(old=>({...old,filter:value}))}} onEq={(band,value)=>record({band,value})}

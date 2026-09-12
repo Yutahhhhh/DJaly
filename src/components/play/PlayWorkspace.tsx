@@ -102,7 +102,6 @@ export function PlayWorkspace() {
   });
   const [fxUnits, setFxUnits] = useState<[FxUnitState, FxUnitState]>(FX_UNIT_DEFAULTS);
   const [compactDecks, setCompactDecks] = useState(() => localStorage.getItem("plumdeck.compactDecks") === "true");
-  const [laneDrop, setLaneDrop] = useState<DeckId | null>(null);
   const [waveformLayout, setWaveformLayout] = useState<WaveformLayout>(() => localStorage.getItem("plumdeck.waveformLayout") === "vertical" ? "vertical" : "horizontal");
   const snapshot = state.snapshot;
   const loadedMetadataIds = [...new Set(DECK_IDS.map(id => snapshot?.decks[id]?.track?.trackId).filter(Boolean))].join(",");
@@ -674,12 +673,9 @@ export function PlayWorkspace() {
   // Lanes accept the same drag payload as the decks, so a row can be dropped on
   // whichever waveform the eye is already on.
   const lane = (id: DeckId, layout: WaveformLayout) => <div key={id}
-    data-deck={id}
-    className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"), laneDrop === id && "dj-lane--drop")}
-    style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}
-    onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-plumdeck-track")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setLaneDrop(id); } }}
-    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setLaneDrop((current) => current === id ? null : current); }}
-    onDrop={(event) => { event.preventDefault(); setLaneDrop(null); try { const track = JSON.parse(event.dataTransfer.getData("application/x-plumdeck-track")) as Track; if (track.id && track.filepath && track.duration > 0) loadTrack(id, track); } catch { /* Ignore foreign drag data. */ } }}>
+    data-deck={id} data-track-drop-deck={id} data-track-drop-label={`DECK ${id} へロード`}
+    className={cn("dj-lane", expandedPair&&(expandedPair.includes(id)?"dj-lane--expanded":"dj-lane--summary"))}
+    style={{ "--deck-accent": id === "A" || id === "C" ? "var(--dj-blue)" : "var(--dj-orange)" } as CSSProperties}>
     {waveform(id, layout)}
     <button className="dj-wave-expand" aria-label={`デッキ ${id} のペアを拡大`} aria-pressed={!!expandedPair?.includes(id)} onClick={()=>setExpandedPair(current=>current?.includes(id)?null:(id==='A'||id==='B'?'AB':'CD'))}>拡大</button>
   </div>;
@@ -733,7 +729,7 @@ export function PlayWorkspace() {
     savedLoops={trackMetadata[(localTrackId(snapshot?.decks[id]?.track) ?? -1)]?.loops}
     trackKey={trackKeys[(localTrackId(snapshot?.decks[id]?.track) ?? -1)]}
     onRecallLoop={(loopId) => void recallLoop(id, loopId)}
-    onActivate={() => setActiveDeck(id)} onDropTrack={(track) => loadTrack(id, track)} onToggle={() => togglePlay(id)}
+    onActivate={() => setActiveDeck(id)} onToggle={() => togglePlay(id)}
     onCue={() => void run(async () => {
       const deck = client.getState().snapshot?.decks[id];
       if (!deck?.track) return;

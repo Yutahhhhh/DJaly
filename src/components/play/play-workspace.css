@@ -67,7 +67,6 @@
 .dj-lane { position: relative; min-height: 0; overflow: hidden; border-bottom: 1px solid #17191b; }
 .dj-lane:last-child { border-bottom: 0; }
 .dj-lane > .dj-waveform { position: absolute; inset: 0; height: auto; width: auto; }
-.dj-lane--drop::after { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; box-shadow: inset 0 0 0 2px var(--deck-accent); background: color-mix(in srgb, var(--deck-accent) 10%, transparent); }
 .dj-waveform { position: relative; min-width: 0; min-height: 0; height: 100%; width: 100%; overflow: hidden; background: #050607; }
 .dj-waveform canvas { position: absolute; inset: 0; display: block; height: 100%; width: 100%; }
 .dj-wave-label { position: absolute; left: 0; top: 0; padding: 0 5px; font-size: 9px; font-weight: 700; letter-spacing: .06em; line-height: 14px; background: #191b1e; color: #e2e4e7; pointer-events: none; }
@@ -84,7 +83,7 @@
 .dj-deck--right { --deck-accent: var(--dj-orange); }
 .dj-deck--active { background: var(--dj-panel-2); }
 .dj-deck--active .dj-deck-number { color: #fff; background: var(--deck-accent); }
-.dj-deck--drop::after { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; box-shadow: inset 0 0 0 2px var(--deck-accent); background: color-mix(in srgb, var(--deck-accent) 9%, transparent); }
+.dj-workspace [data-track-drop-active]::after { content: attr(data-track-drop-label); position: absolute; inset: 0; z-index: 10; pointer-events: none; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 4px #000, 0 0 8px #000; box-shadow: inset 0 0 0 2px var(--deck-accent); background: color-mix(in srgb, var(--deck-accent) 18%, transparent); }
 
 .dj-track-info { display: flex; gap: 7px; align-items: center; height: var(--d-meta); flex-shrink: 0; padding: 0 7px; overflow: hidden; }
 .dj-deck-number { flex-shrink: 0; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 2px; background: #121315; color: #9c9fa6; font-size: 10px; font-weight: 700; }

@@ -50,6 +50,8 @@ jobs:
         run: npm ci && npm test
       - name: Manual updater state and restart tests
         run: node --experimental-strip-types --test src/services/update-controller.test.mjs
+      - name: Deck drop target and native/HTML deduplication tests
+        run: node --experimental-strip-types --test src/services/deck-drop.test.mjs
       - name: Edited tempo boundaries and cue persistence
         run: node --experimental-strip-types --test native/dj-engine-host/tests-node/beat-grid-math.test.ts native/dj-engine-host/tests-node/performance-cue-metadata.test.ts
 
