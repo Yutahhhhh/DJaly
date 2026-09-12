@@ -324,7 +324,7 @@ def _process_batch(batch_id: str) -> None:
                         session.commit()
                         result = asyncio.run(analyze("light"))
                     if not result or not has_completed_analysis_result(result, existing_embedding):
-                        raise ValueError("再生に必要なBPM・長さ・メタデータを取得できませんでした")
+                        raise ValueError("解析に必要な情報（BPM・長さ・特徴量・ビートなど）が不足しています")
                     progress({"stage": "saving", "label": "音源の整合性を確認し、解析結果を保存しています"})
                     after = path.stat()
                     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or _sha(path) != identity:

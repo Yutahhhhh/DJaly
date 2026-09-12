@@ -182,7 +182,7 @@ function LegacyProgressIndicator() {
           <div className="space-y-6 py-4">
             {showIngestion && <div className="space-y-2 text-sm">
               <p className="text-xs text-muted-foreground">
-                解析方法：{queued ? "開始待ち" : effectiveAnalysisProfile === "light" ? "軽量（プレイ優先）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
+                解析方法：{queued ? "開始待ち" : effectiveAnalysisProfile === "light" ? "軽量（低負荷）" : analysisProfile === "auto" ? "自動・詳細解析中" : "詳細"}
               </p>
               <p>経過 {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒 · 成功 {ingestStats.processed} · スキップ {ingestStats.skipped} · 失敗 {ingestStats.errors}</p>
               {activeFiles.map(file => <div key={file.path} className="space-y-1 rounded border p-2" role="status">

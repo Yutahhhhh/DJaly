@@ -11,7 +11,8 @@ import numpy as np
 
 from .analyzer import AudioAnalyzer
 from . import constants
-from . import light_dsp
+from . import light_dsp, light_grid
+from .beat_grid import playback_grid, VERSION as GRID_VERSION
 from .progress import report
 from utils.executables import find_ffmpeg
 
@@ -19,14 +20,30 @@ from utils.executables import find_ffmpeg
 LIGHT_ANALYSIS_SECONDS = light_dsp.WINDOW_SECONDS
 
 
+def musicnn_mel_filters():
+    """Slaney's piecewise mel scale, identical to the full-path model input.
+
+    Kept in NumPy so a 3-second inference does not import librosa/Numba or
+    trigger JIT compilation. Float32 weights match librosa.filters.mel.
+    """
+    def to_mel(hz):
+        return np.where(hz >= 1000, 15 + np.log(np.maximum(hz, 1) / 1000) / (np.log(6.4) / 27), hz / (200 / 3))
+    mels = np.linspace(0, to_mel(np.array(8000.)), 98)
+    hz = np.where(mels >= 15, 1000 * np.exp((mels - 15) * (np.log(6.4) / 27)), (200 / 3) * mels)
+    ramps = hz[:, None] - np.fft.rfftfreq(512, 1 / 16000)[None, :]
+    widths = np.diff(hz)
+    weights = np.maximum(0, np.minimum(-ramps[:-2] / widths[:-1, None], ramps[2:] / widths[1:, None])).astype(np.float32)
+    weights *= (2 / (hz[2:] - hz[:-2]))[:, None]
+    return weights
+
+
 def musicnn_bands(audio: np.ndarray) -> np.ndarray:
-    import librosa
     # Essentia TensorflowInputMusiCNN: centered 512-sample symmetric Hann,
     # 256 hop, Slaney area-normalized 96 mel power bands, log10(1+10000*x).
     padded = np.pad(np.asarray(audio, dtype=np.float32), (256, 256 + (-len(audio) % 256)))
     frames = np.lib.stride_tricks.sliding_window_view(padded, 512)[::256]
     spectrum = np.abs(np.fft.rfft(frames * np.hanning(512), axis=1)) ** 2
-    mel = librosa.filters.mel(sr=16000, n_fft=512, n_mels=96, norm="slaney")
+    mel = musicnn_mel_filters()
     return np.log10(1 + 10000 * (spectrum @ mel.T)).astype(np.float32)
 
 
@@ -68,8 +85,8 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             raise ValueError("Audio is empty or contains non-finite samples")
         return audio
 
-    def _load_audio_segment(self, filepath, start_seconds=0.0, duration_seconds=LIGHT_ANALYSIS_SECONDS):
-        """Decode only a representative window for latency-bounded analysis.
+    def _load_audio_segment(self, filepath, start_seconds=0.0, duration_seconds=LIGHT_ANALYSIS_SECONDS, sample_rate=light_dsp.SAMPLE_RATE):
+        """Decode bounded mono PCM for whole-track DSP or small model windows.
 
         Placing ``-ss`` before the input lets FFmpeg seek without decoding the
         preceding audio.  This is deliberately separate from ``_load_audio``:
@@ -83,23 +100,27 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             command.extend(["-ss", f"{start_seconds:.3f}"])
         command.extend([
             "-i", str(filepath), "-t", str(duration_seconds), "-vn", "-ac", "1",
-            "-ar", str(light_dsp.SAMPLE_RATE), "-f", "f32le", "pipe:1",
+            "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
         ])
-        decoded = subprocess.run(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
-            check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if decoded.returncode:
-            raise RuntimeError(
-                "音声をデコードできません: "
-                + decoded.stderr.decode("utf-8", errors="replace")[-2000:]
+        # Whole-track low-resolution PCM and small model excerpts share a
+        # bounded decoder without holding both stdout and an array in RAM.
+        with tempfile.TemporaryFile() as pcm:
+            decoded = subprocess.run(
+                command, stdout=pcm, stderr=subprocess.PIPE, timeout=30,
+                check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-        audio = np.frombuffer(decoded.stdout, dtype="<f4").copy()
-        maximum = int(duration_seconds * light_dsp.SAMPLE_RATE)
-        if audio.size > maximum:
-            audio = audio[:maximum]
+            if decoded.returncode:
+                raise RuntimeError("音声をデコードできません: " + decoded.stderr.decode("utf-8", errors="replace")[-2000:])
+            pcm.seek(0)
+            audio = np.fromfile(pcm, dtype="<f4", count=int(duration_seconds * sample_rate))
         if not audio.size or not np.isfinite(audio).all():
             raise ValueError("Audio is empty or contains non-finite samples")
+        return audio
+
+    def _load_grid_audio(self, filepath):
+        audio = self._load_audio_segment(filepath, 0, light_grid.MAX_SECONDS + 1)
+        if len(audio) > light_grid.MAX_SECONDS * light_dsp.SAMPLE_RATE:
+            raise ValueError("Audio analysis supports tracks up to 30 minutes")
         return audio
 
     def _extract_light_features(self, audio, sample_rate=constants.SAMPLE_RATE):
@@ -153,18 +174,24 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         }
 
     def analyze_light(self, filepath, external_lyrics=None):
-        """Windows speed-first analysis without full decode or MusiCNN."""
+        """Feature-complete Windows analysis with bounded DSP and model work."""
         report("metadata", "曲名・長さなどの音源情報を読み取っています")
         tag = self._extract_metadata(filepath)
-        duration = float(getattr(tag, "duration", 0) or 0)
-        start = max(0.0, (duration - LIGHT_ANALYSIS_SECONDS) / 2) if duration else 0.0
-        report("decode", f"代表区間を読み込んでいます（最大{LIGHT_ANALYSIS_SECONDS}秒）")
-        audio = self._load_audio_segment(filepath, start, LIGHT_ANALYSIS_SECONDS)
-        report("rhythm_key", "BPM・キーを軽量推定しています")
-        bpm, confidence, key, scale, key_strength = light_dsp.rhythm_and_key(audio)
-        if not np.isfinite(bpm) or bpm <= 0:
-            raise ValueError("軽量解析でBPMを取得できませんでした")
+        report("decode", "全曲の音源を低解像度で読み込んでいます（11.025kHz）")
+        whole_audio = self._load_grid_audio(filepath)
+        duration = len(whole_audio) / light_dsp.SAMPLE_RATE
+        start_sample = max(0, (len(whole_audio) - light_dsp.SAMPLE_RATE * LIGHT_ANALYSIS_SECONDS) // 2)
+        start = start_sample / light_dsp.SAMPLE_RATE
+        audio = whole_audio[start_sample:start_sample + light_dsp.SAMPLE_RATE * LIGHT_ANALYSIS_SECONDS]
+        report("rhythm_key", "代表区間のBPM・キーを解析しています（最大30秒）")
+        bpm_hint, _, key, scale, key_strength = light_dsp.rhythm_and_key(audio)
+        report("beat_grid", "全曲のビート位置を解析しています")
+        bpm, ticks, confidence = light_grid.analyze(whole_audio, bpm_hint=bpm_hint)
+        grid = playback_grid(ticks, bpm, confidence)
+        if grid is None:
+            raise ValueError("軽量解析でビートグリッドを取得できませんでした")
 
+        report("waveform", "全曲の概要波形を作成しています")
         extra = {
             "analysis_level": "light",
             "analysis_profile": "light",
@@ -172,15 +199,17 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             "analysis_window_seconds": round(len(audio) / light_dsp.SAMPLE_RATE, 3),
             "analysis_sample_rate": light_dsp.SAMPLE_RATE,
             "analysis_components": {
-                "rhythm": "numpy-autocorrelation-light-v2",
+                "rhythm": "numpy-whole-track-grid-v1",
                 "key": "numpy-chroma-light-v2",
                 "timbre": "bounded-summary-v2",
+                "embedding": constants.EMBEDDING_PIPELINE_VERSION,
             },
             "bpm_confidence": round(float(confidence), 2),
             "key_strength": round(float(key_strength), 2),
-            # Beat timestamps from a middle excerpt are not a valid whole-track
-            # playback grid.  Keep the estimate explicit instead of faking one.
-            "playback_grid_estimated": True,
+            "beat_positions": ticks.tolist(),
+            "playback_grid_version": GRID_VERSION,
+            "playback_grid": grid,
+            "waveform_peaks": light_grid.waveform_peaks(whole_audio),
         }
         metadata = tag
         report("timbre", "音量・明るさなどの基本情報を計算しています")
@@ -210,6 +239,12 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         year_prefix = str(raw_year).strip()[:4] if raw_year else ""
         if year_prefix.isdigit():
             result["year"] = int(year_prefix)
+        # Release the full low-resolution PCM before loading the model. Keep
+        # the same MusiCNN space so recommendations work with detailed tracks.
+        del audio, whole_audio
+        embedding = self._extract_light_embedding(filepath, duration)
+        extra.update(embedding.pop("features_extra"))
+        result.update(embedding)
         return result
 
     def _rhythm(self, audio):
@@ -244,7 +279,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
         start = int(np.argmax(np.convolve(rms, np.ones(duration_sec), mode="valid"))) * hop
         return audio[start:start+count]
 
-    def _extract_embedding(self, audio):
+    def _get_embedding_session(self):
         if self._embedding_session is None:
             import onnxruntime as ort
             root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
@@ -255,15 +290,42 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
             self._embedding_session = ort.InferenceSession(
                 str(model), sess_options=options, providers=["CPUExecutionProvider"])
+        return self._embedding_session
+
+    def _extract_light_embedding(self, filepath, duration):
+        report("embedding", "類似曲検索用のモデルを準備しています")
+        session = self._get_embedding_session()
+        # Three ~3-second windows, evaluated one at a time to bound activation
+        # memory. This is genuine MusiCNN inference, not a placeholder vector.
+        starts = sorted(set(round(max(0, min(duration - 3, duration * fraction - 1.5)), 3)
+                            for fraction in (.2, .5, .8)))
+        vectors = []
+        for index, start in enumerate(starts):
+            report("embedding", f"類似曲検索用の特徴を解析しています（{index + 1} / {len(starts)}区間）")
+            audio = self._load_audio_segment(filepath, start, 3, sample_rate=16000)
+            bands = musicnn_bands(audio)
+            if len(bands) < 187:
+                bands = np.pad(bands, ((0, 187 - len(bands)), (0, 0)), mode="wrap")
+            vectors.append(session.run(["embeddings"], {"melspectrogram": bands[None, :187]})[0][0])
+        result = self._embedding_result(np.mean(vectors, axis=0))
+        result["features_extra"].update(embedding_windows_seconds=starts, embedding_patch_count=len(starts),
+                                        embedding_window_seconds=3)
+        return result
+
+    def _extract_embedding(self, audio):
+        session = self._get_embedding_session()
         section = self._extract_loudest_section(audio, 60)
         section = self.librosa.resample(section, orig_sr=constants.SAMPLE_RATE, target_sr=16000)
         bands = musicnn_bands(section)
         if len(bands) < 187:
             bands = np.pad(bands, ((0,187-len(bands)),(0,0)), mode="wrap")
         patches = np.stack([bands[i:i+187] for i in range(0,len(bands)-186,93)])
-        predictions = self._embedding_session.run(
+        predictions = session.run(
             ["embeddings"], {"melspectrogram": patches})[0]
-        vector = np.mean(predictions, axis=0)
+        return self._embedding_result(np.mean(predictions, axis=0))
+
+    @staticmethod
+    def _embedding_result(vector):
         if vector.shape != (200,) or not np.isfinite(vector).all() or not np.linalg.norm(vector):
             raise ValueError("MusiCNN produced an invalid embedding")
         return {"embedding": vector.tolist(), "embedding_model": constants.EMBEDDING_MODEL,

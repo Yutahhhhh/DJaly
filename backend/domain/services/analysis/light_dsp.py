@@ -1,7 +1,7 @@
 """Bounded NumPy-only estimates: no JIT, ML model, resampling or beat tracker.
 
-These are excerpt estimates, not a beat grid. Detailed analysis remains the
-route to a whole-track grid and higher-quality tonal/timbre features.
+These excerpt estimates seed light_grid.py, which separately tracks the whole
+song. Model inference is also performed separately on bounded excerpts.
 """
 import numpy as np
 

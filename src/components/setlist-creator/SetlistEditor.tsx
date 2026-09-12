@@ -66,7 +66,7 @@ export function SetlistEditor({
       ref={setNodeRef}
       className="setlist-editor flex-1 flex flex-col bg-muted/10 min-w-0 min-h-0"
     >
-      <div className="border-b bg-background px-3 py-3 space-y-2">
+      <div className="border-b bg-background px-3 py-3 space-y-2 shrink-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Current Setlist <span className="text-xs font-normal text-muted-foreground">· {tracks.length}曲</span></h3>
           <button type="button" className="rounded border px-2 py-1 text-xs" aria-expanded={showTiming} onClick={() => setShowTiming(value => !value)}>{showTiming ? "使用時間を閉じる" : "使用時間を編集"}</button>
@@ -82,7 +82,7 @@ export function SetlistEditor({
         {unknownEntries > 0 && <p className="text-xs text-muted-foreground">未算出 {unknownEntries}曲</p>}
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-2 pb-20">
           {tracks.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg">

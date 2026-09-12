@@ -77,8 +77,8 @@ export function SetlistSidebar({
   };
 
   return (
-    <div className="setlist-sidebar border-r flex flex-col bg-background">
-      <div className="p-4 border-b flex items-center justify-between">
+    <div className="setlist-sidebar border-r flex flex-col bg-background min-h-0">
+      <div className="p-3 border-b shrink-0 flex flex-wrap gap-1 items-center justify-between">
         <h3 className="font-semibold flex items-center gap-2">
           <ListMusic className="h-5 w-5" /> Setlists
         </h3>
@@ -90,7 +90,7 @@ export function SetlistSidebar({
           <Plus className="h-4 w-4" />
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-2 space-y-1">
           {setlists.map((setlist) => (
             <div

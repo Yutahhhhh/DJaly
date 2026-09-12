@@ -304,12 +304,12 @@ export function SettingsView() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">自動（推奨）</SelectItem>
-                  <SelectItem value="light" disabled={!supportsLightAnalysis}>軽量（Windowsのみ・プレイ優先）</SelectItem>
+                  <SelectItem value="light" disabled={!supportsLightAnalysis}>軽量（Windowsのみ・低負荷）</SelectItem>
                   <SelectItem value="full">詳細</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                低スペックのWindowsでは「軽量」を選んでください。最大30秒の音源からBPM・キーを概算し、AIモデルは使用しません。正確なビート位置や類似曲検索用の解析は「詳細」で追加できます。「自動」は詳細解析から始め、時間がかかる場合だけ軽量へ切り替わります。Macは詳細解析を使用します。
+                低スペックのWindowsでは「軽量」を選んでください。ビート操作・SYNC・波形・類似曲検索に必要な情報を保ち、音色や曲の特徴を調べる区間を短くして負荷を抑えます。「自動」は詳細解析から始め、時間がかかる場合だけ軽量へ切り替わります。Macは詳細解析を使用します。
               </p>
             </div>
 

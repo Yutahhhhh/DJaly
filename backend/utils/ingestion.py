@@ -37,6 +37,7 @@ def _has_playable_core(track: Any) -> bool:
         track
         and isinstance(getattr(track, "bpm", None), (int, float))
         and not isinstance(track.bpm, bool)
+        and math.isfinite(track.bpm)
         and track.bpm > 0
         and isinstance(getattr(track, "duration", None), (int, float))
         and not isinstance(track.duration, bool)
@@ -57,10 +58,9 @@ def has_full_analysis(track: Any, embedding: Any) -> bool:
 
 def has_completed_analysis(track: Any, embedding: Any) -> bool:
     """The single definition used by filtering, Explorer badges and imports."""
-    return _has_playable_core(track) and (
-        getattr(track, "analysis_level", None) == "light"
-        or has_valid_embedding(embedding)
-    )
+    # The old excerpt-only light profile had no embedding or playback grid.
+    # Re-importing those tracks must fill the missing capabilities, not skip.
+    return _has_playable_core(track) and has_valid_embedding(embedding)
 
 
 def has_completed_analysis_for_profile(track: Any, embedding: Any, profile: str) -> bool:
@@ -79,9 +79,27 @@ def has_completed_analysis_result(result: Dict[str, Any], existing_embedding: An
     return bool(
         isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and math.isfinite(bpm) and bpm > 0
         and isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0
-        and (result.get("analysis_level") == "light" or has_valid_embedding(embedding))
+        and has_valid_embedding(embedding)
+        and (result.get("analysis_level") != "light" or _has_light_playback_data(result))
         and has_valid_metadata(metadata)
     )
+
+
+def _has_light_playback_data(result: Dict[str, Any]) -> bool:
+    from domain.services.analysis.beat_grid import playback_grid
+    extra = result.get("features_extra") or {}
+    if not isinstance(extra, dict):
+        return False
+    try:
+        ticks = extra.get("beat_positions", [])
+        peaks = extra.get("waveform_peaks", [])
+        return bool(
+            playback_grid(ticks, result["bpm"])
+            and ticks[-1] < result["duration"]
+            and peaks and all(isinstance(p, (int, float)) and math.isfinite(p) and 0 <= p <= 1 for p in peaks)
+        )
+    except (ValueError, TypeError, KeyError, IndexError):
+        return False
 
 def normalize_path(path: str) -> str:
     """

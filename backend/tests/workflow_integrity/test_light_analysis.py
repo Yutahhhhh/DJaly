@@ -20,59 +20,103 @@ from utils.ingestion import (
 )
 
 
-def test_portable_light_analysis_uses_a_bounded_middle_window(monkeypatch):
-    analyzer = object.__new__(PortableAudioAnalyzer)
-    requested = {}
+def light_result(**overrides):
+    return {
+        "title": "Title", "artist": "DJ", "duration": 60, "bpm": 126,
+        "analysis_level": "light", "embedding": [.2] * 200,
+        "embedding_model": "msd-musicnn-1:musicnn-16khz-v1",
+        "features_extra": {"beat_positions": [.25, .726, 1.202], "waveform_peaks": [.1, .8, .3]},
+        **overrides,
+    }
+
+
+def test_portable_light_analysis_keeps_whole_track_grid_and_limits_model_work(monkeypatch):
+    analyzer = PortableAudioAnalyzer()
     analyzer._extract_metadata = lambda _: SimpleNamespace(
         duration=300, title="Title", artist="DJ", album="Album",
         genre="House", year="2026", extra={},
     )
-
-    def load(_path, start, duration):
-        requested.update(start=start, duration=duration)
-        return np.full(light_dsp.SAMPLE_RATE, .1, dtype=np.float32)
-
+    analyzer._load_grid_audio = lambda _: np.full(300 * light_dsp.SAMPLE_RATE, .1, dtype=np.float32)
+    lengths = []
+    def rhythm(audio):
+        lengths.append(len(audio))
+        return 126., .8, "C", "minor", .7
+    monkeypatch.setattr(light_dsp, "rhythm_and_key", rhythm)
+    from domain.services.analysis import light_grid
+    monkeypatch.setattr(light_grid, "analyze", lambda audio, **_: (126., np.arange(.25, 300, 60 / 126), .8))
+    # Exercise actual window selection and preprocessing, with only ONNX mocked.
+    requests = []
+    def load(path, start, duration, sample_rate):
+        requests.append((start, duration, sample_rate))
+        return np.full(duration * sample_rate, .1, dtype=np.float32)
     analyzer._load_audio_segment = load
-    monkeypatch.setattr(light_dsp, "rhythm_and_key", lambda _audio: (126.0, .8, "C", "minor", .7))
-    analyzer._extract_light_features = lambda _audio, **_: {
-        "energy": .25, "brightness": .4, "noisiness": .1,
-        "loudness": -12.0, "loudness_range": 4.0,
-        "spectral_flux": .2, "spectral_rolloff": 4000.0, "contrast": .3,
-    }
-    analyzer._extract_embedding = lambda _audio: (_ for _ in ()).throw(
-        AssertionError("light analysis must not load MusiCNN")
-    )
-
+    def predict(outputs, inputs):
+        assert inputs["melspectrogram"].shape == (1, 187, 96)
+        return [np.full((1, 200), .2, dtype=np.float32)]
+    analyzer._embedding_session = SimpleNamespace(run=predict)
     result = analyzer.analyze_light("/music/track.mp3")
-
-    assert requested == {"start": 135.0, "duration": 30}
-    assert result["analysis_level"] == "light"
-    assert result["bpm"] == 126.0
-    assert result["duration"] == 300
-    assert result["features_extra"]["analysis_sample_rate"] == 11025
-    assert "embedding" not in result
-    assert result["features_extra"]["playback_grid_estimated"] is True
-
-
-def test_light_result_is_complete_without_faking_an_embedding():
-    result = {
-        "title": "Title", "artist": "DJ", "duration": 60,
-        "bpm": 126, "analysis_level": "light",
-    }
+    assert lengths == [30 * 11025]
+    assert requests == [(58.5, 3, 16000), (148.5, 3, 16000), (238.5, 3, 16000)]
     assert has_completed_analysis_result(result)
-    track = SimpleNamespace(
-        title="Title", artist="DJ", duration=60, bpm=126,
-        analysis_level="light",
-    )
-    assert has_completed_analysis(track, None)
-    assert not has_completed_analysis_for_profile(track, None, "full")
-    assert not has_completed_analysis_for_profile(track, [.1] * 200, "full")
+    assert result["features_extra"]["beat_positions"][-1] > 299
+    assert len(result["features_extra"]["waveform_peaks"]) == 500
+    assert result["features_extra"]["playback_grid"]["first_beat_ms"] == pytest.approx(250)
+    assert result["features_extra"]["embedding_patch_count"] == 3
 
-    failed = SimpleNamespace(
-        title="Title", artist="DJ", duration=60, bpm=126,
-        analysis_level=None,
-    )
-    assert not has_completed_analysis(failed, None)
+
+def test_light_completion_requires_real_embedding_and_playback_data():
+    result = light_result()
+    assert has_completed_analysis_result(result)
+    for incomplete in [dict(result, embedding=None), dict(result, embedding=[0] * 200),
+                       dict(result, features_extra={}), dict(result, bpm=float("nan"))]:
+        assert not has_completed_analysis_result(incomplete)
+    track = SimpleNamespace(title="Title", artist="DJ", duration=60, bpm=126, analysis_level="light")
+    assert not has_completed_analysis(track, None)  # old excerpt-only light must be upgraded
+    assert has_completed_analysis(track, result["embedding"])
+    assert not has_completed_analysis_for_profile(track, result["embedding"], "full")
+    assert not has_completed_analysis_for_profile(track, None, "auto")
+
+
+def test_light_data_reaches_playback_recommendations_and_preserves_manual_cues(tmp_path, monkeypatch):
+    from infra.repositories.ingestion_repository import IngestionRepository
+    from infra.repositories.track_repository import TrackRepository
+    from app.services.performance_metadata_app_service import PerformanceMetadataAppService
+    from app.services.recommendation_app_service import RecommendationAppService
+    from app.services.grid_candidate_service import GridCandidateService
+    from api.schemas.performance_metadata import PerformanceMetadataWrite
+
+    engine = db.create_library_engine(f"duckdb:///{tmp_path / 'features.duckdb'}")
+    init_raw_db(engine)
+    monkeypatch.setattr(GridCandidateService, "rekordbox", lambda *args, **kwargs: None)
+    try:
+        with Session(engine) as session:
+            repo = IngestionRepository()
+            original = light_result(filepath=str(tmp_path / "light.mp3"))
+            light_id = repo.save_track_result(session, original)["track_id"]
+            full_id = repo.save_track_result(session, light_result(
+                filepath=str(tmp_path / "full.mp3"), analysis_level="full", genre="House",
+            ))["track_id"]
+            full = session.get(Track, full_id)
+            full.is_genre_verified = True
+            session.add(full)
+            session.commit()
+            metadata = PerformanceMetadataAppService(session)
+            grid = metadata.get(light_id)["beat_grid"]
+            assert grid["first_beat_ms"] == 250
+            assert grid["beat_times_ms"] == pytest.approx([250, 726, 1202], abs=.001)
+            assert TrackRepository(session).get_similar_tracks(light_id)[0]["id"] == full_id
+            assert RecommendationAppService(session).suggest_genre(light_id) == {"suggested_genre": "House", "reason": None}
+            saved = metadata.replace(light_id, PerformanceMetadataWrite(
+                revision=0, cue_points=[{"slot": 0, "position_ms": 1000}],
+                loops=[{"id": "loop", "start_ms": 1000, "end_ms": 3000}],
+                beat_grid={"bpm": 125, "first_beat_ms": 255, "source": "manual"},
+            ))
+            repo.save_track_result(session, original)
+            after = metadata.get(light_id)
+            for key in ("cue_points", "loops", "beat_grid", "revision"):
+                assert after[key] == saved[key]
+    finally:
+        engine.dispose()
 
 
 def test_light_save_does_not_downgrade_an_existing_full_analysis(tmp_path):
@@ -103,7 +147,8 @@ def test_light_save_does_not_downgrade_an_existing_full_analysis(tmp_path):
                 "filepath": track.filepath, "title": "Title", "artist": "DJ",
                 "genre": "House", "duration": 180, "bpm": 124,
                 "analysis_level": "light", "energy": .2, "danceability": .1,
-                "features_extra": {"analysis_level": "light"},
+                "features_extra": {"analysis_level": "light", "beat_positions": [1., 2.], "waveform_peaks": [.2]},
+                "embedding": [.9] * 200, "embedding_model": "msd-musicnn-1:musicnn-16khz-v1",
             })
             saved = session.get(Track, track.id)
             analysis = session.get(TrackAnalysis, track.id)
@@ -111,6 +156,9 @@ def test_light_save_does_not_downgrade_an_existing_full_analysis(tmp_path):
             assert saved.bpm == 126
             assert saved.energy == pytest.approx(.8)
             assert json.loads(analysis.features_extra_json)["analysis_level"] == "full"
+            embedding = session.get(TrackEmbedding, track.id)
+            assert json.loads(embedding.embedding_json) == [.1] * 200
+            assert embedding.model_name == "musicnn"
     finally:
         engine.dispose()
 
@@ -208,10 +256,14 @@ def test_windows_auto_play_import_reuses_an_existing_light_track(tmp_path, monke
     monkeypatch.setattr(play_module, "AnalysisExecutor", ImmediateExecutor)
     try:
         with Session(engine) as session:
-            session.add(Track(
+            track = Track(
                 filepath=str(path), title="Title", artist="DJ", genre="House",
                 duration=60, bpm=126, analysis_level="light",
-            ))
+            )
+            session.add(track)
+            session.flush()
+            session.add(TrackEmbedding(track_id=track.id, embedding_json=json.dumps([.2] * 200), model_name="musicnn"))
+            session.add(TrackAnalysis(track_id=track.id, features_extra_json=json.dumps(light_result()["features_extra"])))
             session.commit()
             batch = play_module.PlayImportService(session).create(
                 "reuse-auto-light", "collection", None, [str(path)],
@@ -226,7 +278,7 @@ def test_windows_auto_play_import_reuses_an_existing_light_track(tmp_path, monke
             assert saved["state"] == "completed"
             assert saved["items"][0]["state"] == "existing"
             assert saved["items"][0]["analysis_level"] == "light"
-            assert session.exec(text("SELECT count(*) FROM track_embeddings")).one()[0] == 0
+            assert session.exec(text("SELECT count(*) FROM track_embeddings")).one()[0] == 1
     finally:
         engine.dispose()
 
@@ -262,11 +314,11 @@ def test_windows_play_import_uses_light_and_bounds_worker(tmp_path, monkeypatch,
             assert kwargs["executor"].task_timeout == 60
             assert kwargs["timeout"] == 90
             return {
+                **light_result(),
                 "filepath": filepath, "title": Path(filepath).stem,
                 "artist": "DJ", "genre": "House", "duration": 60,
                 "bpm": 126, "key": "C minor", "scale": "minor",
                 "analysis_level": "light",
-                "features_extra": {"analysis_level": "light"},
             }
 
     monkeypatch.setattr(play_module.sys, "platform", "win32")
@@ -286,7 +338,7 @@ def test_windows_play_import_uses_light_and_bounds_worker(tmp_path, monkeypatch,
             if requested_profile == "auto":
                 assert saved["effective_analysis_profile"] == "light"
             assert [item["analysis_level"] for item in saved["items"]] == ["light", "light"]
-            assert session.exec(text("SELECT count(*) FROM track_embeddings")).one()[0] == 0
+            assert session.exec(text("SELECT count(*) FROM track_embeddings")).one()[0] == 2
         expected = [("first.mp3", "full")] if requested_profile == "auto" else []
         assert calls == expected + [("first.mp3", "light"), ("second.mp3", "light")]
     finally:

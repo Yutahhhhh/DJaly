@@ -62,11 +62,11 @@ class BeatGrid(BaseModel):
     beat_times_ms: list[FiniteNumber] | None = Field(default=None, min_length=2, max_length=100000)
     beat_numbers: list[Annotated[StrictInt, Field(ge=1, le=16)]] | None = None
     source: Literal["rekordbox", "analysis", "manual"] = "manual"
-    # Raw RhythmExtractor2013(method="multifeature") confidence; not a probability
-    # or percentage. Unavailable for imported/manual grids.
+    # Raw rhythm algorithm confidence; algorithms use different scales.
+    # Not a calibrated probability. Unavailable for imported/manual grids.
     confidence: StrictInt | StrictFloat | None = Field(
         default=None, ge=0,
-        description="Raw Essentia multifeature rhythm confidence; not a probability or percentage",
+        description="Raw rhythm algorithm confidence; not a calibrated probability",
     )
 
     @model_validator(mode="after")

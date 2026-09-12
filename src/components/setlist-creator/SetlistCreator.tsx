@@ -334,7 +334,7 @@ export function SetlistCreator() {
           onDelete={(id) => setlistsService.delete(id).then(loadSetlists)}
         />
 
-        <ResizeHandle variable="--setlist-sidebar" storageKey="plumdeck.width.setlists.sidebar" label="セットリスト一覧の幅" min={140} max={400} />
+        <ResizeHandle variable="--setlist-sidebar" storageKey="plumdeck.width.setlists.sidebar" label="セットリスト一覧の幅" min={180} max={400} />
         {activeSetlist ? (
           <div className="setlist-columns flex-1 flex min-w-0 relative">
             {/* 保存状態インジケーター */}
