@@ -1,6 +1,9 @@
 import asyncio
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -28,6 +31,33 @@ def light_result(**overrides):
         "features_extra": {"beat_positions": [.25, .726, 1.202], "waveform_peaks": [.1, .8, .3]},
         **overrides,
     }
+
+
+def test_windows_analyzer_startup_does_not_import_essentia():
+    script = """
+import numpy
+import sys
+import tempfile
+sys.platform = 'win32'
+from domain.services.analysis.analyzer import AudioAnalyzer
+analyzer = AudioAnalyzer()
+assert type(analyzer).__name__ == 'PortableAudioAnalyzer'
+assert 'essentia' not in sys.modules
+"""
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_light_worker_deadline_allows_slow_windows_startup():
+    assert light_dsp.WORKER_TIMEOUT >= 180
 
 
 def test_portable_light_analysis_keeps_whole_track_grid_and_limits_model_work(monkeypatch):
@@ -311,8 +341,8 @@ def test_windows_play_import_uses_light_and_bounds_worker(tmp_path, monkeypatch,
             calls.append((Path(filepath).name, profile))
             if profile == "full":
                 raise RuntimeError("wrapped") from TimeoutError("Analysis timed out after 180 seconds")
-            assert kwargs["executor"].task_timeout == 60
-            assert kwargs["timeout"] == 90
+            assert kwargs["executor"].task_timeout == light_dsp.WORKER_TIMEOUT
+            assert kwargs["timeout"] == light_dsp.WORKER_TIMEOUT + 30
             return {
                 **light_result(),
                 "filepath": filepath, "title": Path(filepath).stem,
@@ -369,8 +399,8 @@ def test_windows_explorer_uses_light_and_bounds_worker(
             calls.append((Path(filepath).name, profile))
             if profile == "full":
                 raise RuntimeError("wrapped") from TimeoutError("Analysis timed out")
-            assert _args[0].task_timeout == 60
-            assert _args[1] == 90
+            assert _args[0].task_timeout == light_dsp.WORKER_TIMEOUT
+            assert _args[1] == light_dsp.WORKER_TIMEOUT + 30
             return {"analysis_level": "light"}
 
     monkeypatch.setattr(app_module.sys, "platform", "win32")
