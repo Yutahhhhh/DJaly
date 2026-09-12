@@ -132,6 +132,12 @@ class GridAnalysisRequest(BaseModel):
     force: bool = False
 
 
+class GridBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    only_outdated: bool = True
+    track_ids: list[StrictInt] | None = Field(default=None, max_length=100000)
+
+
 class RekordboxCueImportRequest(BaseModel):
     """Expected plumdeck revision for a source-to-owned-metadata import."""
 

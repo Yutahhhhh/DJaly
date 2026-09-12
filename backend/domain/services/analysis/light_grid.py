@@ -8,6 +8,7 @@ import numpy as np
 
 from .light_dsp import SAMPLE_RATE, HOP_SIZE, WINDOW_SECONDS, _tempo, rhythm_and_key
 from .beat_grid import playback_grid
+from .beat_alignment import align_beats
 from .progress import report
 
 MAX_SECONDS = 1800
@@ -84,7 +85,7 @@ def analyze(audio, bpm_hint=None):
     beats = [i for i in beats if audible[0] <= i <= audible[-1]]
     if len(beats) < 2:
         raise ValueError("音源から十分なビートを検出できませんでした")
-    ticks = np.array(beats) / rate
+    ticks = align_beats(audio, np.array(beats) / rate, SAMPLE_RATE)
     intervals = np.diff(ticks)
     bpm = float(60 / np.median(intervals))
     grid = playback_grid(ticks, bpm)

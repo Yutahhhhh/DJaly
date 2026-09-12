@@ -13,9 +13,45 @@ from app.services.performance_metadata_app_service import (
     PerformanceMetadataValidationError,
 )
 from infra.database.connection import get_session
+from api.schemas.performance_metadata import GridBatchRequest
+from app.services.analysis_job_service import analysis_job_service
 
 
 router = APIRouter()
+
+
+@router.post("/api/grid-jobs/plan")
+def plan_grid_job(request: GridBatchRequest):
+    return analysis_job_service.plan(track_ids=request.track_ids, features=["rhythm"], only_outdated=request.only_outdated)
+
+
+@router.post("/api/grid-jobs")
+def start_grid_job(request: GridBatchRequest):
+    try:
+        return analysis_job_service.start(track_ids=request.track_ids, features=["rhythm"], only_outdated=request.only_outdated, workers=1)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api/grid-jobs")
+def grid_job_status():
+    # Same durable queue as selective reanalysis. Never start a second worker.
+    return analysis_job_service.status()
+
+
+@router.post("/api/grid-jobs/{job_id}/{action}")
+def control_grid_job(job_id: str, action: str):
+    try:
+        job = analysis_job_service.status(job_id)
+        if job["config"]["features"] != ["rhythm"]:
+            raise ValueError("この画面ではグリッドの再解析だけを操作できます")
+        if action == "pause":
+            return analysis_job_service.pause(job_id)
+        if action in {"resume", "retry"}:
+            return analysis_job_service.resume(job_id, workers=1, retry_failed=action == "retry")
+        raise ValueError("Unknown grid job action")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _raise_service_error(exc: Exception) -> None:

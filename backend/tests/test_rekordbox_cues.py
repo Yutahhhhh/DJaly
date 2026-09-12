@@ -1,6 +1,27 @@
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture
+def client(session):
+    # Exercise the real HTTP contract and DB without unrelated app integrations.
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routers.performance_metadata import router
+    from infra.database.connection import get_session
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_session] = lambda: session
+    with TestClient(app) as value:
+        yield value
+
+
+@pytest.fixture(autouse=True)
+def query_only_audio_clock(monkeypatch):
+    # These SQL/API fixtures use imaginary audio paths on every OS. Real header
+    # classification and compensation live in workflow_integrity tests.
+    monkeypatch.setattr("infra.rekordbox_cues.timing_offset_ms", lambda _: 0.)
 from sqlmodel import Session
 
 from api.schemas.performance_metadata import CuePoint, PerformanceMetadataWrite

@@ -37,6 +37,8 @@ def _extract(filepath: str) -> dict:
     if float(np.max(np.abs(audio))) < 1e-6:
         raise ValueError("No audible signal available for beat analysis")
     bpm, ticks, confidence, _, _ = es.RhythmExtractor2013(method="multifeature")(audio)
+    from .beat_alignment import align_beats
+    ticks = align_beats(audio, ticks, 44100)
     if not np.isfinite(ticks).all() or len(ticks) < 2:
         raise ValueError("The rhythm analyzer found no usable beats")
     return {"bpm": float(bpm), "ticks": ticks.tolist(), "confidence": float(confidence)}

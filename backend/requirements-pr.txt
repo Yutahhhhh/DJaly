@@ -1,5 +1,8 @@
 # Lightweight PR tests: no Essentia/TensorFlow, FFmpeg, PyInstaller or native toolchain.
 pytest
+pytest-mock
+fastapi
+httpx
 sqlmodel
 duckdb
 duckdb-engine

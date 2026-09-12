@@ -199,7 +199,7 @@ class PortableAudioAnalyzer(AudioAnalyzer):
             "analysis_window_seconds": round(len(audio) / light_dsp.SAMPLE_RATE, 3),
             "analysis_sample_rate": light_dsp.SAMPLE_RATE,
             "analysis_components": {
-                "rhythm": "numpy-whole-track-grid-v1",
+                "rhythm": "numpy-attacks-v2",
                 "key": "numpy-chroma-light-v2",
                 "timbre": "bounded-summary-v2",
                 "embedding": constants.EMBEDDING_PIPELINE_VERSION,

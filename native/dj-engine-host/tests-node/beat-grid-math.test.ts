@@ -1,8 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { barNumbers, lowerBeat, nearestBeat, scaleGrid, setDownbeat, shiftGrid, subdivideGrid } from "../../../src/components/play/beat-grid-math.ts";
+import { barNumbers, bpmAt, lowerBeat, nearestBeat, scaleGrid, setDownbeat, setTempoFrom, shiftGrid, subdivideGrid } from "../../../src/components/play/beat-grid-math.ts";
 import { buildBeatgridParams } from "../../../src/services/dj-engine/protocol.ts";
 const grid = { bpm: 120, first_beat_ms: 100, beats_per_bar: 4, beat_times_ms: [100,600,1100,1700,2300,2900], beat_numbers: [3,4,1,2,3,4], source: "rekordbox" as const };
+test("a 126 to 93 transition is authored once and preserves every earlier beat", () => {
+  const base = { bpm: 126, first_beat_ms: 137, beats_per_bar: 4, source: "analysis" as const };
+  const anchor = 137 + 64 * 60000 / 126;
+  const edited = setTempoFrom(base, 93, anchor, 90_000);
+  for (let i = 0; i < 64; i++) assert.equal(edited.beat_times_ms![i], 137 + i * 60000 / 126);
+  assert.equal(edited.beat_times_ms![64], anchor);
+  assert(Math.abs(edited.beat_times_ms![65] - anchor - 60000 / 93) < 1e-8);
+  assert.equal(edited.bpm, 126); // stable track BPM, not a live display change
+  assert.equal(edited.source, "manual");
+  assert(Math.abs(bpmAt(edited, anchor) - 93) < 1e-8);
+  const transported = buildBeatgridParams("A", "1", edited.bpm, edited.first_beat_ms, 4, edited.beat_times_ms, edited.beat_numbers);
+  assert.deepEqual(transported.beatTimesMs, edited.beat_times_ms);
+  const restored = JSON.parse(JSON.stringify(edited));
+  assert.deepEqual(restored.beat_times_ms, edited.beat_times_ms);
+  const second = setTempoFrom(restored, 110, 60_000, 90_000);
+  assert.deepEqual(second.beat_times_ms!.filter(t => t < 60_000), edited.beat_times_ms!.filter(t => t < 60_000));
+});
+test("segment edit keeps imported bar phase and supports an off-grid edit point", () => {
+  const edited = setTempoFrom(grid, 90, 1700, 5000);
+  assert.deepEqual(edited.beat_times_ms!.slice(0, 4), [100,600,1100,1700]);
+  assert.deepEqual(edited.beat_numbers!.slice(0, 4), [3,4,1,2]);
+  const between = setTempoFrom(grid, 100, 1600, 5000);
+  assert.deepEqual(between.beat_times_ms!.slice(0, 5), [100,600,1100,1600,2200]);
+  assert.equal(grid.beat_times_ms[4], 2300);
+  for (const bpm of [0,NaN,301]) assert.throws(() => setTempoFrom(grid,bpm,1700,5000));
+  for (const anchor of [-1,5000,NaN]) assert.throws(() => setTempoFrom(grid,93,anchor,5000));
+});
 test("bar labels honor imported phase resets rather than inventing an index-based downbeat",()=>{
   assert.deepEqual(barNumbers(6,[3,4,1,2,1,2],4),[1,1,2,2,3,3]);
   assert.deepEqual(barNumbers(3,[1,1,1],4),[1,2,3]);

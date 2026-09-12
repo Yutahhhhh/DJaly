@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, Tuple, List, Union
 from tinytag import TinyTag
 from . import constants
 from .beat_grid import playback_grid, VERSION as GRID_VERSION
+from .beat_alignment import align_beats
 from .progress import report
 
 # Essentia Import
@@ -153,6 +154,7 @@ class AudioAnalyzer:
             result.update(embedding)
         if "rhythm" in features:
             bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
+            ticks = align_beats(audio, ticks, constants.SAMPLE_RATE)
             result["bpm"] = round(float(bpm), 2)
             extra.update(bpm_confidence=float(confidence), beat_positions=ticks.tolist())
             extra.update(playback_grid=playback_grid(ticks, bpm, float(confidence)), playback_grid_version=GRID_VERSION)
@@ -209,6 +211,7 @@ class AudioAnalyzer:
     def _extract_features(self, audio: np.ndarray) -> Dict[str, Any]:
         report("rhythm", "BPM・ビート位置を解析しています")
         bpm, ticks, confidence, _, _ = self.rhythm_extractor(audio)
+        ticks = align_beats(audio, ticks, constants.SAMPLE_RATE)
         report("key", "キーを解析しています")
         key, scale, key_strength = self.key_extractor(audio)
         report("timbre", "音量・音色の詳細を解析しています")
@@ -268,6 +271,7 @@ class AudioAnalyzer:
             "spectral_flux": safe_s(features['flux']),
             "spectral_rolloff": safe_s(features['rolloff']),
             "features_extra": {
+                "analysis_components": {name: constants.COMPONENT_VERSIONS[name] for name in ("rhythm", "key", "timbre")},
                 "bpm_confidence": round(safe_s(features['bpm_confidence']), 2),
                 "playback_grid": playback_grid(features['beat_positions'], features['bpm'], float(features['bpm_confidence'])),
                 "playback_grid_version": GRID_VERSION,
