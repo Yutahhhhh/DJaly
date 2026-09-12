@@ -7,11 +7,13 @@ from sqlmodel import Session, select
 from tinytag import TinyTag
 from ingest import analyze_track_file
 from domain.constants import SUPPORTED_EXTENSIONS
-from utils.metadata import extract_metadata_smart, check_metadata_changed, update_file_metadata, extract_full_metadata
+from utils.metadata import (
+    extract_metadata_smart, check_metadata_changed, update_file_metadata,
+    extract_full_metadata, has_valid_metadata,
+)
 from utils.ingestion import (
     has_completed_analysis_for_profile,
     has_completed_analysis_result,
-    has_valid_metadata,
 )
 import infra.database.connection as db_connection
 from domain.models.track import Track, TrackEmbedding
@@ -231,7 +233,7 @@ class IngestionDomainService:
                         result[key] = db_val
 
             if not has_completed_analysis_result(result, existing_embedding):
-                requirement = "BPM, duration, metadata, embedding or playback data"
+                requirement = "BPM, duration, embedding or playback data"
                 raise RuntimeError(
                     f"Audio analysis returned incomplete {requirement} for {filename}"
                 )

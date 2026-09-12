@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 from sqlalchemy import text
 
 import infra.database.connection as db
@@ -175,6 +175,39 @@ def test_decoder_or_partial_analysis_is_an_error_instead_of_a_skip(tmp_path, mon
             )
 
     asyncio.run(run())
+
+
+def test_tagless_audio_is_registered_with_filename_fallback(library, tmp_path, monkeypatch):
+    from domain.services import ingestion_domain_service as ingestion_module
+
+    path = tmp_path / "Terrace Conga II.mp3"
+    path.write_bytes(b"audio")
+    monkeypatch.setattr(ingestion_module, "extract_metadata_smart", lambda *_args: {
+        "title": "Terrace Conga II", "artist": "Unknown", "album": "Unknown",
+        "genre": "Unknown", "year": None,
+    })
+    monkeypatch.setattr(ingestion_module, "analyze_track_file", lambda *_args: {
+        "filepath": str(path), "title": "Terrace Conga II", "artist": "Unknown",
+        "duration": 60, "bpm": 120, "analysis_level": "full",
+        "embedding": [0.1] * 200,
+    })
+
+    async def run():
+        return await ingestion_module.IngestionDomainService().process_track_ingestion(
+            str(path), True, asyncio.get_running_loop(), save_to_db=True,
+        )
+
+    result = asyncio.run(run())
+    assert result["title"] == "Terrace Conga II"
+    assert result["artist"] == "Unknown"
+    assert result["bpm"] == 120
+    library.expire_all()
+    saved = library.exec(select(Track).where(Track.filepath == str(path))).one()
+    embedding = library.get(TrackEmbedding, saved.id)
+    assert saved.title == "Terrace Conga II"
+    assert saved.artist == "Unknown"
+    from utils.ingestion import has_completed_analysis
+    assert has_completed_analysis(saved, embedding)
 
 
 def test_forced_retry_combines_fresh_audio_with_existing_metadata_and_embedding(library, tmp_path, monkeypatch):

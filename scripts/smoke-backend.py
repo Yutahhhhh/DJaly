@@ -1,12 +1,15 @@
 """Exercise the actual packaged API and MCP server in an isolated user profile."""
 from pathlib import Path
+from array import array
 import json
+import math
 import os
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+import wave
 from urllib.request import Request, urlopen
 
 
@@ -51,6 +54,70 @@ def close_desktop(pid):
     for hwnd, _visible, _cls, _title in targets:
         user.PostMessageW(hwnd, 0x10, 0, 0)  # WM_CLOSE
     return targets
+
+
+def write_tagless_analysis_fixture(path):
+    """Create rhythmic audio with no title/artist tags using only the stdlib."""
+    sample_rate = 11025
+    samples = array("h")
+    for index in range(sample_rate * 12):
+        seconds = index / sample_rate
+        value = (
+            .14 * math.sin(2 * math.pi * 261.626 * seconds)
+            + .11 * math.sin(2 * math.pi * 329.628 * seconds)
+            + .09 * math.sin(2 * math.pi * 391.995 * seconds)
+        )
+        since_beat = (seconds - .25) % .5
+        if since_beat < .02:
+            value += .55 * math.exp(-since_beat * 180)
+        samples.append(round(max(-1, min(1, value)) * 32767))
+    if sys.byteorder == "big":
+        samples.byteswap()
+    with wave.open(str(path), "wb") as output:
+        output.setparams((1, 2, sample_rate, 0, "NONE", "not compressed"))
+        output.writeframes(samples.tobytes())
+
+
+def json_api(port, path, payload=None, timeout=10):
+    data = json.dumps(payload).encode() if payload is not None else None
+    headers = {"Content-Type": "application/json"} if payload is not None else {}
+    request = Request(f"http://127.0.0.1:{port}{path}", data=data, headers=headers)
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode())
+
+
+def exercise_managed_windows_ingestion(port, directory):
+    """Cover Tauri-managed sidecar -> executor thread -> packaged worker."""
+    fixture = Path(directory) / "Tagless Analysis Fixture.wav"
+    write_tagless_analysis_fixture(fixture)
+    started = json_api(port, "/api/ingest", {
+        "targets": [str(fixture)], "force_update": True, "analysis_profile": "light",
+    }, timeout=15)
+    assert started["status"] == "success", started
+    observed_progress = set()
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        state = json_api(port, "/api/ingest/status", timeout=5)
+        labels = (state.get("details") or {}).get("active_progress") or {}
+        observed_progress.update(label for label in labels.values() if isinstance(label, str))
+        if state.get("type") in {"complete", "error", "cancelled"}:
+            break
+        time.sleep(.1)
+    else:
+        raise TimeoutError("Managed packaged /api/ingest did not finish within 90s")
+    assert state.get("type") == "complete", state
+    assert state.get("processed") == 1 and state.get("errors") == 0, state
+    analysis_progress = observed_progress - {"解析ワーカーを起動しています"}
+    assert analysis_progress, f"Packaged worker reported no concrete audio stage: {observed_progress}"
+    page = json_api(port, "/api/tracks/page?limit=2", timeout=10)
+    assert page.get("total") == 1 and len(page.get("items") or []) == 1, page
+    saved = page["items"][0]
+    assert saved.get("title") == fixture.stem and saved.get("artist") == "Unknown", saved
+    print(
+        "Managed packaged light ingestion accepted and registered tagless audio; "
+        f"progress={json.dumps(sorted(analysis_progress), ensure_ascii=True)}",
+        flush=True,
+    )
 
 
 def main():
@@ -112,6 +179,8 @@ def main():
                 data = data.get("result", data)  # MCP wraps generic dictionary return annotations.
                 assert data.get("count") == 0 and data.get("tracks") == [], data
                 print("Packaged API, MCP initialization, tool discovery and library search passed")
+                if sys.platform == "win32":
+                    exercise_managed_windows_ingestion(port, directory)
                 if desktop:
                     windows = close_desktop(child.pid)
                     print(f"Posted WM_CLOSE to {len(windows)} window(s): {windows}", flush=True)

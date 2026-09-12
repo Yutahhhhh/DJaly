@@ -2,13 +2,12 @@ import os
 import json
 import math
 import unicodedata
-from types import SimpleNamespace
 from typing import List, Dict, Any
 from sqlmodel import Session, select
 from models import Track, TrackEmbedding
 import infra.database.connection as db_connection
 from utils.filesystem import resolve_path
-from utils.metadata import check_metadata_changed, has_valid_metadata
+from utils.metadata import check_metadata_changed
 from domain.constants import SUPPORTED_EXTENSIONS
 from domain.constants import EMBEDDING_DIM
 
@@ -32,7 +31,8 @@ def has_valid_embedding(embedding: Any) -> bool:
         return False
 
 
-def _has_playable_core(track: Any) -> bool:
+def _has_audio_analysis_core(track: Any) -> bool:
+    """Validate audio-derived fields without conflating missing ID3 metadata."""
     return bool(
         track
         and isinstance(getattr(track, "bpm", None), (int, float))
@@ -43,14 +43,13 @@ def _has_playable_core(track: Any) -> bool:
         and not isinstance(track.duration, bool)
         and math.isfinite(track.duration)
         and track.duration > 0
-        and has_valid_metadata(track)
     )
 
 
 def has_full_analysis(track: Any, embedding: Any) -> bool:
     """Detailed analysis is never inferred from placeholder vectors."""
     return (
-        _has_playable_core(track)
+        _has_audio_analysis_core(track)
         and getattr(track, "analysis_level", None) != "light"
         and has_valid_embedding(embedding)
     )
@@ -60,7 +59,7 @@ def has_completed_analysis(track: Any, embedding: Any) -> bool:
     """The single definition used by filtering, Explorer badges and imports."""
     # The old excerpt-only light profile had no embedding or playback grid.
     # Re-importing those tracks must fill the missing capabilities, not skip.
-    return _has_playable_core(track) and has_valid_embedding(embedding)
+    return _has_audio_analysis_core(track) and has_valid_embedding(embedding)
 
 
 def has_completed_analysis_for_profile(track: Any, embedding: Any, profile: str) -> bool:
@@ -75,13 +74,11 @@ def has_completed_analysis_result(result: Dict[str, Any], existing_embedding: An
     bpm = result.get("bpm")
     duration = result.get("duration")
     embedding = result.get("embedding", existing_embedding)
-    metadata = SimpleNamespace(title=result.get("title"), artist=result.get("artist"))
     return bool(
         isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and math.isfinite(bpm) and bpm > 0
         and isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0
         and has_valid_embedding(embedding)
         and (result.get("analysis_level") != "light" or _has_light_playback_data(result))
-        and has_valid_metadata(metadata)
     )
 
 

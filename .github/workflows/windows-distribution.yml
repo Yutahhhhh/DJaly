@@ -153,7 +153,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Packaged light analysis failed' }
           & .\backend\dist\plumdeck-server.exe --diagnose-analysis
           if ($LASTEXITCODE -ne 0) { throw 'Packaged analysis failed' }
-      - name: Start packaged API and initialize MCP
+      - name: Run packaged API light ingestion with tagless audio
         run: python scripts/smoke-backend.py backend/dist/plumdeck-server.exe
       - name: Report backend payload
         shell: pwsh
