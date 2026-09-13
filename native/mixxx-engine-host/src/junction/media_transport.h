@@ -38,6 +38,9 @@ public:
     bool remoteDescription(bool bulk,const QString& sdp,const QString& type,const QString& authenticatedFingerprint,QString* error=nullptr);
     bool remoteCandidate(bool bulk,const QString& candidate,const QString& mid);
     bool sendControl(const QByteArray&),sendBulk(const QByteArray&),sendValidation(const QByteArray&);
+    /// Keeps the normally idle asset-transfer connection alive without adding
+    /// an application message to the transfer protocol.
+    bool sendKeepAlive();
     bool setSendManifest(const StreamManifest&),setReceiveManifest(const StreamManifest&);
     void startProducer(PcmRing*);
     void inheritProducerHistory(MediaTransport& previous);

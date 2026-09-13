@@ -16,6 +16,7 @@ export type RosterVisualState =
   | 'next'
   | 'playing'
   | 'finished'
+  | 'reconnecting'
   | 'disconnected'
   | 'problem';
 
@@ -97,7 +98,8 @@ export function participantVisualState(
   if (explicit === 'finished') return 'finished';
   if (explicit === 'requested') return 'requested';
   if (explicit === 'ready' || explicit === 'waiting') return 'ready';
-  if (explicit === 'disconnected' || explicit === 'offline' || explicit === 'unstable') return 'disconnected';
+  if (explicit === 'unstable' || explicit === 'reconnecting') return 'reconnecting';
+  if (explicit === 'disconnected' || explicit === 'offline') return 'disconnected';
   if (explicit === 'response' || explicit === 'response_pending' || explicit === 'approval_pending') return 'response';
   if (explicit === 'invited' || explicit === 'invite_ready' || explicit === 'awaiting_answer') return 'invited';
   if (explicit === 'connecting' || explicit === 'pending' || explicit === 'collecting') return 'connecting';
@@ -107,8 +109,9 @@ export function participantVisualState(
   if (exchange === 'approval_pending') return 'response';
   if (exchange === 'collecting' || exchange === 'connecting') return 'connecting';
   if (exchange === 'invite_ready' || exchange === 'awaiting_answer') return 'invited';
-  if (exchange === 'interrupted') return 'disconnected';
+  if (exchange === 'interrupted') return 'reconnecting';
   if (exchange === 'connected' || participant.status === 'connected') return 'ready';
+  if (participant.status === 'reconnecting' || participant.status === 'interrupted') return 'reconnecting';
   if (participant.status === 'disconnected' || participant.status === 'offline') return 'disconnected';
   if (participant.approved === false) return 'invited';
   return 'ready';

@@ -44,6 +44,7 @@ const STATE_LABEL: Record<RosterVisualState, string> = {
   next: '次のDJ',
   playing: '演奏中',
   finished: '演奏済み',
+  reconnecting: '自動再接続中',
   disconnected: '切断',
   problem: '要対応',
 };
@@ -125,7 +126,9 @@ export function JunctionRoster({
         {host && participants.length > 1 && <small>ドラッグで順番を変更</small>}
       </header>
       {connectionProblem && (
-        <p className="junction-roster-alert" role="alert">接続を確認してください：{connectionProblem}</p>
+        <p className={`junction-roster-alert${['interrupted', 'reconnecting'].includes(snapshot.connection.state) ? ' is-reconnecting' : ''}`} role={['interrupted', 'reconnecting'].includes(snapshot.connection.state) ? 'status' : 'alert'}>
+          {['interrupted', 'reconnecting'].includes(snapshot.connection.state) ? '自動再接続中：' : '接続を確認してください：'}{connectionProblem}
+        </p>
       )}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => void onDragEnd(event)}>
         <SortableContext items={participants.map((participant) => participant.peerId)} strategy={verticalListSortingStrategy}>
@@ -203,7 +206,7 @@ function RosterRow({
   // The coordinator can withdraw a pending turn before it is committed.
   const cancellable = handoffCancelAvailable(state, host);
   const quality = qualityPresentation(
-    participant.connectionQuality ?? (state === 'disconnected' ? {level: 'offline'} : undefined),
+    participant.connectionQuality ?? (state === 'disconnected' ? {level: 'offline'} : state === 'reconnecting' ? {level: 'poor'} : undefined),
   );
   const readinessReason = state === 'next' && !snapshot.readiness.ready
     ? compactReadinessReasons(snapshot.readiness.reasons)

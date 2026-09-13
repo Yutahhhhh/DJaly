@@ -342,6 +342,11 @@
   font-size: 11px;
   line-height: 1.45;
 }
+.junction-roster-alert.is-reconnecting {
+  border-bottom-color: #a16207;
+  background: #2b2512;
+  color: #fde68a;
+}
 .junction-roster-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .junction-roster-row {
   position: relative;
@@ -357,6 +362,7 @@
 .junction-roster-next { background: linear-gradient(90deg, rgba(109, 40, 217, 0.22), #0d1620 62%); }
 .junction-roster-invited { border-left: 2px dashed #64748b; }
 .junction-roster-response { background: linear-gradient(90deg, rgba(180, 83, 9, 0.2), #0d1620 62%); }
+.junction-roster-reconnecting { background: linear-gradient(90deg, rgba(161, 98, 7, 0.2), #0d1620 62%); }
 .junction-roster-disconnected,
 .junction-roster-problem { background: linear-gradient(90deg, rgba(127, 29, 29, 0.22), #0d1620 62%); }
 .junction-roster-main {
