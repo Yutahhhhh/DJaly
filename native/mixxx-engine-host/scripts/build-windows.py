@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import urllib.request
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPS = ROOT / "build-deps"
@@ -131,8 +130,11 @@ def main():
     if not prefix_root.exists():
         download(f"https://downloads.mixxx.org/dependencies/2.5-rel/Windows/{name}.zip", archive,
                  "a9d809ae9c52d8a553af1bb8a58565649ced7b1f938d1d37c1c7d83ad53aacf3")
-        with zipfile.ZipFile(archive) as source:
-            source.extractall(DEPS)
+        # Python's zipfile still goes through legacy Win32 path handling and
+        # fails on Qt's deeply nested object paths in this verified archive.
+        # Windows' bundled bsdtar handles those paths and keeps extraction
+        # usable from an ordinary developer checkout under the user profile.
+        run("tar.exe", "-xf", archive, "-C", DEPS)
     prefix = prefix_root / "installed" / "x64-windows-release"
     if not prefix.is_dir():
         raise RuntimeError("Mixxx dependency archive has an unexpected layout")

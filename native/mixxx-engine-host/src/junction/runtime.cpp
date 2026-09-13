@@ -48,6 +48,14 @@ constexpr qint64 kControlSilenceNanos=10000000000LL;
 constexpr quint64 kSnapshotIntervalTicks=100; // 500 ms at the 5 ms session tick.
 QByteArray json(const QJsonObject& v) {return QJsonDocument(v).toJson(QJsonDocument::Compact);}
 QString fingerprint() {return QStringLiteral("mixxx-3ebac449e7e5fe2a0186596657696e87ce8b0e56-junction-5");}
+bool exchangeAwaitingConnection(ExchangeState state) {
+    // The answerer has no signalling channel on which the offerer can announce
+    // approval. Its first reliable approval signal is both WebRTC links being
+    // connected, while its local exchange state still says response_ready (or
+    // awaiting_host in clients which explicitly acknowledge copying).
+    return state==ExchangeState::ResponseReady||state==ExchangeState::AwaitingHost
+        ||state==ExchangeState::Connecting;
+}
 bool validOrigin(const QUrl& u) {
     return u.isValid() && !u.host().isEmpty() && u.userInfo().isEmpty() && u.fragment().isEmpty() && u.query().isEmpty() && (u.scheme()=="wss" || (u.scheme()=="ws" && (u.host()=="127.0.0.1" || u.host()=="localhost" || u.host()=="::1")));
 }
@@ -608,7 +616,7 @@ struct Runtime::Impl {
             // disconnect a healthy session or prevent DJs gathering in lobby.
             if(state==LinkState::Connected){
                 p.bulkDisconnectedAt=0;
-                if(p.manual.state==ExchangeState::Connecting&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
+                if(exchangeAwaitingConnection(p.manual.state)&&p.transport->aggregateLinkState()==LinkState::Connected){p.manual.connectDeadline=0;p.manual.retries=0;manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));}
             }else if(state==LinkState::Disconnected||state==LinkState::Failed){
                 if(!p.bulkDisconnectedAt)p.bulkDisconnectedAt=monotonicNanos();
                 if(p.manual.state==ExchangeState::Connecting&&state==LinkState::Failed)manualSetState(p,ExchangeState::NeedsExchange,QStringLiteral("楽曲転送用の接続を開始できませんでした。接続情報を作り直してください"),QStringLiteral("bulk_failed"));
@@ -616,9 +624,9 @@ struct Runtime::Impl {
             return;
         }
         if(state==LinkState::Connected){
-            if(p.manual.state==ExchangeState::Connecting&&p.transport->aggregateLinkState()!=LinkState::Connected)return;
+            if(exchangeAwaitingConnection(p.manual.state)&&p.transport->aggregateLinkState()!=LinkState::Connected)return;
             if(!p.hello)p.lastControlAt=monotonicNanos();p.manual.connectDeadline=0;p.manual.retries=0;
-            if(p.manual.state==ExchangeState::Interrupted||p.manual.state==ExchangeState::Connecting)manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));
+            if(p.manual.state==ExchangeState::Interrupted||exchangeAwaitingConnection(p.manual.state))manualSetState(p,ExchangeState::Connected,QStringLiteral("接続しました"));
         }
         // Disconnected is deliberately debounced by manualTick. The existing
         // PeerConnection keeps retrying and incoming control restores the UI.
